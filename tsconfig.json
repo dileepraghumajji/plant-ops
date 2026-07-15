@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compileOnSave": false,
+  "files": [],
+  "references": [],
+  "compilerOptions": {
+    "ignoreDeprecations": "6.0"
+  }
+}
