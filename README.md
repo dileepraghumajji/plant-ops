@@ -1,107 +1,72 @@
-# New Nx Repository
+# PlantOps IAM — Development Specification Suite
 
-<a alt="Nx logo" href="https://nx.dev" target="_blank" rel="noreferrer"><img src="https://raw.githubusercontent.com/nrwl/nx/master/images/nx-logo.png" width="45"></a>
+Agent-executable specification for building the **PlantOps IAM/RBAC service** — a standalone, multi-tenant, self-service identity & access management system that every PlantOps operational module (visitor, rooms, vehicle, patrol, gatepass) will depend on.
 
-✨ Your new, shiny [Nx workspace](https://nx.dev) is ready ✨.
+**Scope:** IAM/RBAC only. The shared kernel and the six operational modules are specified separately, later.
 
-[Learn more about this workspace setup and its capabilities](https://nx.dev/docs/technologies/typescript/introduction?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects) or run `npx nx graph` to visually explore what was created. Now, let's get you up to speed!
-🚀 If you haven't connected to Nx Cloud yet, [complete your setup here](https://cloud.nx.app/get-started). Get faster builds with remote caching, distributed task execution, and self-healing CI. [See how your workspace can benefit](#nx-cloud).
-## Generate a library
+## Stack
+
+NestJS · Supabase (as plain Postgres) · TypeORM · Next.js · Redis · **Nx monorepo**
+
+> Supabase is used only as the Postgres host — **not** Supabase Auth (we issue our own JWTs) and **not** the Supabase SDK. TypeORM owns the schema; RLS is hand-written in migrations.
+
+## The one idea that shapes everything
+
+```
+Effective access = WHO × WHAT × WHERE
+   WHO   = user | service_account
+   WHAT  = permission (runtime-registered per application)
+   WHERE = scope node in the client's org tree (Group→Plant→Dept→Gate)
+```
+
+Plus: **everything is data** — applications, clients, menus, permissions are created at runtime through the admin UI; no deploy to onboard a client or launch an app.
+
+## Quickstart (workspace)
 
 ```sh
-npx nx g @nx/js:lib packages/pkg1 --publishable --importPath=@my-org/pkg1
+npm install          # install all workspace deps
+docker compose up -d # local Postgres (ltree available) + Redis
+npx nx serve @plantops/iam-api    # NestJS API → http://localhost:3000/api
+npx nx dev @plantops/admin-web    # Next.js console → http://localhost:3000 (use -p to change port)
 ```
 
-## Run tasks
-
-To build the library use:
+Useful workspace commands:
 
 ```sh
-npx nx run pkg1:build
+npx nx graph                    # visualize projects & dependencies
+npx nx run-many -t build --all  # build everything
+npx nx run-many -t test --all   # run all unit tests
+npx nx run-many -t lint --all   # lint incl. module-boundary rules (Doc 08 §2)
 ```
 
-To run any task with Nx use:
+Module boundaries (e.g. only `iam-api` may import `libs/db`) are enforced by
+`@nx/enforce-module-boundaries` in [eslint.config.mjs](eslint.config.mjs) — see
+[docs/fixtures/boundary-lint-check.md](docs/fixtures/boundary-lint-check.md).
 
-```sh
-npx nx run <project-name>:<target>
-```
+## Read in order
 
-These targets are either [inferred automatically](https://nx.dev/docs/concepts/inferred-tasks?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects) or defined in the `project.json` or `package.json` files.
+| Doc | Title | Read it for |
+|---|---|---|
+| [00](00-system-overview.md) | System Overview & Principles | the philosophy, stack rationale, monorepo decision |
+| [01](01-data-model.md) | Data Model | every table and the scope tree |
+| [02](02-registry-multitenancy.md) | Registry & Multi-tenancy | runtime registration, admin tiers |
+| [03](03-authentication.md) | Authentication | custom JWT, login, sessions, service accounts |
+| [04](04-authorization-scope-resolution.md) | Authorization & Scope Resolution | the resolution algorithm + caching (the core) |
+| [05](05-dynamic-navigation.md) | Dynamic Navigation | permission-driven menus |
+| [06](06-api-surface.md) | API Surface | every endpoint |
+| [07](07-database-rls.md) | Database & RLS | TypeORM + Supabase + hand-written RLS |
+| [08](08-nx-workspace-structure.md) | Nx Workspace & Structure | monorepo layout, shared libs |
+| [09](09-admin-ui-spec.md) | Admin UI Spec | the two consoles |
+| [10](10-audit-governance.md) | Audit & Governance | append-only trail, retention |
 
-[More about running tasks in the docs &raquo;](https://nx.dev/docs/features/run-tasks?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
+## Suggested build order
 
-## Versioning and releasing
+1. **`libs/db` + `libs/contracts`** — schema, migrations, RLS, shared types (Docs 01, 07, 08).
+2. **`iam-api` auth** — login, JWT, sessions, service accounts (Doc 03).
+3. **`iam-api` registry** — applications, clients, manifest upsert (Doc 02, 06).
+4. **`iam-api` authz** — resolution algorithm + Redis cache + invalidation (Doc 04) and `libs/auth-kit`.
+5. **Dynamic navigation** endpoint (Doc 05).
+6. **`admin-web`** — platform + client consoles (Doc 09).
+7. **Audit** woven through all mutations (Doc 10).
 
-To version and release the library use
-
-```
-npx nx release
-```
-
-Pass `--dry-run` to see what would happen without actually releasing the library.
-
-[Learn more about Nx release &raquo;](https://nx.dev/docs/features/manage-releases?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-
-## Keep TypeScript project references up to date
-
-Nx automatically updates TypeScript [project references](https://www.typescriptlang.org/docs/handbook/project-references.html) in `tsconfig.json` files to ensure they remain accurate based on your project dependencies (`import` or `require` statements). This sync is automatically done when running tasks such as `build` or `typecheck`, which require updated references to function correctly.
-
-To manually trigger the process to sync the project graph dependencies information to the TypeScript project references, run the following command:
-
-```sh
-npx nx sync
-```
-
-You can enforce that the TypeScript project references are always in the correct state when running in CI by adding a step to your CI job configuration that runs the following command:
-
-```sh
-npx nx sync:check
-```
-
-[Learn more about nx sync](https://nx.dev/reference/nx-commands#sync)
-
-## Nx Cloud
-
-Nx Cloud ensures a [fast and scalable CI](https://nx.dev/nx-cloud?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects) pipeline. It includes features such as:
-
-- [Remote caching](https://nx.dev/docs/features/ci-features/remote-cache?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-- [Task distribution across multiple machines](https://nx.dev/docs/features/ci-features/distribute-task-execution?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-- [Automated e2e test splitting](https://nx.dev/docs/features/ci-features/split-e2e-tasks?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-- [Task flakiness detection and rerunning](https://nx.dev/docs/features/ci-features/flaky-tasks?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-
-### Set up CI (non-Github Actions CI)
-
-**Note:** This is only required if your CI provider is not GitHub Actions.
-
-Use the following command to configure a CI workflow for your workspace:
-
-```sh
-npx nx g ci-workflow
-```
-
-[Learn more about Nx on CI](https://nx.dev/docs/features/ci-features?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-
-## Install Nx Console
-
-Nx Console is an editor extension that enriches your developer experience. It lets you run tasks, generate code, and improves code autocompletion in your IDE. It is available for VSCode and IntelliJ.
-
-[Install Nx Console &raquo;](https://nx.dev/docs/getting-started/editor-setup?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-
-## 🔗 Learn More
-
-- [Nx Documentation](https://nx.dev/docs)
-- [Crafting Your Workspace Tutorial](https://nx.dev/docs/getting-started/tutorials/crafting-your-workspace)
-- [Module Boundaries](https://nx.dev/docs/features/enforce-module-boundaries)
-- [Releasing Packages](https://nx.dev/docs/features/manage-releases)
-- [Nx Plugins](https://nx.dev/docs/concepts/nx-plugins)
-- [Nx Cloud](https://nx.dev/nx-cloud)
-
-## 💬 Community
-
-Join the Nx community:
-
-- [Discord](https://go.nx.dev/community)
-- [X (Twitter)](https://twitter.com/nxdevtools)
-- [LinkedIn](https://www.linkedin.com/company/nrwl)
-- [YouTube](https://www.youtube.com/@nxdevtools)
-- [Blog](https://nx.dev/blog)
+Once this is built and proven, the kernel + Gatepass spec suite follows — Gatepass becomes a new `apps/*` that imports `contracts`, `auth-kit`, and `iam-client` and writes zero new authorization logic.

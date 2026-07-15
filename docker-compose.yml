@@ -1,0 +1,38 @@
+name: plantops
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: plantops-postgres
+    environment:
+      POSTGRES_USER: plantops
+      POSTGRES_PASSWORD: plantops
+      POSTGRES_DB: plantops_iam
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      # ltree ships with the official image's contrib modules; migrations
+      # enable it via CREATE EXTENSION (Session 3).
+      test: ['CMD-SHELL', 'pg_isready -U plantops -d plantops_iam']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: plantops-redis
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres-data:
+  redis-data:

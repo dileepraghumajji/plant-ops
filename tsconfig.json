@@ -2,7 +2,35 @@
   "extends": "./tsconfig.base.json",
   "compileOnSave": false,
   "files": [],
-  "references": [],
+  "references": [
+    {
+      "path": "./apps/iam-api-e2e"
+    },
+    {
+      "path": "./apps/iam-api"
+    },
+    {
+      "path": "./apps/admin-web"
+    },
+    {
+      "path": "./libs/contracts"
+    },
+    {
+      "path": "./libs/config"
+    },
+    {
+      "path": "./libs/db"
+    },
+    {
+      "path": "./libs/iam-client"
+    },
+    {
+      "path": "./libs/auth-kit"
+    },
+    {
+      "path": "./libs/ui"
+    }
+  ],
   "compilerOptions": {
     "ignoreDeprecations": "6.0"
   }
