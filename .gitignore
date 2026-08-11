@@ -8,6 +8,11 @@ out-tsc
 # dependencies
 node_modules
 
+# environment — secrets never enter the repo (Doc 08 §5); the template does
+.env
+.env.*
+!.env.example
+
 # IDEs and editors
 /.idea
 .project

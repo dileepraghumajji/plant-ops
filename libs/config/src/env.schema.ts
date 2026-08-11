@@ -1,0 +1,223 @@
+/**
+ * Validated environment schema (Doc 08 §5).
+ *
+ * Boot fails here, loudly, rather than three layers deep at the first query:
+ * a missing `DATABASE_DIRECT_URL` or a malformed signing key is a startup
+ * error, not a runtime surprise. Defaults come from `@plantops/contracts` so
+ * the IAM and every consuming module agree on the same numbers.
+ */
+
+import {
+  ACCESS_TOKEN_TTL_SECONDS,
+  GRANTS_CACHE_MAX_TTL_SECONDS,
+  GRANTS_CACHE_TTL_SECONDS,
+  IAM_ISSUER,
+  REFRESH_REUSE_GRACE_MAX_SECONDS,
+  REFRESH_REUSE_GRACE_MIN_SECONDS,
+  REFRESH_REUSE_GRACE_SECONDS,
+  REFRESH_TOKEN_TTL_SECONDS,
+  SERVICE_ACCESS_TOKEN_MAX_TTL_SECONDS,
+  SERVICE_ACCESS_TOKEN_TTL_SECONDS,
+} from '@plantops/contracts';
+import { z } from 'zod';
+
+/** Minimum length for the out-of-band platform bootstrap secret (Doc 07 §8). */
+export const BOOTSTRAP_SECRET_MIN_LENGTH = 32;
+
+const NODE_ENVS = ['development', 'test', 'production'] as const;
+export type NodeEnv = (typeof NODE_ENVS)[number];
+
+const LOG_LEVELS = ['error', 'warn', 'log', 'debug', 'verbose'] as const;
+export type LogLevel = (typeof LOG_LEVELS)[number];
+
+/** Postgres connection string, either accepted scheme. */
+const postgresUrl = (label: string) =>
+  z
+    .string()
+    .trim()
+    .min(1, `${label} is required`)
+    .refine((value) => hasScheme(value, ['postgres:', 'postgresql:']), {
+      message: `${label} must be a postgres:// or postgresql:// connection string`,
+    });
+
+const redisUrl = z
+  .string()
+  .trim()
+  .min(1, 'REDIS_URL is required')
+  .refine((value) => hasScheme(value, ['redis:', 'rediss:']), {
+    message: 'REDIS_URL must be a redis:// or rediss:// connection string',
+  });
+
+/**
+ * A usable connection string: right scheme *and* a host. The host check
+ * matters — `new URL('redis:6379')` parses happily as an opaque URL, and a
+ * scheme-only check would wave it through to fail at connect time instead.
+ */
+function hasScheme(value: string, schemes: string[]): boolean {
+  try {
+    const url = new URL(value);
+    return schemes.includes(url.protocol) && url.host !== '';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * PEM key material. Secret stores and `.env` files routinely carry keys with
+ * literal `\n` sequences instead of real newlines; unescape before validating
+ * so a correct key is not rejected for its transport encoding.
+ */
+const pem = (label: string, marker: string) =>
+  z
+    .string()
+    .min(1, `${label} is required`)
+    .transform((value) => value.replace(/\\n/g, '\n').trim())
+    .refine((value) => value.includes(marker), {
+      message: `${label} must be a PEM-encoded key containing "${marker}"`,
+    });
+
+/** `kid` → PEM map of public keys retained for rotation (Doc 03 §1). */
+const retiredPublicKeys = z
+  .string()
+  .transform((value, ctx) => {
+    if (value.trim() === '') return {} as Record<string, string>;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          'JWT_RETIRED_PUBLIC_KEYS must be a JSON object mapping kid → PEM public key',
+      });
+      return z.NEVER;
+    }
+    if (
+      typeof parsed !== 'object' ||
+      parsed === null ||
+      Array.isArray(parsed) ||
+      !Object.values(parsed).every((v) => typeof v === 'string')
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          'JWT_RETIRED_PUBLIC_KEYS must be a JSON object mapping kid → PEM public key',
+      });
+      return z.NEVER;
+    }
+    return Object.fromEntries(
+      Object.entries(parsed as Record<string, string>).map(([kid, key]) => [
+        kid,
+        key.replace(/\\n/g, '\n').trim(),
+      ]),
+    );
+  })
+  .default({});
+
+const seconds = (label: string, fallback: number, max?: number) => {
+  let schema = z.coerce
+    .number({ error: `${label} must be a number of seconds` })
+    .int(`${label} must be a whole number of seconds`)
+    .positive(`${label} must be greater than zero`);
+  if (max !== undefined) {
+    schema = schema.max(max, `${label} must be at most ${max} seconds`);
+  }
+  return schema.default(fallback);
+};
+
+const boolish = (fallback: boolean) =>
+  z
+    .enum(['true', 'false', '1', '0'], {
+      error: 'must be one of: true, false, 1, 0',
+    })
+    .transform((value) => value === 'true' || value === '1')
+    .default(fallback);
+
+export const envSchema = z.object({
+  NODE_ENV: z.enum(NODE_ENVS).default('development'),
+  PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+  LOG_LEVEL: z.enum(LOG_LEVELS).default('log'),
+
+  /**
+   * Application connection — the Supabase **pooler** endpoint. TypeORM must
+   * disable prepared statements against PgBouncer transaction mode (Doc 07 §2).
+   */
+  DATABASE_URL: postgresUrl('DATABASE_URL'),
+  /** **Direct** (non-pooled) endpoint; migrations only (Doc 07 §2). */
+  DATABASE_DIRECT_URL: postgresUrl('DATABASE_DIRECT_URL'),
+  DATABASE_SSL: boolish(false),
+
+  REDIS_URL: redisUrl,
+
+  JWT_ISSUER: z.string().trim().min(1).default(IAM_ISSUER),
+  /** `kid` of the key currently signing (Doc 03 §1). */
+  JWT_SIGNING_KEY_ID: z.string().trim().min(1, 'JWT_SIGNING_KEY_ID is required'),
+  JWT_PRIVATE_KEY: pem('JWT_PRIVATE_KEY', 'PRIVATE KEY'),
+  JWT_PUBLIC_KEY: pem('JWT_PUBLIC_KEY', 'PUBLIC KEY'),
+  /**
+   * Public keys kept in JWKS after a rotation, so tokens signed by the previous
+   * key still verify until they expire (Doc 03 §1 step 4).
+   */
+  JWT_RETIRED_PUBLIC_KEYS: retiredPublicKeys,
+
+  ACCESS_TOKEN_TTL_SECONDS: seconds(
+    'ACCESS_TOKEN_TTL_SECONDS',
+    ACCESS_TOKEN_TTL_SECONDS,
+  ),
+  REFRESH_TOKEN_TTL_SECONDS: seconds(
+    'REFRESH_TOKEN_TTL_SECONDS',
+    REFRESH_TOKEN_TTL_SECONDS,
+  ),
+  /** Doc 03 §5 caps service tokens at 5 min — the TTL *is* the kill window. */
+  SERVICE_TOKEN_TTL_SECONDS: seconds(
+    'SERVICE_TOKEN_TTL_SECONDS',
+    SERVICE_ACCESS_TOKEN_TTL_SECONDS,
+    SERVICE_ACCESS_TOKEN_MAX_TTL_SECONDS,
+  ),
+  /** Concurrent-refresh grace window, 10–30 s (Doc 03 §4). */
+  REFRESH_REUSE_GRACE_SECONDS: seconds(
+    'REFRESH_REUSE_GRACE_SECONDS',
+    REFRESH_REUSE_GRACE_SECONDS,
+    REFRESH_REUSE_GRACE_MAX_SECONDS,
+  ).refine((value) => value >= REFRESH_REUSE_GRACE_MIN_SECONDS, {
+    message: `REFRESH_REUSE_GRACE_SECONDS must be at least ${REFRESH_REUSE_GRACE_MIN_SECONDS} seconds`,
+  }),
+  /** Safety net behind invalidation; ≤10 min (Doc 04 §6). */
+  GRANTS_CACHE_TTL_SECONDS: seconds(
+    'GRANTS_CACHE_TTL_SECONDS',
+    GRANTS_CACHE_TTL_SECONDS,
+    GRANTS_CACHE_MAX_TTL_SECONDS,
+  ),
+
+  /**
+   * Secret for the very first platform identity (Doc 07 §8). Supplied
+   * out-of-band, never committed, rotated immediately after first use — and
+   * never logged (see `redactEnv`).
+   */
+  PLATFORM_BOOTSTRAP_SECRET: z
+    .string()
+    .min(
+      BOOTSTRAP_SECRET_MIN_LENGTH,
+      `PLATFORM_BOOTSTRAP_SECRET must be at least ${BOOTSTRAP_SECRET_MIN_LENGTH} characters`,
+    ),
+});
+
+/** The validated, fully-defaulted environment. */
+export type EnvConfig = z.infer<typeof envSchema>;
+
+/** Every variable the schema reads — used by the `.env.example` drift test. */
+export const ENV_KEYS = Object.keys(envSchema.shape) as Array<keyof EnvConfig>;
+
+/**
+ * Values that must never reach a log line, an audit payload, or an error
+ * message (Doc 03 §7, Doc 07 §8, Doc 10 §8).
+ */
+export const SECRET_ENV_KEYS = [
+  'DATABASE_URL',
+  'DATABASE_DIRECT_URL',
+  'REDIS_URL',
+  'JWT_PRIVATE_KEY',
+  'PLATFORM_BOOTSTRAP_SECRET',
+] as const satisfies readonly (keyof EnvConfig)[];
+
+export type SecretEnvKey = (typeof SECRET_ENV_KEYS)[number];

@@ -22,6 +22,8 @@
     ]
   },
   "dependencies": {
-    "tslib": "^2.3.0"
+    "@plantops/contracts": "0.0.1",
+    "tslib": "^2.3.0",
+    "zod": "^4.4.3"
   }
 }
