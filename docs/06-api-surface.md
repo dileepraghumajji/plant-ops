@@ -29,8 +29,13 @@
 | 409 | CONFLICT (duplicate key, cross-tenant violation) |
 | 423 | ACCOUNT_LOCKED |
 | 429 | RATE_LIMITED |
+| 500 | INTERNAL_ERROR |
 
 Denials (`403`) never reveal whether the target exists across tenants.
+
+`INTERNAL_ERROR` carries a fixed, generic `message` — an unhandled exception's own text may quote a query, a connection string, or a row, none of which belongs in a response. The `requestId` is the correlation handle: it appears in the response, in the logged stack trace, and in any audit record for the request.
+
+`GET /health` and `GET /ready` (§13) are ops endpoints, not part of this surface: they answer with a readiness report and are exempt from the envelope, since a probe consumes status codes rather than error codes.
 
 ---
 

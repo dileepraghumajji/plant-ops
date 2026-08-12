@@ -24,6 +24,18 @@ import { z } from 'zod';
 /** Minimum length for the out-of-band platform bootstrap secret (Doc 07 §8). */
 export const BOOTSTRAP_SECRET_MIN_LENGTH = 32;
 
+/**
+ * Throttle and readiness defaults.
+ *
+ * These stay here rather than in `@plantops/contracts`: contracts holds values
+ * the IAM and its consumers must *agree* on (token TTLs, the skew leeway), and
+ * a rate limit is not one of them — it is per-deployment ops tuning that no
+ * consuming module can observe.
+ */
+export const DEFAULT_RATE_LIMIT_WINDOW_SECONDS = 60;
+export const DEFAULT_RATE_LIMIT_MAX_REQUESTS = 120;
+export const DEFAULT_READINESS_TIMEOUT_MS = 2_000;
+
 const NODE_ENVS = ['development', 'test', 'production'] as const;
 export type NodeEnv = (typeof NODE_ENVS)[number];
 
@@ -133,6 +145,38 @@ const boolish = (fallback: boolean) =>
     .transform((value) => value === 'true' || value === '1')
     .default(fallback);
 
+const millis = (label: string, fallback: number) =>
+  z.coerce
+    .number({ error: `${label} must be a number of milliseconds` })
+    .int(`${label} must be a whole number of milliseconds`)
+    .positive(`${label} must be greater than zero`)
+    .default(fallback);
+
+/**
+ * Comma-separated allow-list. Empty means *no* cross-origin browser access,
+ * which is the right default for an API whose only browser client is deployed
+ * separately and must be named explicitly.
+ */
+const originList = z
+  .string()
+  .default('')
+  .transform((value) =>
+    value
+      .split(',')
+      .map((origin) => origin.trim())
+      .filter((origin) => origin !== ''),
+  )
+  .pipe(
+    z.array(
+      z
+        .string()
+        .refine((origin) => origin === '*' || hasScheme(origin, ['http:', 'https:']), {
+          message:
+            'CORS_ALLOWED_ORIGINS entries must be http(s) origins (or "*"), comma-separated',
+        }),
+    ),
+  );
+
 export const envSchema = z.object({
   NODE_ENV: z.enum(NODE_ENVS).default('development'),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
@@ -148,6 +192,49 @@ export const envSchema = z.object({
   DATABASE_SSL: boolish(false),
 
   REDIS_URL: redisUrl,
+  /**
+   * Namespace for every key this deployment writes. Managed Redis is routinely
+   * shared between staging and production; without a prefix, a staging deploy
+   * evicting `perms:*` silently invalidates production's grants cache.
+   */
+  REDIS_KEY_PREFIX: z.string().trim().default('plantops:'),
+
+  /**
+   * Trust `X-Forwarded-For` when resolving the client IP.
+   *
+   * On in exactly one situation: the app sits behind a proxy that *rewrites*
+   * the header (Railway, a load balancer). On elsewhere and every caller
+   * chooses their own rate-limit bucket by sending the header themselves —
+   * which is the same as having no IP rate limiting at all.
+   */
+  TRUST_PROXY: boolish(false),
+
+  /** Browser origins allowed to call the API; empty disables CORS entirely. */
+  CORS_ALLOWED_ORIGINS: originList,
+
+  RATE_LIMIT_ENABLED: boolish(true),
+  /** Fixed-window length for the global throttle (Doc 06 §2 — 429). */
+  RATE_LIMIT_WINDOW_SECONDS: seconds(
+    'RATE_LIMIT_WINDOW_SECONDS',
+    DEFAULT_RATE_LIMIT_WINDOW_SECONDS,
+  ),
+  /**
+   * Requests per window per caller. Deliberately loose: this is the blanket
+   * limit protecting the process, not the credential-stuffing defence — Session
+   * 8 tightens `/auth/*` to single digits with `@RateLimit`.
+   */
+  RATE_LIMIT_MAX_REQUESTS: z.coerce
+    .number({ error: 'RATE_LIMIT_MAX_REQUESTS must be a number' })
+    .int('RATE_LIMIT_MAX_REQUESTS must be a whole number')
+    .positive('RATE_LIMIT_MAX_REQUESTS must be greater than zero')
+    .default(DEFAULT_RATE_LIMIT_MAX_REQUESTS),
+
+  /**
+   * Per-dependency budget for `/ready`. A readiness probe that blocks on a
+   * hung Postgres never answers, and the orchestrator reads "no answer" as a
+   * timeout it cannot explain; answering 503 quickly is the useful behaviour.
+   */
+  READINESS_TIMEOUT_MS: millis('READINESS_TIMEOUT_MS', DEFAULT_READINESS_TIMEOUT_MS),
 
   JWT_ISSUER: z.string().trim().min(1).default(IAM_ISSUER),
   /** `kid` of the key currently signing (Doc 03 §1). */

@@ -5,6 +5,9 @@ import {
 } from '@plantops/contracts';
 import {
   BOOTSTRAP_SECRET_MIN_LENGTH,
+  DEFAULT_RATE_LIMIT_MAX_REQUESTS,
+  DEFAULT_RATE_LIMIT_WINDOW_SECONDS,
+  DEFAULT_READINESS_TIMEOUT_MS,
   ENV_KEYS,
   SECRET_ENV_KEYS,
 } from './env.schema.js';
@@ -253,6 +256,51 @@ describe('parseEnv — bootstrap secret and other defaults', () => {
   it('returns a frozen config', () => {
     const env = parseEnv(validEnv());
     expect(Object.isFrozen(env)).toBe(true);
+  });
+});
+
+describe('parseEnv — HTTP and throttle ops settings', () => {
+  it('defaults to a namespaced Redis, no CORS, and an untrusted proxy', () => {
+    const env = parseEnv(validEnv());
+    expect(env.REDIS_KEY_PREFIX).toBe('plantops:');
+    expect(env.CORS_ALLOWED_ORIGINS).toEqual([]);
+    // Trusting X-Forwarded-For by default would let any caller pick their own
+    // rate-limit bucket, so the safe value is the default.
+    expect(env.TRUST_PROXY).toBe(false);
+  });
+
+  it('applies the throttle and readiness defaults', () => {
+    const env = parseEnv(validEnv());
+    expect(env.RATE_LIMIT_ENABLED).toBe(true);
+    expect(env.RATE_LIMIT_WINDOW_SECONDS).toBe(DEFAULT_RATE_LIMIT_WINDOW_SECONDS);
+    expect(env.RATE_LIMIT_MAX_REQUESTS).toBe(DEFAULT_RATE_LIMIT_MAX_REQUESTS);
+    expect(env.READINESS_TIMEOUT_MS).toBe(DEFAULT_READINESS_TIMEOUT_MS);
+  });
+
+  it('splits and trims the CORS origin list', () => {
+    const env = parseEnv(
+      validEnv({
+        CORS_ALLOWED_ORIGINS: 'https://admin.plantops.io, http://localhost:4200 ,',
+      }),
+    );
+    expect(env.CORS_ALLOWED_ORIGINS).toEqual([
+      'https://admin.plantops.io',
+      'http://localhost:4200',
+    ]);
+  });
+
+  it('rejects a CORS entry that is not an origin', () => {
+    expect(issuesOf(validEnv({ CORS_ALLOWED_ORIGINS: 'admin.plantops.io' }))[0]).toContain(
+      'CORS_ALLOWED_ORIGINS',
+    );
+  });
+
+  it.each([
+    ['RATE_LIMIT_MAX_REQUESTS', '0'],
+    ['RATE_LIMIT_WINDOW_SECONDS', '-1'],
+    ['READINESS_TIMEOUT_MS', 'soon'],
+  ])('rejects a nonsensical %s', (key, value) => {
+    expect(issuesOf(validEnv({ [key]: value }))[0]).toContain(key);
   });
 });
 

@@ -121,17 +121,32 @@ async function derivePlatformAdmin(
  * transaction the setting would apply to the whole session and be handed to
  * whoever gets that connection next.
  *
- * The platform lookup runs *before* the context is set, i.e. with no context —
- * which is safe precisely because `role_binding` and `client` are readable
- * without one only to the extent RLS allows. It is a single indexed existence
- * check on the hot path; Session 21 caches the result alongside grants.
+ * ## Ordering: tenant first, then derive, then the flag
+ *
+ * The platform lookup runs **after** `app.current_client_id` is set and before
+ * `app.is_platform_admin`, and the order is not cosmetic. The app role is
+ * subject to RLS on `role_binding` and `client` (Doc 07 §5.1), whose policies
+ * read `is_platform_admin or <tenant> = app.current_client_id`. Run the lookup
+ * with no context and both arms are false, so it returns zero rows and every
+ * subject — including the seeded platform identity — is derived as *not* a
+ * platform admin. Measured on PostgreSQL 17 as `plantops_app`: false with no
+ * context, true with the tenant set. See finding 18 in
+ * `docs/CHANGELOG-validation-fixes.md`.
+ *
+ * Setting the tenant first also narrows the check rather than widening it: the
+ * lookup now only sees bindings inside the caller's own tenant, so platform
+ * authority requires a token whose `cid` *is* the platform client **and** a
+ * binding at the platform root under that subject. Setting the flag last
+ * matters for the same reason in reverse — were it set first, the policy's
+ * `is_platform_admin` arm would make the lookup's own read unconditional.
+ *
+ * It is a single indexed existence check on the hot path; Session 21 caches
+ * the result alongside grants.
  */
 export async function applyRlsContext(
   executor: Executor,
   claims: VerifiedClaims,
 ): Promise<void> {
-  const isPlatformAdmin = await derivePlatformAdmin(executor, claims.sub, claims.sty);
-
   await executor.query(`select set_config($1, $2, true)`, [
     RLS_SETTINGS.CLIENT_ID,
     claims.cid,
@@ -142,6 +157,9 @@ export async function applyRlsContext(
     RLS_SETTINGS.USER_ID,
     claims.sty === 'user' ? claims.sub : '',
   ]);
+
+  const isPlatformAdmin = await derivePlatformAdmin(executor, claims.sub, claims.sty);
+
   await executor.query(`select set_config($1, $2, true)`, [
     RLS_SETTINGS.IS_PLATFORM_ADMIN,
     isPlatformAdmin ? 'true' : 'false',

@@ -81,6 +81,20 @@ Found during Session 5 setup, before any policy was written. §5 required the ap
 
 **Startup check widened** from two assertions to three: not superuser, not `BYPASSRLS`, and **owns no table in `iam`**.
 
+**17. The Doc 06 §2 error table had no 5xx code, so the server could not describe its own failures**
+*Medium severity.* Doc 06 §2 (table + two notes) · `libs/contracts/src/errors.ts`.
+Found in Session 6 while writing the global exception filter. The table is authoritative and closed, and it stopped at 429 — leaving nothing to return when a handler throws something unanticipated. The consequence is not cosmetic: `isIamErrorResponse` (the type guard every consumer branches on) rejects any body whose `code` is not in the table, so a 500 escaping as a bare Nest `{ statusCode, message }` is *unparseable to `iam-client` and admin-web* — the exact moment a caller most needs a machine-readable answer is the one moment it does not get one.
+
+**Decision:** `INTERNAL_ERROR` → 500 added to the table and to `IamErrorCode`. Two constraints ship with it. Its `message` is a fixed generic string, never the exception's own text, which routinely quotes the failing query, a connection string, or row data. And it is the *fallback only* — a filter that reaches for it when a more specific code exists is a bug, so anything the code table already covers must be thrown as an `IamException`. `/health` and `/ready` are documented as exempt from the envelope: a probe reads status codes, and a readiness report is a different contract.
+
+**18. `applyRlsContext` derived the platform flag before setting any context, so it was always false**
+*High severity.* `libs/db/src/rls-context.ts` (statement order) · Doc 07 §5 (ordering note implied by §5.1).
+Found in Session 6, the first session to execute `applyRlsContext` against a real connection as the runtime role. The function derived `app.is_platform_admin` from the subject's binding at the platform scope root **before** setting `app.current_client_id`. But the runtime role is subject to RLS on `role_binding` and `client` (Doc 07 §5.1 forces policies on the owner too), and those policies read `is_platform_admin or <tenant> = app.current_client_id`. With no context set, *both* arms are false: the derivation query saw zero rows and returned false for every subject, including the seeded platform identity. Measured on PostgreSQL 17 connected as `plantops_app`, against the bootstrap seed: `false` with no context, `true` with `app.current_client_id` set to the platform client.
+
+Nothing failed visibly, which is what makes it high severity rather than a bug report: the flag simply never turned on, so every platform-admin path from Session 12 onward would have returned empty results or 403s, and the obvious diagnosis ("the binding is wrong") points away from the cause.
+
+**Decision:** the ordering is now part of the contract — set `app.current_client_id` and `app.current_user_id`, *then* derive, *then* set `app.is_platform_admin`. This narrows the derivation rather than widening it: the lookup sees only bindings within the caller's own tenant, so platform authority requires a token whose `cid` is the platform client **and** a binding at the platform root. The flag must stay last for the mirror-image reason — set first, its own policy arm would make the lookup's read unconditional.
+
 ## New schema additions introduced by post-implementation findings
 
 6. Two database roles per environment (owner + app) with the grant split above — Doc 07 §5.1. Not a schema object, but a deployment precondition: the RLS suite is meaningless without it.

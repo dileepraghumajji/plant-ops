@@ -18,7 +18,7 @@
 
 import { DataSource, QueryFailedError } from 'typeorm';
 import { MIGRATIONS_TABLE_NAME, createMigrationDataSource } from '../data-source.js';
-import { IAM_SCHEMA } from '../schema.js';
+import { IAM_SCHEMA, IAM_SCHEMA_TEST_LOCK_ID } from '../schema.js';
 
 /**
  * Markers of a connection string that was pasted but never filled in:
@@ -95,6 +95,13 @@ export async function connectHarness(): Promise<IntegrationHarness> {
   });
   await dataSource.initialize();
 
+  // Claim the shared schema before touching it. These suites drop and rebuild
+  // `iam`, and `@plantops/iam-api`'s RLS suite reads it from another Nx
+  // project that `nx run-many` may be running at the same moment. The lock is
+  // session-scoped and this data source has `poolSize: 1`, so it is held for
+  // exactly as long as the harness lives and released by `dispose()`.
+  await dataSource.query('select pg_advisory_lock($1)', [IAM_SCHEMA_TEST_LOCK_ID]);
+
   const query = async <T = unknown>(sql: string, params?: unknown[]): Promise<T[]> =>
     (await dataSource.query(sql, params)) as T[];
 
@@ -138,7 +145,14 @@ export async function connectHarness(): Promise<IntegrationHarness> {
     },
 
     async dispose(): Promise<void> {
-      if (dataSource.isInitialized) await dataSource.destroy();
+      // Destroying the connection releases the advisory lock with it; the
+      // explicit unlock keeps the intent visible and covers a pooled reuse.
+      if (dataSource.isInitialized) {
+        await dataSource
+          .query('select pg_advisory_unlock($1)', [IAM_SCHEMA_TEST_LOCK_ID])
+          .catch(() => undefined);
+        await dataSource.destroy();
+      }
     },
   };
 }

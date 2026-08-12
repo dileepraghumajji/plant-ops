@@ -8,6 +8,21 @@
  */
 export const IAM_SCHEMA = 'iam';
 
+/**
+ * Advisory-lock id that serialises test suites sharing one `iam` schema.
+ *
+ * Test-only coordination, but it has to live in shipped code because the
+ * suites that need it are in two different Nx projects — `@plantops/db`, whose
+ * migration suites **drop and rebuild** the schema, and `@plantops/iam-api`,
+ * whose RLS suite reads it. `nx run-many -t test` runs projects in parallel,
+ * so without a shared lock the rebuild lands mid-read and the reader fails for
+ * reasons that have nothing to do with the code under test — the worst class
+ * of flake, because it looks like an isolation bug.
+ *
+ * Two copies of the number would defeat the purpose the moment one changed.
+ */
+export const IAM_SCHEMA_TEST_LOCK_ID = 728_113;
+
 /** Postgres enum types, all created up front in migration 0001 (Doc 07 §4). */
 export const IAM_ENUMS = {
   NAV_NODE_KIND: 'nav_node_kind',

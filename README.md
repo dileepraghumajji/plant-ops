@@ -26,8 +26,17 @@ Plus: **everything is data** — applications, clients, menus, permissions are c
 ```sh
 npm install          # install all workspace deps
 docker compose up -d # local Postgres (ltree available) + Redis
-npx nx serve @plantops/iam-api    # NestJS API → http://localhost:3000/api
+npm run migration:run             # apply the schema + bootstrap seed
+npx nx serve @plantops/iam-api    # NestJS API → http://localhost:3000
 npx nx dev @plantops/admin-web    # Next.js console → http://localhost:3000 (use -p to change port)
+```
+
+The API's paths are the ones Doc 06 §1 fixes — `/iam`, `/auth`, and the two ops
+endpoints — with no global prefix:
+
+```sh
+curl localhost:3000/health   # liveness: 200 whatever the dependencies are doing
+curl localhost:3000/ready    # readiness: 503 (naming the culprit) if PG or Redis is down
 ```
 
 Useful workspace commands:
