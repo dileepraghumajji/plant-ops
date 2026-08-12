@@ -19,9 +19,44 @@
     "tags": [
       "type:lib",
       "scope:db"
-    ]
+    ],
+    "targets": {
+      "migration:run": {
+        "executor": "nx:run-commands",
+        "options": {
+          "cwd": "{workspaceRoot}",
+          "command": "tsx --tsconfig libs/db/tsconfig.lib.json tools/migrate.ts run",
+          "env": {
+            "NODE_OPTIONS": "--conditions=@plantops/source"
+          }
+        }
+      },
+      "migration:revert": {
+        "executor": "nx:run-commands",
+        "options": {
+          "cwd": "{workspaceRoot}",
+          "command": "tsx --tsconfig libs/db/tsconfig.lib.json tools/migrate.ts revert",
+          "env": {
+            "NODE_OPTIONS": "--conditions=@plantops/source"
+          }
+        }
+      },
+      "migration:show": {
+        "executor": "nx:run-commands",
+        "options": {
+          "cwd": "{workspaceRoot}",
+          "command": "tsx --tsconfig libs/db/tsconfig.lib.json tools/migrate.ts show",
+          "env": {
+            "NODE_OPTIONS": "--conditions=@plantops/source"
+          }
+        }
+      }
+    }
   },
   "dependencies": {
-    "tslib": "^2.3.0"
+    "@plantops/contracts": "0.0.1",
+    "reflect-metadata": "^0.2.0",
+    "tslib": "^2.3.0",
+    "typeorm": "^0.3.31"
   }
 }

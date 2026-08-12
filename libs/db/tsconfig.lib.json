@@ -6,14 +6,29 @@
     "tsBuildInfoFile": "dist/tsconfig.lib.tsbuildinfo",
     "emitDeclarationOnly": false,
     "forceConsistentCasingInFileNames": true,
-    "types": ["node"]
+    "types": ["node"],
+    // TypeORM's entity decorators are the legacy (stage-2) flavour, and its
+    // column metadata is read off `design:type`. `useDefineForClassFields`
+    // must stay off: ES class fields would re-define every decorated property
+    // as `undefined` after the decorator ran, blanking the metadata.
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "useDefineForClassFields": false,
+    "target": "es2021"
   },
   "include": ["src/**/*.ts"],
-  "references": [],
+  "references": [
+    {
+      "path": "../contracts/tsconfig.lib.json"
+    }
+  ],
   "exclude": [
     "jest.config.ts",
     "jest.config.cts",
     "src/**/*.spec.ts",
-    "src/**/*.test.ts"
+    "src/**/*.test.ts",
+    // Test-only plumbing for the integration suites. It references jest
+    // globals and must never reach the published lib.
+    "src/testing/**/*.ts"
   ]
 }

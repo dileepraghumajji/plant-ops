@@ -3,14 +3,22 @@
   "compilerOptions": {
     "outDir": "./out-tsc/jest",
     "types": ["jest", "node"],
-    "forceConsistentCasingInFileNames": true
+    "forceConsistentCasingInFileNames": true,
+    // Mirrors tsconfig.lib.json — specs import the decorated entities.
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "useDefineForClassFields": false,
+    "target": "es2021"
   },
   "include": [
     "jest.config.ts",
     "jest.config.cts",
     "src/**/*.test.ts",
     "src/**/*.spec.ts",
-    "src/**/*.d.ts"
+    "src/**/*.d.ts",
+    // The integration harness the migration suites share — excluded from
+    // tsconfig.lib.json, so this is where it gets type-checked.
+    "src/testing/**/*.ts"
   ],
   "references": [
     {
