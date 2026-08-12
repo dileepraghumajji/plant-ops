@@ -17,6 +17,7 @@
 import { DataSource } from 'typeorm';
 import { checkRlsEnforceable } from '../startup-checks.js';
 import { IAM_SCHEMA } from '../schema.js';
+import { verifySecret } from '../secret-hash.js';
 import {
   connectHarness,
   describeWithDb,
@@ -351,20 +352,22 @@ describeWithDb('RLS isolation, as the app role', () => {
       expect(account?.client_id).toBeNull();
     });
 
-    it('never stores the secret in plaintext', async () => {
+    it('never stores the secret in plaintext, and the hash verifies', async () => {
       const secret = process.env['PLATFORM_BOOTSTRAP_SECRET'] as string;
       const [account] = await harness.query<{ key_hash: string }>(
         `select key_hash from ${S}."service_account" where key = $1`,
         [PLATFORM_SERVICE_ACCOUNT_KEY],
       );
       expect(account?.key_hash).not.toContain(secret);
-      // ...and the stored hash verifies the real secret.
-      const [check] = await harness.query<{ ok: boolean }>(
-        `select (key_hash = crypt($1, key_hash)) as ok
-           from ${S}."service_account" where key = $2`,
-        [secret, PLATFORM_SERVICE_ACCOUNT_KEY],
-      );
-      expect(check?.ok).toBe(true);
+      // argon2id, with the parameters pinned in ARGON2_OPTIONS (Doc 03 §7).
+      expect(account?.key_hash).toMatch(/^\$argon2id\$v=19\$m=19456,t=2,p=1\$/);
+
+      // The stored hash accepts the real secret and rejects anything else —
+      // this is exactly the check Session 11's token exchange will perform.
+      await expect(verifySecret(account?.key_hash as string, secret)).resolves.toBe(true);
+      await expect(
+        verifySecret(account?.key_hash as string, `${secret}-wrong`),
+      ).resolves.toBe(false);
     });
 
     it('binds the platform account at the platform scope root', async () => {

@@ -54,6 +54,7 @@
     }
   },
   "dependencies": {
+    "@node-rs/argon2": "^2.0.2",
     "@plantops/contracts": "0.0.1",
     "reflect-metadata": "^0.2.0",
     "tslib": "^2.3.0",

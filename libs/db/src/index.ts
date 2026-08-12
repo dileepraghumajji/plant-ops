@@ -16,4 +16,5 @@ export * from './entities/index.js';
 export * from './migrations/index.js';
 export * from './rls-context.js';
 export * from './schema.js';
+export * from './secret-hash.js';
 export * from './startup-checks.js';

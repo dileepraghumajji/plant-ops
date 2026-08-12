@@ -34,6 +34,7 @@
 
 import type { MigrationInterface, QueryRunner } from 'typeorm';
 import { IAM_SCHEMA } from '../schema.js';
+import { hashSecret } from '../secret-hash.js';
 
 const S = `"${IAM_SCHEMA}"`;
 
@@ -119,19 +120,20 @@ export class BootstrapSeed1786406400011 implements MigrationInterface {
       returning id
     `, [clientId])) as { id: string }[];
 
-    // The secret is hashed here and never stored, echoed or audited. bcrypt via
-    // pgcrypto rather than argon2id: Doc 03 §7 mandates argon2id for *user
-    // passwords*, where the input is low-entropy and human-chosen. This is a
-    // high-entropy machine secret, and hashing it inside the database keeps the
-    // seed free of a Node crypto dependency it would otherwise pin forever.
-    // Session 11 must verify with `key_hash = crypt(provided, key_hash)`.
+    // The secret is hashed before it reaches SQL, and never stored, echoed or
+    // audited in the clear. argon2id via the shared hasher (Doc 03 §7) — the
+    // same function Sessions 8 and 11 use for passwords and service-account
+    // secrets, so there is exactly one hashing path in the system and
+    // `verifySecret()` is all Session 11 needs to authenticate this account.
+    const keyHash = await hashSecret(secret);
+
     const [{ id: serviceAccountId }] = (await queryRunner.query(`
       insert into ${S}."service_account" (client_id, name, key, key_hash, status)
       values (null, 'Platform Bootstrap', '${PLATFORM_SERVICE_ACCOUNT_KEY}',
-              crypt($1, gen_salt('bf', 12)), 'active')
+              $1, 'active')
       on conflict (key) do update set status = 'active'
       returning id
-    `, [secret])) as { id: string }[];
+    `, [keyHash])) as { id: string }[];
 
     await queryRunner.query(`
       insert into ${S}."role_binding" (client_id, service_account_id, role_id, scope_node_id)
