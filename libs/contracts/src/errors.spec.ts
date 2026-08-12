@@ -22,6 +22,7 @@ describe('IamErrorCode', () => {
     ['CONFLICT', 409],
     ['ACCOUNT_LOCKED', 423],
     ['RATE_LIMITED', 429],
+    ['INTERNAL_ERROR', 500],
   ];
 
   it('contains exactly the Doc 06 §2 codes', () => {
@@ -57,7 +58,7 @@ describe('IamErrorCode', () => {
 describe('isIamErrorCode', () => {
   it('accepts known codes and rejects everything else', () => {
     expect(isIamErrorCode('SCOPE_DENIED')).toBe(true);
-    expect(isIamErrorCode('INTERNAL_ERROR')).toBe(false);
+    expect(isIamErrorCode('SERVER_EXPLODED')).toBe(false);
     expect(isIamErrorCode(403)).toBe(false);
     expect(isIamErrorCode(undefined)).toBe(false);
   });

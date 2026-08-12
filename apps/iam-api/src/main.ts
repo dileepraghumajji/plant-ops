@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { EnvValidationError, loadEnv, redactEnv } from '@plantops/config';
 import {
   RlsStartupCheckError,
@@ -40,16 +41,37 @@ async function bootstrap() {
     await probe.destroy();
   }
 
-  const app = await NestFactory.create(AppModule, {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     logger: logLevelsFor(env.LOG_LEVEL),
   });
-  const globalPrefix = 'api';
-  app.setGlobalPrefix(globalPrefix);
+
+  // No global prefix: Doc 06 §1 fixes the paths as `/iam`, `/auth`, `/health`
+  // and `/ready`, and controllers declare those themselves. A prefix here
+  // would silently move every documented path.
+
+  // Lets `onModuleDestroy` / `onApplicationShutdown` run — which is what closes
+  // the database pool and Redis connection on SIGTERM. Without it a rolling
+  // deploy leaks a pool per replacement instance until the pooler refuses new
+  // connections.
+  app.enableShutdownHooks();
+
+  // Express's own `trust proxy`, driven by the same flag the throttle reads,
+  // so `req.ip` cannot mean one thing to the framework and another to the
+  // guard keyed on it.
+  app.set('trust proxy', env.TRUST_PROXY);
+
+  if (env.CORS_ALLOWED_ORIGINS.length > 0) {
+    app.enableCors({
+      origin: [...env.CORS_ALLOWED_ORIGINS],
+      // The admin UI sends `Authorization`, not cookies; credentials stay off
+      // so a wildcard-adjacent misconfiguration cannot become a session leak.
+      credentials: false,
+    });
+  }
+
   await app.listen(env.PORT);
 
-  Logger.log(
-    `🚀 iam-api (${env.NODE_ENV}) listening on http://localhost:${env.PORT}/${globalPrefix}`,
-  );
+  Logger.log(`🚀 iam-api (${env.NODE_ENV}) listening on http://localhost:${env.PORT}`);
   // Only ever log the redacted view — the raw config holds connection strings,
   // the signing key, and the bootstrap secret (Doc 07 §8, Doc 10 §8).
   Logger.debug(redactEnv(env), 'Env');

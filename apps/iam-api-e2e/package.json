@@ -17,7 +17,7 @@
           "@plantops/iam-api:serve"
         ],
         "options": {
-          "jestConfig": "apps/iam-api-e2e/jest.config.cts",
+          "jestConfig": "apps/iam-api-e2e/jest.config.js",
           "passWithNoTests": true
         }
       }

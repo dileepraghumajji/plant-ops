@@ -25,6 +25,17 @@ export const IamErrorCode = {
   ACCOUNT_LOCKED: 'ACCOUNT_LOCKED',
   /** 429 — throttled. */
   RATE_LIMITED: 'RATE_LIMITED',
+  /**
+   * 500 — the request failed for a reason the server did not anticipate.
+   *
+   * The one code a caller can never act on, and the one every caller must be
+   * able to parse: without it, an unhandled exception escapes as some other
+   * body shape and `isIamErrorResponse` rejects the server's own error. The
+   * `message` is always generic — an exception's text can carry a query, a
+   * connection string, or a row — and `requestId` is what correlates it with
+   * the logged stack (Doc 06 §2, added Session 6).
+   */
+  INTERNAL_ERROR: 'INTERNAL_ERROR',
 } as const;
 export type IamErrorCode = (typeof IamErrorCode)[keyof typeof IamErrorCode];
 
@@ -39,6 +50,7 @@ export const IAM_ERROR_CODES = [
   IamErrorCode.CONFLICT,
   IamErrorCode.ACCOUNT_LOCKED,
   IamErrorCode.RATE_LIMITED,
+  IamErrorCode.INTERNAL_ERROR,
 ] as const satisfies readonly IamErrorCode[];
 
 /** code → HTTP status, per the Doc 06 §2 table. */
@@ -53,6 +65,7 @@ export const IAM_ERROR_HTTP_STATUS: Readonly<Record<IamErrorCode, number>> =
     [IamErrorCode.CONFLICT]: 409,
     [IamErrorCode.ACCOUNT_LOCKED]: 423,
     [IamErrorCode.RATE_LIMITED]: 429,
+    [IamErrorCode.INTERNAL_ERROR]: 500,
   });
 
 /** One field-level complaint accompanying `VALIDATION_FAILED`. */

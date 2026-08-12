@@ -92,12 +92,18 @@
     "@nestjs/platform-express": "^11.0.0",
     "@plantops/config": "0.0.1",
     "@plantops/contracts": "0.0.1",
+    "@plantops/db": "0.0.1",
     "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "ioredis": "^5.4.1",
     "reflect-metadata": "^0.2.0",
     "rxjs": "^7.8.0",
-    "tslib": "^2.3.0"
+    "tslib": "^2.3.0",
+    "typeorm": "^0.3.31",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@nestjs/testing": "^11.0.0"
+    "@nestjs/testing": "^11.0.0",
+    "@types/express": "^4.17.21"
   }
 }
