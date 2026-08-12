@@ -8,6 +8,7 @@
  */
 
 export * from './env.schema.js';
+export * from './key-rotation.js';
 export * from './load-env.js';
 
 /**
