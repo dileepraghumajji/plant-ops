@@ -24,6 +24,32 @@ export const AUTH_ROUTE_PREFIX = '/auth';
  */
 export const CLOCK_SKEW_LEEWAY_SECONDS = 60;
 
+/**
+ * The one signature algorithm the IAM issues and accepts (Doc 03 §1).
+ *
+ * Pinned as a constant because verification must never take the algorithm from
+ * the token being verified. A verifier that honours the incoming `alg` header
+ * accepts `alg: "none"`, and accepts an HS256 token forged with the *public*
+ * key as the HMAC secret — the two classic JWT breaks, both of which look like
+ * ordinary success. Comparing the header against this value and rejecting
+ * anything else closes them.
+ */
+export const JWT_SIGNING_ALGORITHM = 'RS256';
+
+/** Smallest RSA modulus the IAM will sign or verify with. */
+export const JWT_MIN_RSA_KEY_BITS = 2048;
+
+/**
+ * `max-age` on the JWKS response (Doc 03 §1 step 2).
+ *
+ * Rotation says to wait for JWKS propagation — "allow at least one cache TTL" —
+ * before switching signers. That step is only actionable if the TTL is a known
+ * number, so the endpoint publishes this one and the rotation tool reads the
+ * same constant when it computes the earliest safe activation time. Changing it
+ * changes both ends together.
+ */
+export const JWKS_CACHE_MAX_AGE_SECONDS = 300;
+
 /** Human access-token lifetime — 15 min (Doc 03 §1). */
 export const ACCESS_TOKEN_TTL_SECONDS = 900;
 

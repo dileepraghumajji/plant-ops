@@ -9,6 +9,7 @@ import {
 } from '@plantops/db';
 import { config as loadDotenv } from 'dotenv';
 import { AppModule } from './app/app.module';
+import { KeyConfigurationError, KeysService } from './auth/keys.service';
 
 /**
  * Local `.env` support. A no-op when the file is absent, and it never
@@ -40,6 +41,18 @@ async function bootstrap() {
   } finally {
     await probe.destroy();
   }
+
+  // And that the signing keys are usable, before the first token is asked for
+  // (Doc 03 §1).
+  //
+  // `KeysService` parses lazily so the many tests that boot the module need not
+  // carry a real keypair; that laziness is exactly why a deployment needs this
+  // line. Without it a malformed key, or a public key that is not the pair of
+  // the private one, surfaces at the first login rather than at boot — and the
+  // mismatched-pair case does not surface at all here: signing succeeds, JWKS
+  // serves a valid-looking key, and every token this instance issues fails
+  // verification in every consumer.
+  new KeysService(env).assertKeysUsable();
 
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     logger: logLevelsFor(env.LOG_LEVEL),
@@ -88,7 +101,10 @@ bootstrap().catch((error: unknown) => {
   if (error instanceof EnvValidationError) {
     // A stack trace adds nothing here; the operator needs the variable names.
     Logger.error(error.message, undefined, 'Bootstrap');
-  } else if (error instanceof RlsStartupCheckError) {
+  } else if (
+    error instanceof RlsStartupCheckError ||
+    error instanceof KeyConfigurationError
+  ) {
     // Likewise: the operator needs the failed assertions and the fix, not a
     // stack through NestFactory.
     Logger.error(error.message, undefined, 'Bootstrap');
