@@ -1,6 +1,11 @@
 import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { EnvValidationError, loadEnv, redactEnv } from '@plantops/config';
+import {
+  RlsStartupCheckError,
+  assertRlsEnforceable,
+  createAppDataSource,
+} from '@plantops/db';
 import { config as loadDotenv } from 'dotenv';
 import { AppModule } from './app/app.module';
 
@@ -15,6 +20,25 @@ async function bootstrap() {
   // Validate the environment before anything else starts: a misconfigured
   // deployment must die here, not at its first query (Doc 08 §5).
   const env = loadEnv();
+
+  // Then prove the database connection can actually enforce RLS, before a
+  // single request is served (Doc 07 §5, §5.1).
+  //
+  // This check exists because every RLS bypass is *silent*: policies do not
+  // error when they are skipped, they just stop filtering, and the API goes on
+  // returning perfectly plausible rows that belong to other tenants. There is
+  // no runtime symptom to notice later — so it is checked once, loudly, here.
+  //
+  // Its own connection, disposed immediately: the assertions are about the
+  // credentials in DATABASE_URL, and nothing should be able to serve a request
+  // before they have passed.
+  const probe = createAppDataSource(env);
+  await probe.initialize();
+  try {
+    await assertRlsEnforceable(probe);
+  } finally {
+    await probe.destroy();
+  }
 
   const app = await NestFactory.create(AppModule, {
     logger: logLevelsFor(env.LOG_LEVEL),
@@ -41,6 +65,10 @@ function logLevelsFor(level: string) {
 bootstrap().catch((error: unknown) => {
   if (error instanceof EnvValidationError) {
     // A stack trace adds nothing here; the operator needs the variable names.
+    Logger.error(error.message, undefined, 'Bootstrap');
+  } else if (error instanceof RlsStartupCheckError) {
+    // Likewise: the operator needs the failed assertions and the fix, not a
+    // stack through NestFactory.
     Logger.error(error.message, undefined, 'Bootstrap');
   } else {
     Logger.error(error, undefined, 'Bootstrap');

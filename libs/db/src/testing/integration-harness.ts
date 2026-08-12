@@ -62,6 +62,21 @@ export interface IntegrationHarness {
   expectFailure(sql: string, params?: unknown[]): Promise<DbFailure>;
   /** Drops the `iam` schema and the migration log, then runs the full chain. */
   rebuild(): Promise<void>;
+  /**
+   * Lifts `force row level security` from every `iam` table.
+   *
+   * For the **constraint** suites only. Those prove Doc 01 §6 by watching
+   * Postgres refuse an insert, and they connect as the owner — who migration
+   * 0007 deliberately subjects to policy (Doc 07 §5.1). Left in place, every
+   * fixture insert would be rejected by a *policy*, and a test asserting a
+   * check-constraint violation would pass on the wrong error code: a suite
+   * that goes green for the wrong reason, which is the exact failure mode
+   * §5.1 exists to prevent.
+   *
+   * The isolation suite never calls this — it rebuilds and connects as the
+   * app role, with FORCE intact, because that is what it is testing.
+   */
+  relaxForcedRowSecurity(): Promise<void>;
   dispose(): Promise<void>;
 }
 
@@ -108,6 +123,18 @@ export async function connectHarness(): Promise<IntegrationHarness> {
       await query(`drop schema if exists ${IAM_SCHEMA} cascade`);
       await query(`drop table if exists "${MIGRATIONS_TABLE_NAME}"`);
       await dataSource.runMigrations({ transaction: 'each' });
+    },
+
+    async relaxForcedRowSecurity(): Promise<void> {
+      const tables = await query<{ tablename: string }>(
+        `select tablename from pg_tables where schemaname = $1`,
+        [IAM_SCHEMA],
+      );
+      for (const { tablename } of tables) {
+        await query(
+          `alter table "${IAM_SCHEMA}"."${tablename}" no force row level security`,
+        );
+      }
     },
 
     async dispose(): Promise<void> {

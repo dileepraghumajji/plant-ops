@@ -23,6 +23,9 @@
   ],
   "references": [
     {
+      "path": "../../libs/db/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/contracts/tsconfig.lib.json"
     },
     {

@@ -14,4 +14,6 @@ import 'reflect-metadata';
 export * from './data-source.js';
 export * from './entities/index.js';
 export * from './migrations/index.js';
+export * from './rls-context.js';
 export * from './schema.js';
+export * from './startup-checks.js';

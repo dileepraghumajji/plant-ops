@@ -30,6 +30,11 @@ describe('migration chain', () => {
       'MappingTables1786406400004',
       'AuditTrail1786406400005',
       'Indexes1786406400006',
+      'RlsTenant1786406400007',
+      'RlsCatalog1786406400008',
+      'RlsJoinTables1786406400009',
+      'AuditWriteFn1786406400010',
+      'BootstrapSeed1786406400011',
     ]);
   });
 

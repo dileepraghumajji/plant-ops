@@ -32,6 +32,8 @@ describeWithDb('registry migrations against Postgres', () => {
   beforeAll(async () => {
     harness = await connectHarness();
     await harness.rebuild();
+    // A constraint suite, not an isolation suite — see the method's comment.
+    await harness.relaxForcedRowSecurity();
   }, 60_000);
 
   afterAll(async () => {
