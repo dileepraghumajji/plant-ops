@@ -66,14 +66,15 @@
 # Session 5 — RLS policies, request context, write_audit, bootstrap seed
 **Goal:** Hand-written RLS for every table, the JWT-sourced transaction-local context helper, the non-forgeable `write_audit` SECURITY DEFINER function, the non-BYPASSRLS startup assertion, and the platform-admin bootstrap seed (Doc 07 §5–8, Doc 00 §5.0).
 **Expected Output:** Cross-tenant reads return zero rows at the DB layer even from deliberately buggy queries; audit is append-only and unspoofable.
-**Files to Create:** `libs/db/src/migrations/0007-rls-tenant.ts`, `0008-rls-catalog.ts`, `0009-rls-join-tables.ts` (role_permission via parent role; menu_permission as catalog), `0010-audit-write-fn.ts` (`iam.write_audit` + grants/revokes incl. TRUNCATE), `0011-bootstrap-seed.ts` (platform service account from env secret, audited `platform.bootstrap`), `libs/db/src/rls-context.ts` (accepts **only** the AuthGuard token object — structurally impossible to feed from `req`), a lint gate (custom ESLint rule or restricted-import check) so no code path can call `set_config`/the context-setter with request-derived values (Doc 07 §5), `libs/db/src/startup-checks.ts` (assert connection role is non-superuser/non-BYPASSRLS), RLS isolation test suite.
-**Files to Modify:** `apps/iam-api` bootstrap to run startup checks; `docker-compose`/local setup to create `app_role` as non-superuser.
+**Files to Create:** `libs/db/src/migrations/0007-rls-tenant.ts`, `0008-rls-catalog.ts`, `0009-rls-join-tables.ts` (role_permission via parent role; menu_permission as catalog), `0010-audit-write-fn.ts` (`iam.write_audit` + grants/revokes incl. TRUNCATE), `0011-bootstrap-seed.ts` (platform service account from env secret, audited `platform.bootstrap`), `libs/db/src/rls-context.ts` (accepts **only** the AuthGuard token object — structurally impossible to feed from `req`), a lint gate (custom ESLint rule or restricted-import check) so no code path can call `set_config`/the context-setter with request-derived values (Doc 07 §5), `libs/db/src/startup-checks.ts` (assert connection role is non-superuser, non-BYPASSRLS, **and owns no `iam` table** — Doc 07 §5.1), RLS isolation test suite (run under the **app** role, never the owner).
+**Files to Modify:** `apps/iam-api` bootstrap to run startup checks; `docker-compose`/local setup to create **both** roles per Doc 07 §5.1 — an owner role for migrations and a non-owner `app_role` for requests; `.env` so `DATABASE_URL` and `DATABASE_DIRECT_URL` differ by role, not only endpoint.
 **Dependencies:** Session 4
 **Acceptance Criteria:**
 - With context set to client A, a raw `SELECT * FROM iam.role` returns only A's rows; with no context, zero tenant rows.
 - Platform-admin context reads across tenants but `with check` blocks writing a row under another `client_id`.
 - Direct `INSERT/UPDATE/DELETE/TRUNCATE` on `audit_trail` as `app_role` all fail; `write_audit()` succeeds and stamps actor/client from session vars.
-- Startup aborts if connected as a BYPASSRLS role.
+- Startup aborts if connected as a BYPASSRLS role, a superuser, **or the role owning the `iam` tables** (Doc 07 §5.1 — ownership exempts a role from its own policies, so this check passing is otherwise no evidence of isolation).
+- Every RLS-enabled table carries `force row level security`, except `audit_trail` (its `SECURITY DEFINER` writer inserts via the owner path; the app role is blocked there by privilege, not policy).
 - Bootstrap seed creates the platform service account; secret comes from env, never logged.
 **Definition of Done:** RLS isolation suite green against a two-tenant fixture; seed idempotent (re-run safe).
 **Suggested Commit Message:** `feat(db): hand-written RLS policies, JWT-sourced request context, non-forgeable audit fn, bootstrap seed`

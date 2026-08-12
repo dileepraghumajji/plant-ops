@@ -66,3 +66,21 @@ Added: service_account revoked; client_application **re-enabled** (not just disa
 ## Not changed (deliberately)
 
 - Core access model, resolve/point-check split, registry-as-data, IAM-as-authority, three-layer isolation — all validated sound, untouched.
+
+---
+
+## Post-implementation findings
+
+Findings raised while building, not part of the original 15-finding review. Same format.
+
+**16. Ownership bypass — Doc 07 §5's startup assertion was necessary but not sufficient**
+*High severity.* Doc 07 §2 (role split note) · Doc 07 new §5.1 · Roadmap Session 5 (startup check scope).
+Found during Session 5 setup, before any policy was written. §5 required the app's connection role to be non-superuser and non-BYPASSRLS. A **table's owner is also exempt from its own policies**, independent of both — `enable row level security` does not apply to the owner. Measured on PostgreSQL 17.6 with a two-tenant fixture and the context set to one tenant: connected as the table owner, an `enable`-only table returned **both** tenants' rows while `rolsuper` and `rolbypassrls` were both false — i.e. §5's assertion passed with isolation fully inert. The failure mode is what makes it high severity: an isolation suite executed under the owning role goes green with every policy disabled, so its output is not evidence.
+
+**Decision (applies to every environment, local and hosted):** two roles, split by function — an *owner* role that owns schema `iam`, all tables and `iam.write_audit` and is used **only** by migrations (`DATABASE_DIRECT_URL`), and an *app* role that owns nothing and serves every request (`DATABASE_URL`), holding `usage` + DML + `execute` on the audit function. On Supabase the built-in `postgres` role is unsuitable as either — it is privileged and would own everything migrations create; it is used once to create the two roles and never appears in a connection string again. `DATABASE_URL` vs `DATABASE_DIRECT_URL` therefore differ by **role as well as endpoint**; the endpoint split alone protects nothing. Additionally every RLS-enabled table gets `force row level security`, with `audit_trail` deliberately exempt so the `SECURITY DEFINER` writer can still insert via the owner path (the app role is blocked there by privilege, not policy). Consequence for migrations: a seed writing into a forced table runs as owner and *is* subject to policy, so it must set the §5 session context itself.
+
+**Startup check widened** from two assertions to three: not superuser, not `BYPASSRLS`, and **owns no table in `iam`**.
+
+## New schema additions introduced by post-implementation findings
+
+6. Two database roles per environment (owner + app) with the grant split above — Doc 07 §5.1. Not a schema object, but a deployment precondition: the RLS suite is meaningless without it.

@@ -21,6 +21,8 @@ Consequence: TypeORM owns the schema and migrations; RLS is written by hand in S
 - With PgBouncer in transaction mode, disable prepared statements in TypeORM (or use the session-mode port for migrations). Document which port is used where in the env config.
 - Enable extensions once (migration): `create extension if not exists ltree;` and `pgcrypto` (for `gen_random_uuid()`).
 
+> `DATABASE_URL` and `DATABASE_DIRECT_URL` differ in **two** dimensions, not one: a different endpoint *and* a different role. The app URL carries the runtime role, the migration URL carries the owning role. Pointing both at the same user re-opens the ownership bypass in §5.1 — the endpoint split alone does not protect anything.
+
 ## 3. TypeORM setup
 
 - **Entities** map the tables in Doc 01. Use explicit column types matching the data model (`uuid`, `text`, `jsonb`, `timestamptz`, enums as Postgres enums or text+check).
@@ -54,7 +56,36 @@ Implement via a TypeORM transaction wrapper / interceptor that runs these before
 
 > **PROVENANCE — the load-bearing rule (Invariant I0/I5).** The values bound to `app.current_client_id`, `app.current_user_id`, and `app.is_platform_admin` MUST be sourced **only** from the verified JWT claims (`cid`, `sub`, and the platform-admin determination), taken from the `AuthGuard`'s validated token context. They MUST NEVER be read from a request body, header, query param, path segment, or any client-supplied field. RLS is the last line of defense, but it *trusts these session vars completely* — a single interceptor that sets `client_id` from `req.body.clientId` or a `X-Client-Id` header collapses tenant isolation across the entire system, and the database will faithfully enforce the wrong tenant. Enforce this structurally: the context-setter accepts *only* the AuthGuard's token object as input, and `is_platform_admin` is derived from the token's platform-scope binding, not passed in. Add a lint/review gate so no code path can set these from `req`.
 
-> The database connection role used by the app must be a **non-superuser, non-BYPASSRLS** role, or RLS is silently skipped. This is the single most common RLS misconfiguration — assert it in a startup check.
+> The database connection role used by the app must be a **non-superuser, non-BYPASSRLS** role, or RLS is silently skipped. This is the single most common RLS misconfiguration — assert it in a startup check. **That assertion is necessary but not sufficient — see §5.1.**
+
+## 5.1 Database roles — the ownership bypass
+
+There are **three** ways a connection escapes RLS, not two. Superuser and `BYPASSRLS` are the well-known pair. The third is **table ownership**: a table's owner is not subject to its own policies, regardless of how unprivileged the role otherwise is. `alter table … enable row level security` simply does not apply to the owner.
+
+Measured against this schema (PostgreSQL 17.6, policy `using (tenant = current_setting('app.current_client_id')::uuid)`, two tenants' rows present, context set to one of them):
+
+```
+ENABLE ROW LEVEL SECURITY, connected as the table OWNER   → 2 rows   (both tenants)
+after ALTER TABLE … FORCE ROW LEVEL SECURITY              → 1 row    (correct)
+role attributes: rolsuper = false, rolbypassrls = false
+```
+
+The role passed both of §5's checks while isolation was completely inert. This is the dangerous shape of the bug: an isolation suite run under the owning role goes **green with every policy disabled**, so the test output is not evidence of anything.
+
+**Mandated role split — identical in every environment, local and hosted:**
+
+| Role | Owns | Used by | Attributes |
+|---|---|---|---|
+| *owner* (`plantops`) | schema `iam`, all tables, `iam.write_audit` | migrations only — `DATABASE_DIRECT_URL` | `nosuperuser nobypassrls`; owns the objects |
+| *app* (`plantops_app`) | nothing | every request — `DATABASE_URL` | `nosuperuser nobypassrls`, **not** an owner |
+
+The app role receives `usage` on `iam`, DML on the tables, and `execute` on `iam.write_audit` — never ownership. This is already implicit in §6, which writes `revoke all on iam.audit_trail from app_role` and requires the audit function's owner to be "a role distinct from `app_role`"; §5.1 makes it explicit and general.
+
+**On Supabase specifically:** the built-in `postgres` role is unsuitable as *either* role — it is privileged (and bypasses RLS) and would own everything the migrations create. Use it exactly once, to create the two roles above, and never place it in a connection string again. Staging and production therefore carry the same two roles as local; only the host and port differ.
+
+**Belt and braces:** every RLS-enabled table also gets `force row level security`, so ownership can never re-open the hole even if a connection string is later mispointed. One exception, deliberate: `audit_trail` is left un-forced, because `iam.write_audit` is `SECURITY DEFINER` owned by the owning role and relies on the owner path to insert (§6). The app role is blocked there by **privilege** — it holds no `INSERT` — which is the stronger barrier and does not depend on policy evaluation at all. A consequence to respect in migrations: any migration that seeds rows into a forced table (the §8 bootstrap) runs as the owner and *is* subject to policy, so it must set the §5 session context itself rather than assuming owner privilege.
+
+**Startup check (extends §5).** Assert all three, not the first two: the connection role is not a superuser, does not have `BYPASSRLS`, and **owns no table in `iam`**. Optionally verify `relforcerowsecurity` is set on every table that has policies. A check that passes while isolation is broken is worse than no check, because it is quoted as proof.
 
 ## 6. RLS policies (hand-written)
 
