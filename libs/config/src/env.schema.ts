@@ -36,6 +36,29 @@ export const DEFAULT_RATE_LIMIT_WINDOW_SECONDS = 60;
 export const DEFAULT_RATE_LIMIT_MAX_REQUESTS = 120;
 export const DEFAULT_READINESS_TIMEOUT_MS = 2_000;
 
+/**
+ * Account-lockout and password-reset policy (Doc 03 §7–8).
+ *
+ * Here rather than in `@plantops/contracts` for the same reason the rate limits
+ * are: no consuming module can observe either value. A module sees a locked
+ * account only as a login it never gets a token from, and a reset token never
+ * leaves the IAM at all.
+ *
+ * **Five attempts**, because the threshold trades two failures against each
+ * other. Too high and it stops bounding an online guessing attack; too low and
+ * a shared gate terminal with a sticky keyboard locks a shift supervisor out
+ * mid-shift. Five is the common floor in NIST 800-63B-adjacent practice and
+ * leaves room for the ordinary "wrong one of my two passwords" twice over.
+ *
+ * **One hour**, because a reset link is a bearer credential sitting in an inbox.
+ * Long enough to survive a delivery delay and a walk back to the office;
+ * short enough that a mailbox compromised next week finds nothing usable.
+ */
+export const DEFAULT_LOGIN_MAX_FAILED_ATTEMPTS = 5;
+export const MAX_LOGIN_MAX_FAILED_ATTEMPTS = 100;
+export const DEFAULT_PASSWORD_RESET_TTL_SECONDS = 3_600;
+export const MAX_PASSWORD_RESET_TTL_SECONDS = 86_400;
+
 const NODE_ENVS = ['development', 'test', 'production'] as const;
 export type NodeEnv = (typeof NODE_ENVS)[number];
 
@@ -269,6 +292,31 @@ export const envSchema = z.object({
   ).refine((value) => value >= REFRESH_REUSE_GRACE_MIN_SECONDS, {
     message: `REFRESH_REUSE_GRACE_SECONDS must be at least ${REFRESH_REUSE_GRACE_MIN_SECONDS} seconds`,
   }),
+  /**
+   * Consecutive failed logins that lock an account (Doc 03 §8).
+   *
+   * Floored at 1 rather than allowing 0 to mean "off". A security control with
+   * an off switch spelled as a falsy default is one that gets disabled by an
+   * empty environment variable; an operator who genuinely wants no lockout can
+   * say so out loud with a large number.
+   */
+  LOGIN_MAX_FAILED_ATTEMPTS: z.coerce
+    .number({ error: 'LOGIN_MAX_FAILED_ATTEMPTS must be a number' })
+    .int('LOGIN_MAX_FAILED_ATTEMPTS must be a whole number')
+    .min(1, 'LOGIN_MAX_FAILED_ATTEMPTS must be at least 1')
+    .max(
+      MAX_LOGIN_MAX_FAILED_ATTEMPTS,
+      `LOGIN_MAX_FAILED_ATTEMPTS must be at most ${MAX_LOGIN_MAX_FAILED_ATTEMPTS}`,
+    )
+    .default(DEFAULT_LOGIN_MAX_FAILED_ATTEMPTS),
+
+  /** How long a password-reset token stays usable; ≤24 h (Doc 03 §7). */
+  PASSWORD_RESET_TTL_SECONDS: seconds(
+    'PASSWORD_RESET_TTL_SECONDS',
+    DEFAULT_PASSWORD_RESET_TTL_SECONDS,
+    MAX_PASSWORD_RESET_TTL_SECONDS,
+  ),
+
   /** Safety net behind invalidation; ≤10 min (Doc 04 §6). */
   GRANTS_CACHE_TTL_SECONDS: seconds(
     'GRANTS_CACHE_TTL_SECONDS',

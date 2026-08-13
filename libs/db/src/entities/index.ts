@@ -15,6 +15,7 @@ import { Client } from './client.entity.js';
 import { ClientApplication } from './client-application.entity.js';
 import { MenuPermission } from './menu-permission.entity.js';
 import { NavNode } from './nav-node.entity.js';
+import { PasswordResetToken } from './password-reset-token.entity.js';
 import { Permission } from './permission.entity.js';
 import { Role } from './role.entity.js';
 import { RoleBinding } from './role-binding.entity.js';
@@ -63,6 +64,11 @@ export {
 export type { IdentityProvider } from './user-identity.entity.js';
 export { Session } from './session.entity.js';
 
+// ── credentials in flight (Doc 03 §7, Session 10) ────────────────────────
+// Outside Doc 01's model: a reset token is a mechanism, not an entity the
+// identity model reasons about. Migration 0014 explains why it needs a table.
+export { PasswordResetToken } from './password-reset-token.entity.js';
+
 // ── audit (Doc 01 §4.8) ──────────────────────────────────────────────────
 export {
   AuditTrail,
@@ -86,5 +92,6 @@ export const entities = [
   RoleBinding,
   UserIdentity,
   Session,
+  PasswordResetToken,
   AuditTrail,
 ] as const;

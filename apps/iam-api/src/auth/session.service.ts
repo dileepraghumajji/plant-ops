@@ -282,7 +282,72 @@ export class SessionService implements RevocationFallback {
     // After COMMIT, never before: until the transaction lands there is no
     // revocation to announce, and a rollback would leave every verifier in the
     // fleet refusing a session that is still live.
-    afterCommit(async () => {
+    afterCommit(() => this.publishRevocations([sessionId]));
+    return true;
+  }
+
+  /**
+   * Revokes every live session a user has, and audits each one (Doc 03 §6).
+   *
+   * The force-logout behind a lock, a disable and a completed password reset —
+   * "revoke all sessions for a user", which the spec lists precisely because a
+   * state change that leaves existing sessions running changes nothing for
+   * whoever is already inside.
+   *
+   * Runs on the request transaction, unlike the pre-auth paths above: every
+   * caller of this is an *authenticated* administrative action, so the RLS
+   * context exists and the revocation belongs to the same transaction as the
+   * status change it accompanies. Publishing to the cache is the caller's job,
+   * after that transaction commits — see {@link publishRevocations}.
+   *
+   * One audit row per session rather than one for the user. The session list is
+   * a screen an administrator reads back (Doc 09), and "this device was logged
+   * out at 14:02" is the thing they are looking for; a single aggregate row
+   * would leave every individual session's ending unexplained.
+   */
+  async revokeAllForUser(userId: string, action: string): Promise<string[]> {
+    // The same CTE shape as `revoke`, and for the same reason: TypeORM's
+    // Postgres driver returns `[rows, rowCount]` for a bare UPDATE, so the
+    // `returning` clause has to be wrapped to come back as rows.
+    const rows = (await entityManager().query(
+      `with revoked as (
+         update ${S}."session" s
+            set revoked_at = now()
+          where s.user_id = $1
+            and s.revoked_at is null
+          returning s.id
+       )
+       select id from revoked`,
+      [userId],
+    )) as { id: string }[];
+
+    for (const { id } of rows) {
+      await entityManager().query(
+        `select ${S}.write_audit($1, 'session', $2, '{}'::jsonb)`,
+        [action, id],
+      );
+    }
+
+    return rows.map((row) => row.id);
+  }
+
+  /**
+   * Publishes revoked `sid`s to the cache every verifier reads (Doc 03 §6).
+   *
+   * Best-effort by design. The database is authoritative — a session with
+   * `revoked_at` set is dead whether or not the cache heard about it — and
+   * {@link SessionService.isRevoked} is the fallback `AuthGuard` reaches for
+   * when Redis cannot answer. So a failed publish is logged loudly and the
+   * caller's operation still succeeds: the alternative is failing a completed
+   * lockout because a cache was briefly unreachable, which would leave the
+   * account locked in the database and the request reported as an error.
+   *
+   * Callers inside a transaction must defer this with `afterCommit`; callers on
+   * the pool (the pre-auth paths) can call it directly, because their write has
+   * already committed by the time they have the ids.
+   */
+  async publishRevocations(sessionIds: readonly string[]): Promise<void> {
+    for (const sessionId of sessionIds) {
       try {
         await this.revocations.revoke(sessionId);
       } catch (error) {
@@ -292,8 +357,7 @@ export class SessionService implements RevocationFallback {
             'fall back to the database until the entry is written',
         );
       }
-    });
-    return true;
+    }
   }
 
   /**

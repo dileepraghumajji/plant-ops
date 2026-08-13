@@ -15,7 +15,8 @@
 
 import { z } from 'zod';
 import { createZodDto } from '../common/validation.pipe';
-import { PASSWORD_MAX_LENGTH } from './password.util';
+import { PASSWORD_MAX_LENGTH, passwordSchema } from './password.util';
+import { RESET_TOKEN_MAX_LENGTH } from './password-reset.util';
 import { REFRESH_TOKEN_MAX_LENGTH } from './refresh-token.util';
 
 /**
@@ -86,3 +87,42 @@ export const refreshSchema = z.object({
 });
 
 export class RefreshDto extends createZodDto(refreshSchema) {}
+
+/**
+ * `POST /auth/password/reset-request` (Doc 06 §3).
+ *
+ * The same two identifiers login takes, minus the password — a reset is for
+ * `(client_slug, email)` because that is what identifies a user (Doc 01 §3.6),
+ * and the address alone would be ambiguous across tenants.
+ *
+ * Nothing here can fail in a way that tells the caller anything: a malformed
+ * address is a 400 about *syntax*, which says nothing about whether the account
+ * exists, and every well-formed request gets the same 202.
+ */
+export const passwordResetRequestSchema = z.object({
+  email,
+  client_slug: clientSlug,
+});
+
+export class PasswordResetRequestDto extends createZodDto(passwordResetRequestSchema) {}
+
+/**
+ * `POST /auth/password/reset` (Doc 06 §3).
+ *
+ * `new_password` is checked against {@link passwordSchema} — the policy from
+ * Doc 03 §7, enforced at the API as that section asks, and the same schema any
+ * later set-password endpoint will use. This is the opposite of `loginPassword`
+ * above and deliberately so: refusing a short password when it is being *set*
+ * is the policy working, while refusing one at login would only leak that the
+ * guess was too short to be worth checking.
+ *
+ * The token is bounded but not shape-checked, for the reason `refresh_token`
+ * is: a 400 for a malformed token and a 401 for a wrong one would let a caller
+ * tell which strings are worth presenting.
+ */
+export const passwordResetSchema = z.object({
+  token: z.string().trim().min(1, 'token is required').max(RESET_TOKEN_MAX_LENGTH),
+  new_password: passwordSchema,
+});
+
+export class PasswordResetDto extends createZodDto(passwordResetSchema) {}

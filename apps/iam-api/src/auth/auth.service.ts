@@ -36,18 +36,34 @@
  * view — the account is refused, permanently. At the *login endpoint* it is
  * still returned as the generic 401, because a 403 at an unauthenticated
  * endpoint is precisely a user-enumeration hint: it confirms the address is
- * real. The 403 belongs to a disabled subject presenting a still-valid token,
- * which is Session 10's territory. The audit records `account_disabled` either
- * way, so nothing is lost where it matters.
+ * real. The audit records `account_disabled` either way, so nothing is lost
+ * where it matters.
+ *
+ * A disabled subject holding a still-valid access token is refused too, and
+ * also not with a 403: disabling revokes every session it has
+ * (`AccountStateService`), so the token's `sid` is in the revoked set and
+ * `AuthGuard` answers 401 before any handler runs. That is the stronger
+ * outcome — it needs no per-request status lookup, and it reaches every
+ * consuming module rather than only this one.
+ *
+ * ## Locking is not something the login path decides
+ *
+ * The failed-attempt policy lives in `iam.auth_record_login_failure` (migration
+ * 0014), which is called from {@link AuthService.recordFailure} below. It counts
+ * the failure and locks the account in one statement, so the two cannot come
+ * apart — see there for why the response does not change on the attempt that
+ * trips it.
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import type { EnvConfig } from '@plantops/config';
 import {
   IamErrorCode,
   SubjectType,
   type TokenPairResponse,
 } from '@plantops/contracts';
 import { IAM_SCHEMA, type LoginFailureReason, type VerifiedClaims } from '@plantops/db';
+import { ENV } from '../config/config.module';
 import { IamException } from '../common/iam.exception';
 import { entityManager } from '../common/transaction-context';
 import { DatabaseService } from '../database/database.service';
@@ -84,6 +100,7 @@ export class AuthService {
   private readonly logger = new Logger(AuthService.name);
 
   constructor(
+    @Inject(ENV) private readonly env: EnvConfig,
     private readonly tokens: TokenService,
     private readonly sessions: SessionService,
     private readonly database: DatabaseService,
@@ -205,22 +222,60 @@ export class AuthService {
    * A failure to write is logged and swallowed. Refusing the login is the
    * security-relevant outcome, and turning a lost audit row into a 500 would
    * hand an attacker a way to distinguish one failure mode from another.
+   *
+   * ## It is also where the account gets locked
+   *
+   * Since Session 10 the same function counts the failure and, at
+   * `LOGIN_MAX_FAILED_ATTEMPTS`, sets `status = 'locked'` and revokes the
+   * account's sessions (migration 0014). Counting belongs there rather than
+   * here for the reason the audit does — it is the only path that can read and
+   * write the row without an RLS context — and it belongs in the *same*
+   * statement as the audit so that a lock and the failure that caused it cannot
+   * come apart.
+   *
+   * What comes back is the sessions the lock killed, because the revoked-`sid`
+   * cache lives outside Postgres and only this side can publish to it. That
+   * publish is best-effort: the database is authoritative and the guard falls
+   * back to it, so a Redis outage delays a force-logout rather than losing it.
+   *
+   * Note that the caller still receives the generic 401 on the attempt that
+   * locks the account, not the 423. Announcing the lock the moment it happens
+   * would confirm to whoever provoked it that the address is real — the
+   * enumeration hint this whole endpoint is shaped around denying. The 423 is
+   * reserved for someone who presents the *correct* password and is told why it
+   * is not working (see {@link AuthService.classify}).
    */
   private async recordFailure(
     input: LoginInput,
     reason: LoginFailureReason,
   ): Promise<void> {
+    let revoked: string[] = [];
     try {
-      await this.database.dataSource.query(
-        `select ${S}.auth_record_login_failure($1, $2, $3)`,
-        [input.clientSlug, input.email, reason],
-      );
+      const rows = (await this.database.dataSource.query(
+        `select ${S}.auth_record_login_failure($1, $2, $3, $4) as revoked_sessions`,
+        [
+          input.clientSlug,
+          input.email,
+          reason,
+          this.env.LOGIN_MAX_FAILED_ATTEMPTS,
+        ],
+      )) as { revoked_sessions: string[] | null }[];
+      revoked = rows[0]?.revoked_sessions ?? [];
     } catch (error) {
       this.logger.error(
         `Failed to audit a login failure (${reason}): ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
+      return;
+    }
+
+    if (revoked.length > 0) {
+      this.logger.warn(
+        `An account was locked after ${this.env.LOGIN_MAX_FAILED_ATTEMPTS} failed ` +
+          `login attempts; ${revoked.length} session(s) were revoked`,
+      );
+      await this.sessions.publishRevocations(revoked);
     }
   }
 }

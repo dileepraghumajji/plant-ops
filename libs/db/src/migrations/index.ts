@@ -23,6 +23,7 @@ import { AuditWriteFn1786406400010 } from './0010-audit-write-fn.js';
 import { BootstrapSeed1786406400011 } from './0011-bootstrap-seed.js';
 import { AuthFunctions1786406400012 } from './0012-auth-functions.js';
 import { RefreshRotation1786406400013 } from './0013-refresh-rotation.js';
+import { PasswordResetAccountState1786406400014 } from './0014-password-reset-account-state.js';
 
 export { ENUM_VALUES, Extensions1786406400001 } from './0001-extensions-enums.js';
 export { RegistryTables1786406400002 } from './0002-registry-tables.js';
@@ -63,6 +64,16 @@ export {
   REFRESH_OUTCOMES,
   type RefreshOutcome,
 } from './0013-refresh-rotation.js';
+export {
+  PasswordResetAccountState1786406400014,
+  ACCOUNT_AUDIT_ACTIONS,
+  AUTH_COMPLETE_PASSWORD_RESET_SIGNATURE,
+  AUTH_RECORD_LOGIN_FAILURE_V2_SIGNATURE,
+  AUTH_REQUEST_PASSWORD_RESET_SIGNATURE,
+  AUTO_LOCK_REASON,
+  PASSWORD_RESET_OUTCOMES,
+  type PasswordResetOutcome,
+} from './0014-password-reset-account-state.js';
 
 export const migrations = [
   Extensions1786406400001,
@@ -78,4 +89,5 @@ export const migrations = [
   BootstrapSeed1786406400011,
   AuthFunctions1786406400012,
   RefreshRotation1786406400013,
+  PasswordResetAccountState1786406400014,
 ] as const;

@@ -154,7 +154,14 @@ describeWithDb('RLS isolation, as the app role', () => {
       expect(rows.length).toBeGreaterThanOrEqual(2);
     });
 
-    it.each(['user', 'session', 'user_identity', 'scope_node', 'role_binding'])(
+    it.each([
+      'user',
+      'session',
+      'user_identity',
+      'scope_node',
+      'role_binding',
+      'password_reset_token',
+    ])(
       'isolates %s the same way',
       async (table) => {
         const rows = await withContext(

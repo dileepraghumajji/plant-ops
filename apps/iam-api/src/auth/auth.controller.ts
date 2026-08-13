@@ -23,9 +23,11 @@
  *
  * The limit is per caller IP, and IP is a blunt instrument: a plant behind one
  * NAT shares a bucket, so it is set at ten a minute rather than the three that
- * would be ideal against a single attacker. The real credential-stuffing
- * defence is per-account and arrives in Session 10 (failed-attempt lockout,
- * Doc 03 §8) — this is the blunt outer layer, not the answer.
+ * would be ideal against a single attacker. It is the outer layer, not the
+ * answer. The per-account half is the failed-attempt lockout in
+ * `iam.auth_record_login_failure` (migration 0014), and the two cover different
+ * cases: this bounds one attacker against the whole tenant, that bounds the
+ * whole internet against one account.
  */
 
 import {
@@ -50,7 +52,13 @@ import { IamException } from '../common/iam.exception';
 import { RateLimit } from '../common/rate-limit.decorator';
 import { verifiedClaimsOf } from '../common/verified-claims';
 import { AuthAuditAction, AuthService } from './auth.service';
-import { LoginDto, RefreshDto } from './auth.dto';
+import {
+  LoginDto,
+  PasswordResetDto,
+  PasswordResetRequestDto,
+  RefreshDto,
+} from './auth.dto';
+import { PasswordResetService } from './password-reset.service';
 import { RefreshService } from './refresh.service';
 import { SessionService } from './session.service';
 
@@ -83,12 +91,32 @@ const REFRESH_RATE_LIMIT = { limit: 30, windowSeconds: 60 } as const;
  */
 const SESSION_RATE_LIMIT = { limit: 60, windowSeconds: 60 } as const;
 
+/**
+ * Reset is the tightest limit on the surface, and it fails **closed**.
+ *
+ * Requesting a reset is unauthenticated, costs an email, and invalidates the
+ * account's outstanding token as a side effect — so an unthrottled loop is both
+ * a mail-bomb against a person and a way to make sure no reset link a real user
+ * clicks is ever still current. Five a minute is generous for a human who
+ * mistypes their address twice and useless as an amplifier.
+ *
+ * Completion shares the bucket. It is a guess against a 256-bit secret, so the
+ * limit is not what makes guessing hopeless, but there is no legitimate caller
+ * who submits the same link six times in a minute either.
+ */
+const PASSWORD_RESET_RATE_LIMIT = {
+  limit: 5,
+  windowSeconds: 60,
+  failOpen: false,
+} as const;
+
 @Controller(AUTH_ROUTE_PREFIX)
 export class AuthController {
   constructor(
     private readonly auth: AuthService,
     private readonly refreshes: RefreshService,
     private readonly sessions: SessionService,
+    private readonly passwordResets: PasswordResetService,
   ) {}
 
   @Post('login')
@@ -120,6 +148,52 @@ export class AuthController {
   @RateLimit(REFRESH_RATE_LIMIT)
   refresh(@Body() body: RefreshDto): Promise<TokenPairResponse> {
     return this.refreshes.refresh(body.refresh_token);
+  }
+
+  /**
+   * Starts a password reset (Doc 03 §7, Doc 06 §3).
+   *
+   * **202, always.** Unknown tenant, unknown address, locked account, disabled
+   * account, mail transport down — every one of them accepted, with no body.
+   * Doc 06 §3 pins the status and the reason is the one behind login's generic
+   * 401: an endpoint that answers differently for an address that exists is a
+   * staff directory anyone can query, and this one needs no password to do it.
+   *
+   * `@Public()`, necessarily: somebody who cannot log in is exactly who is here.
+   */
+  @Post('password/reset-request')
+  @Public()
+  @HttpCode(HttpStatus.ACCEPTED)
+  @RateLimit(PASSWORD_RESET_RATE_LIMIT)
+  async requestPasswordReset(@Body() body: PasswordResetRequestDto): Promise<void> {
+    await this.passwordResets.request({
+      email: body.email,
+      clientSlug: body.client_slug,
+    });
+  }
+
+  /**
+   * Completes a password reset (Doc 03 §7, Doc 06 §3).
+   *
+   * 204 on success, and one 401 for every way it can fail. The new password is
+   * policy-checked by the DTO before it arrives — Doc 03 §7's "enforce minimum
+   * policy at the API" — so a 400 here is about the password being too short,
+   * never about the token.
+   *
+   * Succeeding logs the account out everywhere (Doc 03 §6). A reset is either a
+   * forgotten password or a stolen one, and the second case is what decides the
+   * behaviour: leaving live sessions running would change nothing for whoever is
+   * already inside.
+   */
+  @Post('password/reset')
+  @Public()
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @RateLimit(PASSWORD_RESET_RATE_LIMIT)
+  async completePasswordReset(@Body() body: PasswordResetDto): Promise<void> {
+    await this.passwordResets.complete({
+      token: body.token,
+      newPassword: body.new_password,
+    });
   }
 
   /** Revokes the session the caller's own token belongs to. */
