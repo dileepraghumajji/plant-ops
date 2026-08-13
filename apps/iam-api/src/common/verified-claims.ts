@@ -13,9 +13,10 @@
  * `Object.assign(req, req.body)` anywhere in the stack can plant claims on a
  * request, because nothing else can name the key.
  *
- * Until Session 8 wires the guard, nothing calls the setter, so the
- * transaction wrapper runs with no context and RLS denies every tenant row.
- * That is the correct inert state: open, unauthenticated, *and* empty.
+ * The setter is called from exactly one place: `RequestClaimsSink`, the adapter
+ * `AuthGuard` hands verified claims to. A `@Public()` route still reaches the
+ * transaction wrapper with nothing here, so it runs with no RLS context and
+ * every tenant policy matches nothing — open, unauthenticated, *and* empty.
  */
 
 import type { VerifiedClaims } from '@plantops/db';

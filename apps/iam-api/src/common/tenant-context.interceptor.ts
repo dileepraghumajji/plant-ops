@@ -16,21 +16,29 @@
  *
  * ## Unauthenticated requests
  *
- * A request with no verified claims still gets a transaction, and still gets
- * no RLS context. The result is that every tenant-scoped policy evaluates
- * against an unset `app.current_client_id` and matches nothing. Opening the
- * transaction anyway is the point: it means the *only* difference between an
- * authenticated and an unauthenticated request is which rows the database is
- * willing to return, rather than whether the mechanism ran at all.
+ * A `@Public()` route — login, the JWKS, the probes — still gets a transaction,
+ * and still gets no RLS context. The result is that every tenant-scoped policy
+ * evaluates against an unset `app.current_client_id` and matches nothing.
+ * Opening the transaction anyway is the point: it means the *only* difference
+ * between an authenticated and an unauthenticated request is which rows the
+ * database is willing to return, rather than whether the mechanism ran at all.
  *
- * Until Session 8 provides tokens, that is every request — the wrapper is
- * live but inert, exactly as the roadmap describes.
+ * Login reaches its own data through the migration-0012 definer functions
+ * precisely because this leaves it, correctly, able to read nothing.
+ *
+ * ## Post-commit work
+ *
+ * Callbacks registered with `afterCommit()` run here, after `COMMIT` returns.
+ * That ordering is required wherever a change is published outside Postgres —
+ * a revoked `sid` reaching the cache today (Doc 03 §6), the grant invalidation
+ * fan-out in Session 22 (Doc 04 §7.1).
  */
 
 import {
   type CallHandler,
   type ExecutionContext,
   Injectable,
+  Logger,
   type NestInterceptor,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
@@ -45,6 +53,8 @@ import { verifiedClaimsOf } from './verified-claims';
 
 @Injectable()
 export class TenantContextInterceptor implements NestInterceptor {
+  private readonly logger = new Logger(TenantContextInterceptor.name);
+
   constructor(
     private readonly database: DatabaseService,
     private readonly reflector: Reflector,
@@ -72,14 +82,22 @@ export class TenantContextInterceptor implements NestInterceptor {
       const claims = verifiedClaimsOf(context.switchToHttp().getRequest());
       if (claims) await applyRlsContext(runner.manager, claims);
 
-      const result = await runInTransactionContext(runner.manager, () =>
+      let deferred: Array<() => void | Promise<void>> = [];
+      const result = await runInTransactionContext(runner.manager, async (scope) => {
         // `defaultIfEmpty` covers handlers that return nothing — a 204 route
         // completes its observable without emitting, and `firstValueFrom`
         // rejects on an empty one, which would roll back a successful write.
-        firstValueFrom(next.handle().pipe(defaultIfEmpty(undefined))),
-      );
+        const value = await firstValueFrom(
+          next.handle().pipe(defaultIfEmpty(undefined)),
+        );
+        deferred = scope.afterCommit;
+        return value;
+      });
 
       await runner.commitTransaction();
+      // Only now: everything registered here publishes a fact to the world
+      // outside Postgres, and until COMMIT returns there is no such fact.
+      await this.runAfterCommit(deferred);
       return result;
     } catch (error) {
       // Rollback is best-effort: if the transaction is already aborted (or the
@@ -91,6 +109,31 @@ export class TenantContextInterceptor implements NestInterceptor {
       throw error;
     } finally {
       await runner.release();
+    }
+  }
+
+  /**
+   * Runs the deferred callbacks, and never lets one fail the request.
+   *
+   * The write is already committed by the time these run, so throwing here
+   * would answer an error for a request that succeeded — and would do it for a
+   * cache publish, which is recoverable by design (every consumer of these
+   * caches has a database fallback). Each failure is logged loudly instead,
+   * because a silent one is how a stale cache becomes permanent.
+   */
+  private async runAfterCommit(
+    callbacks: Array<() => void | Promise<void>>,
+  ): Promise<void> {
+    for (const callback of callbacks) {
+      try {
+        await callback();
+      } catch (error) {
+        this.logger.error(
+          `A post-commit callback failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
     }
   }
 }

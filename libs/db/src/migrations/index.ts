@@ -21,6 +21,7 @@ import { RlsCatalog1786406400008 } from './0008-rls-catalog.js';
 import { RlsJoinTables1786406400009 } from './0009-rls-join-tables.js';
 import { AuditWriteFn1786406400010 } from './0010-audit-write-fn.js';
 import { BootstrapSeed1786406400011 } from './0011-bootstrap-seed.js';
+import { AuthFunctions1786406400012 } from './0012-auth-functions.js';
 
 export { ENUM_VALUES, Extensions1786406400001 } from './0001-extensions-enums.js';
 export { RegistryTables1786406400002 } from './0002-registry-tables.js';
@@ -45,6 +46,15 @@ export {
   PLATFORM_ROLE_NAME,
   PLATFORM_SERVICE_ACCOUNT_KEY,
 } from './0011-bootstrap-seed.js';
+export {
+  AuthFunctions1786406400012,
+  AUTH_BEGIN_SESSION_SIGNATURE,
+  AUTH_LOOKUP_PASSWORD_IDENTITY_SIGNATURE,
+  AUTH_RECORD_LOGIN_FAILURE_SIGNATURE,
+  LOGIN_FAILURE_REASONS,
+  SESSION_IS_REVOKED_SIGNATURE,
+  type LoginFailureReason,
+} from './0012-auth-functions.js';
 
 export const migrations = [
   Extensions1786406400001,
@@ -58,4 +68,5 @@ export const migrations = [
   RlsJoinTables1786406400009,
   AuditWriteFn1786406400010,
   BootstrapSeed1786406400011,
+  AuthFunctions1786406400012,
 ] as const;

@@ -13,11 +13,15 @@
  *   response to a dependency it cannot serve without. It stays alive and
  *   rejoins when the dependency returns.
  *
- * Both are exempt from the throttle and from the per-request transaction.
- * A throttled probe reports the throttle as an outage, hardest during the
- * traffic spike that made it matter; and `/ready`'s job is to find out whether
- * the database answers at all, which it cannot do from inside a transaction
- * on that database.
+ * Both are exempt from authentication, from the throttle, and from the
+ * per-request transaction. An orchestrator's probe holds no credential and
+ * never will; a throttled probe reports the throttle as an outage, hardest
+ * during the traffic spike that made it matter; and `/ready`'s job is to find
+ * out whether the database answers at all, which it cannot do from inside a
+ * transaction on that database.
+ *
+ * The exemption costs nothing: neither route reads a tenant row, and `/ready`
+ * reports only which dependency is up.
  *
  * Neither uses the Doc 06 §2 error envelope: a probe consumes status codes,
  * and a readiness report says *which* dependency is down, which an error code
@@ -25,6 +29,7 @@
  */
 
 import { Controller, Get, Res } from '@nestjs/common';
+import { Public } from '@plantops/auth-kit';
 import type { Response } from 'express';
 import { SkipRateLimit } from '../common/rate-limit.decorator';
 import { SkipTransaction } from '../common/transaction-context';
@@ -37,6 +42,7 @@ export interface LivenessReport {
 }
 
 @Controller()
+@Public()
 @SkipRateLimit()
 @SkipTransaction()
 export class HealthController {

@@ -1,91 +1,60 @@
 /**
  * Access-token issuance and verification (Doc 03 §1–2, §5–6).
  *
+ * ## What is here, and what moved
+ *
+ * The claim *rules* — the closed seven-claim set, the issuer check, the 60 s
+ * skew leeway — live in `@plantops/auth-kit`, because the IAM is not their only
+ * enforcer: every consuming module verifies the same tokens locally from the
+ * published JWKS (Doc 06 §11), and two implementations of "the same" checks is
+ * how a signer and a verifier drift apart. What stays here is what only the
+ * signer can do: hold the private key, choose the TTL, and stamp the times.
+ *
  * ## The claim set is closed
  *
- * Doc 03 §2 lists exactly seven claims: `iss, sub, sty, cid, sid, iat, exp`.
- * Not "at least" — permissions, roles and scope nodes are *deliberately* absent
- * so that a grant change takes effect on cache invalidation (Doc 04 §7) rather
- * than on token expiry. A token that carried them would be a 15-minute window
- * in which a revoked permission still works, and nothing would report it.
+ * Doc 03 §2 lists exactly seven claims. Not "at least" — permissions, roles and
+ * scope nodes are *deliberately* absent so that a grant change takes effect on
+ * cache invalidation (Doc 04 §7) rather than on token expiry. A token that
+ * carried them would be a 15-minute window in which a revoked permission still
+ * works, and nothing would report it. `assertExactClaims` fails at the point an
+ * extra claim is introduced, rather than letting it survive to production as a
+ * quietly larger token.
  *
- * So the payload is built field by field from a typed input and then checked
- * against `JWT_CLAIM_KEYS` before signing. An extra claim is a spec violation
- * that fails here, at the point it is introduced, instead of surviving to
- * production as a quietly larger token.
+ * ## Revocation is not checked here
  *
- * ## Verification is not the inverse of signing
- *
- * {@link TokenService.verifyAccessToken} does not trust anything it decodes
- * before checking the signature, and re-checks the claim shape afterwards: a
- * token signed by a *legitimate* key is still attacker-influenced if any
- * upstream path ever let a caller choose a claim value. Every field is
- * re-validated on the way in, not just on the way out.
- *
- * Revocation is **not** checked here. `sid` is verified as present and
- * well-formed, but whether that session is still live is the AuthGuard's job
- * against the Redis revocation set (Doc 03 §6, Session 8). Keeping the two
- * apart is what lets consuming modules verify a signature locally without
- * calling the IAM.
+ * `sid` is verified as present and well-formed, but whether that session is
+ * still live is the `AuthGuard`'s job against the Redis revocation set (Doc 03
+ * §6). Keeping the two apart is what lets consuming modules verify a signature
+ * locally without calling the IAM.
  */
 
 import { Inject, Injectable } from '@nestjs/common';
+import {
+  TokenRejection,
+  TokenVerificationError,
+  assertClaimsAcceptable,
+  assertExactClaims,
+  JwsFormatError,
+  parseCompactJws,
+  readAccessTokenClaims,
+  signCompactJws,
+  verifyCompactJws,
+  type TokenVerifier,
+} from '@plantops/auth-kit';
 import type { EnvConfig } from '@plantops/config';
 import {
-  CLOCK_SKEW_LEEWAY_SECONDS,
-  JWT_CLAIM_KEYS,
   JWT_SIGNING_ALGORITHM,
   SubjectType,
   type JwtClaims,
 } from '@plantops/contracts';
 import { ENV } from '../config/config.module';
 import { KeysService } from './keys.service';
-import {
-  JwsFormatError,
-  parseCompactJws,
-  signCompactJws,
-  verifyCompactJws,
-} from './jws';
-
-/** Why a token was refused. Never returned to a caller — see the note below. */
-export const TokenRejection = {
-  /** Not a compact JWS, or its segments do not decode. */
-  MALFORMED: 'malformed',
-  /** Header `alg` is not RS256 (Doc 03 §1). */
-  UNSUPPORTED_ALGORITHM: 'unsupported_algorithm',
-  /** `kid` is not in the published set — refetch JWKS, then reject. */
-  UNKNOWN_KEY: 'unknown_key',
-  /** Signature does not verify under the selected key. */
-  BAD_SIGNATURE: 'bad_signature',
-  /** `exp` has passed, allowing the 60 s leeway. */
-  EXPIRED: 'expired',
-  /** `iat` is in the future beyond the leeway — a clock or a forgery. */
-  NOT_YET_VALID: 'not_yet_valid',
-  /** `iss` is not this IAM. */
-  WRONG_ISSUER: 'wrong_issuer',
-  /** Claim set is not the Doc 03 §2 shape. */
-  BAD_CLAIMS: 'bad_claims',
-} as const;
-export type TokenRejection = (typeof TokenRejection)[keyof typeof TokenRejection];
 
 /**
- * A refused token, with the reason kept **server-side**.
- *
- * The distinction matters at the HTTP boundary: an `unknown_key` and an
- * `expired` must look identical to the caller (both are a bare 401
- * `AUTH_REQUIRED`), because the difference tells an attacker whether a forged
- * `kid` was a near miss. The reason is here for logs, metrics and the
- * refetch-then-reject decision — not for the response body.
+ * Re-exported so the IAM's own code and specs have one import for the token
+ * vocabulary. The definitions are `auth-kit`'s — see the note above.
  */
-export class TokenVerificationError extends Error {
-  constructor(
-    readonly reason: TokenRejection,
-    message: string,
-  ) {
-    super(message);
-    this.name = 'TokenVerificationError';
-  }
-}
+export { TokenRejection, TokenVerificationError };
 
 /** Everything the caller supplies; `iss`, `iat` and `exp` are not theirs to set. */
 export interface IssueAccessTokenInput {
@@ -106,7 +75,7 @@ export interface IssuedAccessToken {
 }
 
 @Injectable()
-export class TokenService {
+export class TokenService implements TokenVerifier {
   constructor(
     @Inject(ENV) private readonly env: EnvConfig,
     private readonly keys: KeysService,
@@ -152,7 +121,9 @@ export class TokenService {
   }
 
   /**
-   * Verifies a token and returns its claims.
+   * Verifies a token and returns its claims. This is the {@link TokenVerifier}
+   * the `AuthGuard` runs inside the IAM — local keys, no JWKS round-trip,
+   * because this process *is* the publisher.
    *
    * Order is deliberate: structure, then algorithm, then key, then signature,
    * and only then the claims. Nothing derived from the payload is acted on
@@ -192,30 +163,14 @@ export class TokenService {
       );
     }
 
-    const claims = readClaims(parsed.payload);
-
-    if (claims.iss !== this.env.JWT_ISSUER) {
-      throw new TokenVerificationError(
-        TokenRejection.WRONG_ISSUER,
-        'Token was issued by a different issuer',
-      );
-    }
-
-    // The 60 s leeway is the shared constant, not a local number: the IAM and
-    // every consuming module must agree, or a token is live in one and expired
-    // in the other at the edges (Doc 03 §6).
-    const seconds = Math.floor(now.getTime() / 1000);
-    if (claims.exp + CLOCK_SKEW_LEEWAY_SECONDS <= seconds) {
-      throw new TokenVerificationError(TokenRejection.EXPIRED, 'Token has expired');
-    }
-    if (claims.iat - CLOCK_SKEW_LEEWAY_SECONDS > seconds) {
-      throw new TokenVerificationError(
-        TokenRejection.NOT_YET_VALID,
-        'Token was issued in the future',
-      );
-    }
-
+    const claims = readAccessTokenClaims(parsed.payload);
+    assertClaimsAcceptable(claims, this.env.JWT_ISSUER, now);
     return claims;
+  }
+
+  /** {@link TokenVerifier} — the guard depends on the interface, not on this class. */
+  verify(token: string, now?: Date): JwtClaims {
+    return this.verifyAccessToken(token, now);
   }
 }
 
@@ -228,81 +183,6 @@ function parse(token: string) {
     }
     throw error;
   }
-}
-
-/**
- * Guards the closed claim set at signing time (Doc 03 §2).
- *
- * Typed input alone does not cover this: a structurally-typed object may carry
- * extra properties at runtime, and `JSON.stringify` would faithfully sign them.
- */
-function assertExactClaims(claims: JwtClaims): Record<string, unknown> {
-  const allowed = new Set<string>(JWT_CLAIM_KEYS);
-  const extra = Object.keys(claims).filter((key) => !allowed.has(key));
-  if (extra.length > 0) {
-    throw new Error(
-      `Access token would carry claims outside Doc 03 §2: ${extra.join(', ')}. ` +
-        'Permissions, roles and scopes are resolved separately and must not be ' +
-        'embedded in a token.',
-    );
-  }
-  return { ...claims };
-}
-
-/** Validates a verified payload against the Doc 03 §2 shape. */
-function readClaims(payload: Record<string, unknown>): JwtClaims {
-  const missing = JWT_CLAIM_KEYS.filter((key) => payload[key] === undefined);
-  if (missing.length > 0) {
-    throw new TokenVerificationError(
-      TokenRejection.BAD_CLAIMS,
-      `Token is missing required claims: ${missing.join(', ')}`,
-    );
-  }
-  // Extra claims are rejected too, not ignored. A token this IAM signed cannot
-  // have them, so their presence means the payload came from somewhere else —
-  // and silently accepting the seven we recognise is how a stale key or a
-  // second issuer goes unnoticed.
-  const allowed = new Set<string>(JWT_CLAIM_KEYS);
-  const extra = Object.keys(payload).filter((key) => !allowed.has(key));
-  if (extra.length > 0) {
-    throw new TokenVerificationError(
-      TokenRejection.BAD_CLAIMS,
-      `Token carries claims outside Doc 03 §2: ${extra.join(', ')}`,
-    );
-  }
-
-  for (const key of ['iss', 'sub', 'cid', 'sid'] as const) {
-    if (typeof payload[key] !== 'string' || payload[key] === '') {
-      throw new TokenVerificationError(
-        TokenRejection.BAD_CLAIMS,
-        `Token claim "${key}" is not a non-empty string`,
-      );
-    }
-  }
-  for (const key of ['iat', 'exp'] as const) {
-    if (typeof payload[key] !== 'number' || !Number.isInteger(payload[key])) {
-      throw new TokenVerificationError(
-        TokenRejection.BAD_CLAIMS,
-        `Token claim "${key}" is not an integer`,
-      );
-    }
-  }
-  if (payload['sty'] !== SubjectType.USER && payload['sty'] !== SubjectType.SERVICE) {
-    throw new TokenVerificationError(
-      TokenRejection.BAD_CLAIMS,
-      'Token claim "sty" is not a known subject type',
-    );
-  }
-
-  return {
-    iss: payload['iss'] as string,
-    sub: payload['sub'] as string,
-    sty: payload['sty'],
-    cid: payload['cid'] as string,
-    sid: payload['sid'] as string,
-    iat: payload['iat'] as number,
-    exp: payload['exp'] as number,
-  };
 }
 
 export { JWT_SIGNING_ALGORITHM };

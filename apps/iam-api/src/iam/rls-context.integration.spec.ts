@@ -20,20 +20,27 @@
  * Read-only — it creates no rows and drops nothing, so it is safe against a
  * database that carries data. It takes the shared advisory lock only to keep
  * `@plantops/db`'s destructive suites from rebuilding the schema underneath it.
+ *
+ * ## Since Session 8: real tokens, real guard
+ *
+ * This suite used to install a fixture guard that read claims from headers.
+ * That is gone — the app now has a genuine `AuthGuard`, and a test that routes
+ * around it would be asserting the RLS behaviour of a pipeline nobody ships.
+ * Tokens are signed here by the app's own `TokenService`, with the keys from
+ * the real environment, so every request below passes verification for the
+ * ordinary reason.
+ *
+ * The subject is the seeded **service** account, and its `sty` matters twice
+ * over: it keeps the suite read-only (a service token's `sid` is ephemeral and
+ * needs no `session` row, Doc 03 §5), and it is what the platform-flag
+ * derivation is written against.
  */
 
-import {
-  type CanActivate,
-  Controller,
-  type ExecutionContext,
-  Get,
-  type INestApplication,
-  Injectable,
-  Module,
-} from '@nestjs/common';
-import { APP_GUARD } from '@nestjs/core';
+import { Controller, Get, type INestApplication, Module } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { Public } from '@plantops/auth-kit';
 import { loadEnv } from '@plantops/config';
+import { SubjectType, type IamErrorResponse } from '@plantops/contracts';
 import {
   IAM_SCHEMA,
   IAM_SCHEMA_TEST_LOCK_ID,
@@ -41,13 +48,13 @@ import {
   PLATFORM_SERVICE_ACCOUNT_KEY,
   RLS_SETTINGS,
   createMigrationDataSource,
-  markClaimsVerified,
 } from '@plantops/db';
+import { randomUUID } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import type { DataSource } from 'typeorm';
 import { AppModule } from '../app/app.module';
+import { TokenService } from '../auth/token.service';
 import { entityManager } from '../common/transaction-context';
-import { setVerifiedClaims } from '../common/verified-claims';
 import type { WhoAmIResponse } from './whoami.controller';
 
 const PLACEHOLDER = /REPLACE_ME|[[\]<>]/;
@@ -62,39 +69,13 @@ const configured =
 const describeWithDb = configured ? describe : describe.skip;
 
 /**
- * Stands in for Session 8's `AuthGuard`: it is the one place allowed to call
- * `markClaimsVerified`, and it hands the result to the request exactly as the
- * real guard will. The claims are read from headers *here and only here* — in
- * a test, from a fixture the test itself wrote — which is why this class
- * cannot exist outside a spec file.
- */
-@Injectable()
-class FixtureAuthGuard implements CanActivate {
-  canActivate(context: ExecutionContext): boolean {
-    const request = context.switchToHttp().getRequest();
-    const sub = request.headers['x-test-sub'];
-    if (typeof sub !== 'string') return true;
-
-    setVerifiedClaims(
-      request,
-      markClaimsVerified({
-        cid: request.headers['x-test-cid'] as string,
-        sub,
-        sty: request.headers['x-test-sty'] === 'user' ? 'user' : 'service',
-        sid: 'test-session',
-      }),
-    );
-    return true;
-  }
-}
-
-/**
  * Reports the RLS context *without* requiring claims — which `/iam/whoami`
  * cannot do, since it 401s first. That is what makes the leak test possible:
  * an unauthenticated request has to be able to look at the settings it should
  * not have inherited.
  */
 @Controller('__ctx')
+@Public()
 class ContextProbeController {
   @Get()
   async read(): Promise<{ clientId: string | null; isPlatformAdmin: string | null }> {
@@ -114,7 +95,6 @@ class ContextProbeController {
 @Module({
   imports: [AppModule],
   controllers: [ContextProbeController],
-  providers: [{ provide: APP_GUARD, useClass: FixtureAuthGuard }],
 })
 class FixtureRootModule {}
 
@@ -128,6 +108,7 @@ describeWithDb(`RLS context over HTTP (${configured ? 'live' : 'skipped: no DATA
   let baseUrl: string;
   let admin: DataSource;
   let platform: PlatformFixture;
+  let tokens: TokenService;
 
   // Migrations, an app boot and a schema read; comfortably past Jest's default.
   jest.setTimeout(60_000);
@@ -176,6 +157,7 @@ describeWithDb(`RLS context over HTTP (${configured ? 'live' : 'skipped: no DATA
     await app.init();
     await app.listen(0);
     baseUrl = `http://127.0.0.1:${(app.getHttpServer().address() as AddressInfo).port}`;
+    tokens = app.get(TokenService);
   });
 
   afterAll(async () => {
@@ -186,21 +168,60 @@ describeWithDb(`RLS context over HTTP (${configured ? 'live' : 'skipped: no DATA
     }
   });
 
-  const whoami = (headers: Record<string, string>) =>
+  /**
+   * A real bearer header for a subject, signed with the deployment's own key.
+   *
+   * `sid` is a fresh uuid with no `session` row behind it, which is exactly
+   * what a service token carries (Doc 03 §5) — so the guard's revocation check
+   * finds nothing to revoke and this suite writes no rows.
+   */
+  const bearer = (
+    subjectId: string,
+    subjectType: SubjectType = SubjectType.SERVICE,
+    clientId: string = platform.clientId,
+  ): Record<string, string> => ({
+    authorization: `Bearer ${
+      tokens.issueAccessToken({
+        subjectId,
+        subjectType,
+        clientId,
+        sessionId: randomUUID(),
+      }).accessToken
+    }`,
+  });
+
+  const whoami = (headers: Record<string, string> = {}) =>
     fetch(`${baseUrl}/iam/whoami`, { headers });
 
   it('rejects an unauthenticated request with AUTH_REQUIRED', async () => {
-    const response = await whoami({});
+    const response = await whoami();
     expect(response.status).toBe(401);
-    expect((await response.json()).error.code).toBe('AUTH_REQUIRED');
+    expect(((await response.json()) as IamErrorResponse).error.code).toBe('AUTH_REQUIRED');
+  });
+
+  it('rejects a token this deployment did not sign', async () => {
+    // The forgery that would matter: a well-formed token from elsewhere. It is
+    // refused with the same bare 401 as a missing one — the guard never says
+    // which check failed (Doc 06 §2).
+    const [header, payload] = tokens
+      .issueAccessToken({
+        subjectId: platform.serviceAccountId,
+        subjectType: SubjectType.SERVICE,
+        clientId: platform.clientId,
+        sessionId: randomUUID(),
+      })
+      .accessToken.split('.');
+
+    const response = await whoami({
+      authorization: `Bearer ${header}.${payload}.${Buffer.from('forged').toString('base64url')}`,
+    });
+
+    expect(response.status).toBe(401);
+    expect(((await response.json()) as IamErrorResponse).error.code).toBe('AUTH_REQUIRED');
   });
 
   it('sets the tenant Postgres sees to the token`s cid, inside the request transaction', async () => {
-    const response = await whoami({
-      'x-test-cid': platform.clientId,
-      'x-test-sub': platform.serviceAccountId,
-      'x-test-sty': 'service',
-    });
+    const response = await whoami(bearer(platform.serviceAccountId));
     const body = (await response.json()) as WhoAmIResponse;
 
     expect(response.status).toBe(200);
@@ -210,11 +231,7 @@ describeWithDb(`RLS context over HTTP (${configured ? 'live' : 'skipped: no DATA
   });
 
   it('leaves app.current_user_id null for a service subject (Doc 07 §6)', async () => {
-    const response = await whoami({
-      'x-test-cid': platform.clientId,
-      'x-test-sub': platform.serviceAccountId,
-      'x-test-sty': 'service',
-    });
+    const response = await whoami(bearer(platform.serviceAccountId));
     const body = (await response.json()) as WhoAmIResponse;
 
     // The audit writer distinguishes a human from a machine by this being
@@ -224,11 +241,7 @@ describeWithDb(`RLS context over HTTP (${configured ? 'live' : 'skipped: no DATA
   });
 
   it('derives the platform flag from a binding, for the seeded platform identity', async () => {
-    const response = await whoami({
-      'x-test-cid': platform.clientId,
-      'x-test-sub': platform.serviceAccountId,
-      'x-test-sty': 'service',
-    });
+    const response = await whoami(bearer(platform.serviceAccountId));
 
     expect(((await response.json()) as WhoAmIResponse).isPlatformAdmin).toBe(true);
   });
@@ -237,11 +250,7 @@ describeWithDb(`RLS context over HTTP (${configured ? 'live' : 'skipped: no DATA
     // The attack the derivation exists to defeat: a valid token whose `cid`
     // names the platform tenant does not confer platform authority — only a
     // binding at the platform scope root does (Doc 04 §10).
-    const response = await whoami({
-      'x-test-cid': platform.clientId,
-      'x-test-sub': '00000000-0000-4000-8000-000000000000',
-      'x-test-sty': 'service',
-    });
+    const response = await whoami(bearer('00000000-0000-4000-8000-000000000000'));
 
     expect(((await response.json()) as WhoAmIResponse).isPlatformAdmin).toBe(false);
   });
@@ -252,14 +261,15 @@ describeWithDb(`RLS context over HTTP (${configured ? 'live' : 'skipped: no DATA
     // and hands it to whoever is given that connection next. The pool holds
     // ten connections, so twelve unauthenticated probes after an authenticated
     // request will certainly be handed a used one back.
-    const authenticated = await fetch(`${baseUrl}/__ctx`, {
-      headers: {
-        'x-test-cid': platform.clientId,
-        'x-test-sub': platform.serviceAccountId,
-        'x-test-sty': 'service',
-      },
-    });
-    expect((await authenticated.json()).clientId).toBe(platform.clientId);
+    //
+    // The authenticated half goes through `/iam/whoami` rather than the probe:
+    // `/__ctx` is `@Public()`, and a public route is genuinely unauthenticated
+    // — the guard skips it and attaches no claims even when a valid token is
+    // offered. That is the property being relied on for the second half.
+    const authenticated = await whoami(bearer(platform.serviceAccountId));
+    expect(((await authenticated.json()) as WhoAmIResponse).clientId).toBe(
+      platform.clientId,
+    );
 
     for (let i = 0; i < 12; i += 1) {
       const probe = await fetch(`${baseUrl}/__ctx`);

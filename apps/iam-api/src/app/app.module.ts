@@ -10,18 +10,40 @@
  *
  * 1. `RequestIdMiddleware` — first, so everything after it has an id to log
  *    and to put in an error envelope.
- * 2. `RateLimitGuard` — a guard, so a throttled request is rejected before a
- *    transaction is opened or a body is parsed. Shedding load after paying for
- *    the work is not shedding load.
- * 3. `TenantContextInterceptor` — opens the transaction and applies the RLS
- *    context. After the guard, before the handler.
- * 4. `ZodValidationPipe` — parses and strips the body.
- * 5. `HttpExceptionFilter` — turns whatever came out of all of the above into
+ * 2. `AuthGuard` — verifies the bearer token and checks the session against the
+ *    revocation cache (Doc 03 §6). Deny-by-default: a route is authenticated
+ *    unless it carries `@Public()`.
+ * 3. `RateLimitGuard` — still before any transaction or body parsing, so a
+ *    throttled request is rejected before the expensive work; shedding load
+ *    after paying for it is not shedding load.
+ * 4. `TenantContextInterceptor` — opens the transaction and applies the RLS
+ *    context from the claims the guard established. After the guards, before
+ *    the handler.
+ * 5. `ZodValidationPipe` — parses and strips the body.
+ * 6. `HttpExceptionFilter` — turns whatever came out of all of the above into
  *    the Doc 06 §2 envelope.
+ *
+ * ## Why authentication runs before throttling
+ *
+ * Nest runs global guards in declaration order, so this array *is* the order.
+ * Putting `AuthGuard` first is what lets `RateLimitGuard` key its counters by
+ * `sub` rather than by IP — which matters because IP is a poor identity here:
+ * a plant's terminals share one NAT address and would share one budget, while
+ * a single stolen credential would escape its budget simply by moving between
+ * addresses.
+ *
+ * The cost of that order is that an unauthenticated flood pays for a signature
+ * verification before being refused. An RSA-2048 verify is tens of
+ * microseconds against a rate limiter's Redis round-trip, so the trade is
+ * lopsided in favour of the better bucketing. The one genuinely expensive
+ * unauthenticated path — argon2id on `POST /auth/login` — is `@Public()` and so
+ * never reaches the verifier at all; it is protected by its own tight
+ * fail-closed limit instead.
  */
 
 import { type MiddlewareConsumer, Module, type NestModule } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR, APP_PIPE } from '@nestjs/core';
+import { AuthGuard } from '@plantops/auth-kit';
 import { AuthModule } from '../auth/auth.module';
 import { HttpExceptionFilter } from '../common/http-exception.filter';
 import { RequestIdMiddleware } from '../common/request-id.middleware';
@@ -45,6 +67,8 @@ import { RedisModule } from '../redis/redis.module';
   ],
   providers: [
     { provide: APP_FILTER, useClass: HttpExceptionFilter },
+    // Order-sensitive: see the note above. AuthGuard, then the throttle.
+    { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_GUARD, useClass: RateLimitGuard },
     { provide: APP_INTERCEPTOR, useClass: TenantContextInterceptor },
     { provide: APP_PIPE, useClass: ZodValidationPipe },

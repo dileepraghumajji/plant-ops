@@ -19,14 +19,50 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { SetMetadata } from '@nestjs/common';
 import type { EntityManager } from 'typeorm';
 
-const storage = new AsyncLocalStorage<EntityManager>();
+/** What the request's transaction carries besides its manager. */
+interface TransactionScope {
+  manager: EntityManager;
+  /** Work deferred until the transaction has actually committed. */
+  afterCommit: Array<() => void | Promise<void>>;
+}
+
+const storage = new AsyncLocalStorage<TransactionScope>();
 
 /** Runs `work` with `manager` as the ambient transaction. */
 export function runInTransactionContext<T>(
   manager: EntityManager,
-  work: () => Promise<T>,
+  work: (scope: TransactionScope) => Promise<T>,
 ): Promise<T> {
-  return storage.run(manager, work);
+  const scope: TransactionScope = { manager, afterCommit: [] };
+  return storage.run(scope, () => work(scope));
+}
+
+/**
+ * Defers `callback` until this request's transaction commits.
+ *
+ * For anything that publishes a change to the world outside Postgres — a
+ * revoked `sid` reaching the cache (Doc 03 §6), and from Session 22 the
+ * `perms.invalidated` fan-out after a scope move (Doc 04 §7.1). Running such a
+ * publish inline is a correctness bug in both directions: a rollback leaves the
+ * outside world believing a change that never happened, and a reader racing the
+ * commit repopulates its cache from pre-change state.
+ *
+ * Callbacks run after `COMMIT` returns, outside the transaction and outside the
+ * response — the client has its answer by then. A callback that throws is
+ * logged by the interceptor and otherwise ignored: the committed row is the
+ * record of truth, and a failed cache publish must not turn a successful
+ * request into an error.
+ */
+export function afterCommit(callback: () => void | Promise<void>): void {
+  const scope = storage.getStore();
+  if (scope === undefined) {
+    throw new Error(
+      'afterCommit() was called outside a request transaction; there is no ' +
+        'commit to wait for, and running the callback now would publish a ' +
+        'change that may never be written.',
+    );
+  }
+  scope.afterCommit.push(callback);
 }
 
 /**
@@ -37,7 +73,7 @@ export function runInTransactionContext<T>(
  * without an RLS context.
  */
 export function entityManager(): EntityManager {
-  const manager = storage.getStore();
+  const manager = storage.getStore()?.manager;
   if (manager === undefined) {
     throw new Error(
       'No transaction in scope. Database work must run inside the per-request ' +

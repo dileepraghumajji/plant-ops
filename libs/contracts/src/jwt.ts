@@ -87,6 +87,35 @@ export interface AccessTokenResponse {
 }
 
 /**
+ * One row of `GET /auth/sessions` (Doc 06 §3).
+ *
+ * Note what is absent: `refresh_token_hash`. A session list is a security
+ * screen — "where am I logged in, and what do I want to kill" — and it is
+ * rendered in a browser. The hash is the credential's stored form; nothing that
+ * can be replayed or brute-forced belongs in a response that exists to *show*
+ * sessions (Doc 10 §8).
+ */
+export interface SessionDTO {
+  /** The `sid` claim of tokens issued for this session. */
+  id: string;
+  /** e.g. "Gate-3 Terminal" — what makes the list actionable. */
+  device_label: string | null;
+  /** ISO-8601. */
+  issued_at: string;
+  expires_at: string;
+  /** Set once revoked, and never cleared. */
+  revoked_at: string | null;
+  /**
+   * True for the session the calling token belongs to.
+   *
+   * Without it a user revoking "everything else" has no way to tell which row
+   * is the browser they are looking at — and logging yourself out while trying
+   * to log a lost terminal out is the mistake this flag exists to prevent.
+   */
+  current: boolean;
+}
+
+/**
  * `POST /iam/introspect` response (Doc 06 §11). Inactive tokens carry no
  * identity fields — never leak subject data for a token that failed
  * verification.

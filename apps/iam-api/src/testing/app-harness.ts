@@ -21,16 +21,32 @@
 import { type INestApplication, Module, type Type } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { type EnvConfig, parseEnv } from '@plantops/config';
+import { SubjectType } from '@plantops/contracts';
+import { generateKeyPairSync, randomUUID } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import { AppModule } from '../app/app.module';
+import { TokenService } from '../auth/token.service';
 import { ENV } from '../config/config.module';
 import { DatabaseService } from '../database/database.service';
 import { RedisService } from '../redis/redis.service';
 
-const PRIVATE_KEY =
-  '-----BEGIN PRIVATE KEY-----\nMIIBVgIBADANBg\n-----END PRIVATE KEY-----';
-const PUBLIC_KEY =
-  '-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhki\n-----END PUBLIC KEY-----';
+/**
+ * A real keypair, generated once for the process.
+ *
+ * It used to be two PEM-shaped strings, which was enough while nothing verified
+ * anything. Since Session 8 the global `AuthGuard` verifies a signature on
+ * every non-`@Public()` route, so a token has to be genuinely signable — and a
+ * fake key would make every authenticated test pass or fail for the wrong
+ * reason. 2048-bit generation costs ~100 ms once per suite.
+ */
+const TEST_KEYPAIR = generateKeyPairSync('rsa', {
+  modulusLength: 2048,
+  publicKeyEncoding: { type: 'spki', format: 'pem' },
+  privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+});
+
+const PRIVATE_KEY = TEST_KEYPAIR.privateKey;
+const PUBLIC_KEY = TEST_KEYPAIR.publicKey;
 
 /**
  * A valid environment that owes nothing to the developer's `.env`. Tests that
@@ -73,6 +89,16 @@ export class FakeDatabaseService {
   };
 
   readonly dataSource = {
+    /**
+     * Pool-level queries — the ones that deliberately run *outside* the request
+     * transaction: `AuthGuard`'s revocation fallback, and the failed-login
+     * audit that must survive the rollback its own 401 causes.
+     */
+    query: (sql: string, parameters?: unknown[]): Promise<unknown[]> => {
+      this.queries.push({ sql, parameters });
+      return Promise.resolve(this.rows.shift() ?? []);
+    },
+
     createQueryRunner: () => {
       let active = false;
       return {
@@ -110,8 +136,23 @@ export class FakeRedisService {
   /** Set to make every command reject, standing in for an outage. */
   failing = false;
   readonly counters = new Map<string, number>();
+  /** Plain keys — the revoked-`sid` entries the guard reads (Doc 03 §6). */
+  readonly keys = new Map<string, string>();
 
   readonly client = {
+    // `set`/`exists` back the revocation cache. Behavioural like the counter
+    // fake: a test can revoke a session and watch the guard refuse the next
+    // request, which a stub returning `0` could never show.
+    set: async (key: string, value: string): Promise<'OK'> => {
+      if (this.failing) throw new Error('redis unavailable');
+      this.keys.set(key, value);
+      return 'OK';
+    },
+    exists: async (key: string): Promise<number> => {
+      if (this.failing) throw new Error('redis unavailable');
+      return this.keys.has(key) ? 1 : 0;
+    },
+
     multi: () => {
       const commands: Array<() => unknown> = [];
       const chain = {
@@ -148,6 +189,21 @@ export class FakeRedisService {
   }
 }
 
+/** Who a minted test token claims to be. Every field has a usable default. */
+export interface TestSubject {
+  subjectId?: string;
+  subjectType?: SubjectType;
+  clientId?: string;
+  sessionId?: string;
+}
+
+export interface IssuedTestToken {
+  accessToken: string;
+  /** Spreadable straight into a `fetch` init. */
+  headers: { authorization: string };
+  claims: { sub: string; cid: string; sid: string; sty: SubjectType };
+}
+
 export interface Harness {
   app: INestApplication;
   /** `http://127.0.0.1:<port>` — the app is on a port the OS picked. */
@@ -156,6 +212,14 @@ export interface Harness {
   redis: FakeRedisService;
   /** `fetch`, with the base URL already applied. */
   get(path: string, init?: RequestInit): Promise<Response>;
+  /**
+   * A genuinely signed access token for a made-up subject.
+   *
+   * Signed by the app's own `TokenService` with the harness keypair, so it
+   * passes the real guard for the real reason. There is no back door here: a
+   * test cannot bypass verification, only satisfy it.
+   */
+  tokenFor(subject?: TestSubject): IssuedTestToken;
   close(): Promise<void>;
 }
 
@@ -199,6 +263,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 
   const address = app.getHttpServer().address() as AddressInfo;
   const baseUrl = `http://127.0.0.1:${address.port}`;
+  const tokens = app.get(TokenService);
 
   return {
     app,
@@ -206,6 +271,27 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
     database,
     redis,
     get: (path, init) => fetch(`${baseUrl}${path}`, init),
+
+    tokenFor(subject: TestSubject = {}): IssuedTestToken {
+      const input = {
+        subjectId: subject.subjectId ?? randomUUID(),
+        subjectType: subject.subjectType ?? SubjectType.USER,
+        clientId: subject.clientId ?? randomUUID(),
+        sessionId: subject.sessionId ?? randomUUID(),
+      };
+      const issued = tokens.issueAccessToken(input);
+      return {
+        accessToken: issued.accessToken,
+        headers: { authorization: `Bearer ${issued.accessToken}` },
+        claims: {
+          sub: input.subjectId,
+          cid: input.clientId,
+          sid: input.sessionId,
+          sty: input.subjectType,
+        },
+      };
+    },
+
     close: () => app.close(),
   };
 }

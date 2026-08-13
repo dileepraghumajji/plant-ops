@@ -8,11 +8,13 @@
  */
 
 import { Controller, Get } from '@nestjs/common';
+import { Public } from '@plantops/auth-kit';
 import { IamErrorCode, type IamErrorResponse } from '@plantops/contracts';
 import { RateLimit } from './rate-limit.decorator';
 import { type Harness, createHarness, testEnv } from '../testing/app-harness';
 
 @Controller('__throttled')
+@Public()
 class ThrottledController {
   @Get('default')
   onDefault(): string {
@@ -32,7 +34,17 @@ class ThrottledController {
   }
 }
 
-const controllers = [ThrottledController];
+/** Authenticated, to exercise the per-subject bucket the guard order enables. */
+@Controller('__throttled-auth')
+class AuthenticatedThrottledController {
+  @Get()
+  @RateLimit({ limit: 2, windowSeconds: 60 })
+  hit(): string {
+    return 'ok';
+  }
+}
+
+const controllers = [ThrottledController, AuthenticatedThrottledController];
 
 describe('rate limiting', () => {
   let harness: Harness;
@@ -80,6 +92,30 @@ describe('rate limiting', () => {
     await harness.get('/__throttled/tight');
 
     expect((await harness.get('/__throttled/default')).status).toBe(200);
+  });
+
+  it('gives each authenticated subject its own budget, not one shared by IP', async () => {
+    // This is what putting AuthGuard ahead of the throttle buys (see
+    // `app.module.ts`): every request in this test comes from the same address,
+    // so an IP-keyed limiter would have exhausted the budget before `other`
+    // ever ran. A plant's terminals share a NAT address; they must not share a
+    // rate-limit bucket.
+    const subject = harness.tokenFor();
+    const other = harness.tokenFor();
+
+    for (let i = 0; i < 2; i += 1) {
+      const ok = await harness.get('/__throttled-auth', { headers: subject.headers });
+      expect(ok.status).toBe(200);
+    }
+    const throttled = await harness.get('/__throttled-auth', {
+      headers: subject.headers,
+    });
+    expect(throttled.status).toBe(429);
+
+    const unaffected = await harness.get('/__throttled-auth', {
+      headers: other.headers,
+    });
+    expect(unaffected.status).toBe(200);
   });
 
   it('exempts the probes — a throttled /ready reports the throttle as an outage', async () => {
