@@ -395,6 +395,20 @@ describe('session (Doc 01 §4.7, Doc 03 §6)', () => {
       'refresh_token',
     );
   });
+
+  it('carries the reuse grace state as a hash and a time (Doc 03 §4)', () => {
+    // Hashed like the current generation, and for the same reason: the token
+    // one step back is still a live credential inside the window.
+    expect(columnName(Session, 'previousRefreshTokenHash')).toBe(
+      'previous_refresh_token_hash',
+    );
+    expect(columnName(Session, 'rotatedAt')).toBe('rotated_at');
+    expect(columnOf(Session, 'previousRefreshTokenHash')?.options.nullable).toBe(true);
+    expect(columnOf(Session, 'rotatedAt')?.options.nullable).toBe(true);
+    expect(columnsOf(Session).map((column) => column.options.name)).not.toContain(
+      'previous_refresh_token',
+    );
+  });
 });
 
 describe('audit_trail — append-only (Doc 10 §1)', () => {

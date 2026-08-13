@@ -25,7 +25,8 @@ describe('migration chain', () => {
     // RLS and the bootstrap seed are Session 5; the pre-auth functions the
     // login path reads and writes through are Session 8, and come last because
     // they depend on `write_audit` and on the app role's grants already
-    // existing (migrations 0007 and 0010).
+    // existing (migrations 0007 and 0010). Session 9's rotation state and its
+    // own definer function follow for the same reason.
     expect(named.map((migration) => migration.className)).toEqual([
       'Extensions1786406400001',
       'RegistryTables1786406400002',
@@ -39,6 +40,7 @@ describe('migration chain', () => {
       'AuditWriteFn1786406400010',
       'BootstrapSeed1786406400011',
       'AuthFunctions1786406400012',
+      'RefreshRotation1786406400013',
     ]);
   });
 

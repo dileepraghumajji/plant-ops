@@ -26,9 +26,18 @@
  * - **{@link VERIFIED_CLAIMS_SINK} → `RequestClaimsSink`.** The single place
  *   claims become branded and therefore usable as an RLS context (Doc 07 §5).
  *
- * `TokenService` and `KeysService` stay exported because Session 9 (refresh),
- * Session 11 (service-account exchange) and Session 23 (`PermissionGuard`)
- * build on them and must sign with the same key set rather than grow their own.
+ * `TokenService` and `KeysService` stay exported because Session 11
+ * (service-account exchange) and Session 23 (`PermissionGuard`) build on them
+ * and must sign with the same key set rather than grow their own — as Session
+ * 9's `RefreshService`, which lives here, already does.
+ *
+ * ## A fifth binding, and why it is not among the four
+ *
+ * `REFRESH_REPLAY_CACHE` is Redis too, but it is not part of the guard's
+ * contract and no other process participates in it: Doc 06 §11 has modules
+ * verify tokens locally and send their users here to rotate. So it stays
+ * unexported, and its key prefix stays out of `@plantops/contracts` — see
+ * `refresh-replay.cache.ts`.
  */
 
 import { Module } from '@nestjs/common';
@@ -46,6 +55,8 @@ import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwksController } from './jwks.controller';
 import { KeysService } from './keys.service';
+import { refreshReplayCacheProvider } from './refresh-replay.provider';
+import { RefreshService } from './refresh.service';
 import { REVOCATION_CACHE, revocationCacheProvider } from './revocation.provider';
 import { SessionService } from './session.service';
 import { TokenService } from './token.service';
@@ -69,7 +80,9 @@ const AUTH_GUARD_SETTINGS: AuthGuardOptions = { onRevocationUnavailable: 'deny' 
     TokenService,
     SessionService,
     AuthService,
+    RefreshService,
     RequestClaimsSink,
+    refreshReplayCacheProvider,
     revocationCacheProvider,
     { provide: TOKEN_VERIFIER, useExisting: TokenService },
     { provide: REVOCATION_CHECKER, useExisting: REVOCATION_CACHE },

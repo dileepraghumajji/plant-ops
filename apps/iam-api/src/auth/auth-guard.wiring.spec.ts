@@ -121,8 +121,11 @@ describe('AuthGuard wiring', () => {
     expect(response.status).toBeLessThan(400);
   });
 
-  it('leaves POST /auth/login public, since it is what produces a token', async () => {
-    const response = await fetch(`${harness.baseUrl}/auth/login`, json({}));
+  it.each([
+    ['/auth/login', 'it is what produces a token'],
+    ['/auth/refresh', 'it is reached precisely when the access token has expired'],
+  ])('leaves POST %s public, since %s', async (path) => {
+    const response = await fetch(`${harness.baseUrl}${path}`, json({}));
     const body = (await response.json()) as IamErrorResponse;
 
     // 400, not 401: the request reached validation, which is only possible if

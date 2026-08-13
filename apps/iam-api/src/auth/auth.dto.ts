@@ -16,6 +16,7 @@
 import { z } from 'zod';
 import { createZodDto } from '../common/validation.pipe';
 import { PASSWORD_MAX_LENGTH } from './password.util';
+import { REFRESH_TOKEN_MAX_LENGTH } from './refresh-token.util';
 
 /**
  * Slugs are the tenant half of the login credential (Doc 01 §3.4). Bounded and
@@ -66,3 +67,22 @@ export const loginSchema = z.object({
 });
 
 export class LoginDto extends createZodDto(loginSchema) {}
+
+/**
+ * Bounded, and otherwise unexamined.
+ *
+ * The shape check lives in `parseRefreshToken`, not here, and the difference is
+ * the response: a body whose `refresh_token` is the wrong *shape* must answer
+ * the same 401 as one that is merely wrong, or a 400 becomes a way to probe
+ * which tokens are worth presenting. The length bound stays, because the value
+ * reaches a hash function on an unauthenticated endpoint.
+ */
+export const refreshSchema = z.object({
+  refresh_token: z
+    .string()
+    .trim()
+    .min(1, 'refresh_token is required')
+    .max(REFRESH_TOKEN_MAX_LENGTH),
+});
+
+export class RefreshDto extends createZodDto(refreshSchema) {}

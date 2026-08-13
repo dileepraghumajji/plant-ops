@@ -22,6 +22,7 @@ import { RlsJoinTables1786406400009 } from './0009-rls-join-tables.js';
 import { AuditWriteFn1786406400010 } from './0010-audit-write-fn.js';
 import { BootstrapSeed1786406400011 } from './0011-bootstrap-seed.js';
 import { AuthFunctions1786406400012 } from './0012-auth-functions.js';
+import { RefreshRotation1786406400013 } from './0013-refresh-rotation.js';
 
 export { ENUM_VALUES, Extensions1786406400001 } from './0001-extensions-enums.js';
 export { RegistryTables1786406400002 } from './0002-registry-tables.js';
@@ -55,6 +56,13 @@ export {
   SESSION_IS_REVOKED_SIGNATURE,
   type LoginFailureReason,
 } from './0012-auth-functions.js';
+export {
+  RefreshRotation1786406400013,
+  AUTH_ROTATE_REFRESH_TOKEN_SIGNATURE,
+  REFRESH_AUDIT_ACTIONS,
+  REFRESH_OUTCOMES,
+  type RefreshOutcome,
+} from './0013-refresh-rotation.js';
 
 export const migrations = [
   Extensions1786406400001,
@@ -69,4 +77,5 @@ export const migrations = [
   AuditWriteFn1786406400010,
   BootstrapSeed1786406400011,
   AuthFunctions1786406400012,
+  RefreshRotation1786406400013,
 ] as const;

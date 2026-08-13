@@ -4,9 +4,11 @@
  * ## Which routes are public, and why exactly these
  *
  * `AuthGuard` is registered app-wide, so a route is authenticated unless it
- * says otherwise. Only login is `@Public()` here — it is the route that exists
- * to *produce* the token everything else requires. Logout, the session list and
- * the revoke endpoint all carry a bearer token and are guarded like any other
+ * says otherwise. Login and refresh are `@Public()` here — between them they are
+ * the routes that exist to *produce* the token everything else requires, and
+ * refresh in particular is reached precisely when the access token has expired,
+ * so requiring one would make it unreachable. Logout, the session list and the
+ * revoke endpoint all carry a bearer token and are guarded like any other
  * endpoint, which is what lets them act on `claims.sid` and `claims.sub`
  * instead of trusting a body.
  *
@@ -48,11 +50,31 @@ import { IamException } from '../common/iam.exception';
 import { RateLimit } from '../common/rate-limit.decorator';
 import { verifiedClaimsOf } from '../common/verified-claims';
 import { AuthAuditAction, AuthService } from './auth.service';
-import { LoginDto } from './auth.dto';
+import { LoginDto, RefreshDto } from './auth.dto';
+import { RefreshService } from './refresh.service';
 import { SessionService } from './session.service';
 
 /** Ten attempts a minute per caller, and no free pass when Redis is down. */
 const LOGIN_RATE_LIMIT = { limit: 10, windowSeconds: 60, failOpen: false } as const;
+
+/**
+ * Refresh is limited too, but it fails **open** — the opposite of login, on
+ * purpose.
+ *
+ * Login's limit is what stands between an attacker and unlimited guesses at a
+ * human-chosen password. Nothing analogous applies here: the secret presented is
+ * 256 bits from the CSPRNG, so guessing is not a strategy, and the limit exists
+ * to bound the amplification in `iam.auth_rotate_refresh_token` — a token that
+ * matches neither generation revokes its session, and that should not be a lever
+ * anyone can pull in a loop.
+ *
+ * Failing closed would mean a Redis blip logs out every client whose access
+ * token expires during it, since refresh is the only way back and re-login runs
+ * into the throttle too. Thirty a minute leaves room for a plant behind one NAT
+ * — a client refreshes about every quarter of an hour — while still bounding the
+ * loop.
+ */
+const REFRESH_RATE_LIMIT = { limit: 30, windowSeconds: 60 } as const;
 
 /**
  * Session management is authenticated and cheap, but it is still a lever an
@@ -65,6 +87,7 @@ const SESSION_RATE_LIMIT = { limit: 60, windowSeconds: 60 } as const;
 export class AuthController {
   constructor(
     private readonly auth: AuthService,
+    private readonly refreshes: RefreshService,
     private readonly sessions: SessionService,
   ) {}
 
@@ -79,6 +102,24 @@ export class AuthController {
       clientSlug: body.client_slug,
       deviceLabel: body.device_label ?? null,
     });
+  }
+
+  /**
+   * Rotates a refresh token (Doc 03 §4, Doc 06 §3).
+   *
+   * Returns the same `{ access_token, refresh_token, expires_in }` login does,
+   * because a client should be able to treat the two identically: store what
+   * comes back, discard what it had. The refresh token in the response is a new
+   * one on a normal rotation and the *already-issued* one when this request lost
+   * a race — indistinguishable from here, which is what makes concurrent
+   * refreshes safe for a caller that is not thinking about them.
+   */
+  @Post('refresh')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @RateLimit(REFRESH_RATE_LIMIT)
+  refresh(@Body() body: RefreshDto): Promise<TokenPairResponse> {
+    return this.refreshes.refresh(body.refresh_token);
   }
 
   /** Revokes the session the caller's own token belongs to. */
