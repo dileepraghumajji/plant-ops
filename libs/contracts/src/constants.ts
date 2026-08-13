@@ -92,3 +92,18 @@ export const CLIENT_PERMISSION_NAMESPACE = 'iam.client';
 
 /** Redis pub/sub channel carrying grant-invalidation events (Doc 04 §7). */
 export const PERMS_INVALIDATED_CHANNEL = 'perms.invalidated';
+
+/**
+ * Key namespace for the revoked-`sid` cache (Doc 03 §6).
+ *
+ * Shared rather than private to the IAM because the IAM *writes* these keys and
+ * every consuming module *reads* them: a module that guesses a different prefix
+ * finds no revocations and honours force-logout never. One entry per revoked
+ * session, expiring on its own — see {@link revokedSessionKey}.
+ */
+export const REVOKED_SESSION_KEY_PREFIX = 'revoked-sid:';
+
+/** The revoked-`sid` cache key for a session id. */
+export function revokedSessionKey(sessionId: string): string {
+  return `${REVOKED_SESSION_KEY_PREFIX}${sessionId}`;
+}

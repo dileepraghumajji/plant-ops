@@ -18,5 +18,10 @@
       "scope:auth"
     ]
   },
-  "dependencies": {}
+  "dependencies": {
+    "@nestjs/common": "^11.0.0",
+    "@nestjs/core": "^11.0.0",
+    "@plantops/contracts": "0.0.1",
+    "tslib": "^2.3.0"
+  }
 }

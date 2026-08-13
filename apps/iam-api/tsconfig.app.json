@@ -24,6 +24,9 @@
   ],
   "references": [
     {
+      "path": "../../libs/auth-kit/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/db/tsconfig.lib.json"
     },
     {

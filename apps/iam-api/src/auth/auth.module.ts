@@ -1,21 +1,93 @@
 /**
- * The `/auth` surface and the token machinery behind it (Doc 03).
+ * The `/auth` surface, the token machinery behind it, and the wiring that makes
+ * `auth-kit`'s guard work inside the IAM (Doc 03).
  *
- * Session 7 fills in the half that has no session state: key management, token
- * signing and verification, and the published JWKS. `TokenService` and
- * `KeysService` are exported because Session 8 builds login, sessions and the
- * `AuthGuard` on top of them, and Session 11 the service-account exchange —
- * all of which must sign with the same key set rather than grow their own.
+ * ## Where the guard itself is registered
+ *
+ * Not here. `AuthGuard` is declared as an `APP_GUARD` in `app.module.ts`,
+ * beside the rate limiter, because **the order of the two is a security
+ * property** and Nest applies global guards in the order it discovers them.
+ * Spreading them across modules would make that order an accident of import
+ * sequence. What lives here is everything the guard *depends* on, exported so
+ * the root module can construct it.
+ *
+ * ## The four bindings
+ *
+ * - **{@link TOKEN_VERIFIER} → `TokenService`.** The IAM verifies with its own
+ *   local keys; it *is* the JWKS publisher, so fetching its own document over
+ *   HTTP would be a round-trip to itself. Every other process binds
+ *   `JwksVerifier` here instead — that substitution is the whole reason the
+ *   guard depends on an interface.
+ * - **{@link REVOCATION_CHECKER} → the Redis cache.** One `EXISTS` per request
+ *   and no SQL on the happy path (Doc 03 §6).
+ * - **{@link REVOCATION_FALLBACK} → `SessionService`.** Only the IAM can have
+ *   one: it owns the `session` table. A module has no fallback and denies when
+ *   the cache is unavailable.
+ * - **{@link VERIFIED_CLAIMS_SINK} → `RequestClaimsSink`.** The single place
+ *   claims become branded and therefore usable as an RLS context (Doc 07 §5).
+ *
+ * `TokenService` and `KeysService` stay exported because Session 9 (refresh),
+ * Session 11 (service-account exchange) and Session 23 (`PermissionGuard`)
+ * build on them and must sign with the same key set rather than grow their own.
  */
 
 import { Module } from '@nestjs/common';
+import {
+  AUTH_GUARD_OPTIONS,
+  REVOCATION_CHECKER,
+  REVOCATION_FALLBACK,
+  TOKEN_VERIFIER,
+  VERIFIED_CLAIMS_SINK,
+  type AuthGuardOptions,
+} from '@plantops/auth-kit';
+import { DatabaseModule } from '../database/database.module';
+import { RedisModule } from '../redis/redis.module';
+import { AuthController } from './auth.controller';
+import { AuthService } from './auth.service';
 import { JwksController } from './jwks.controller';
 import { KeysService } from './keys.service';
+import { REVOCATION_CACHE, revocationCacheProvider } from './revocation.provider';
+import { SessionService } from './session.service';
 import { TokenService } from './token.service';
+import { RequestClaimsSink } from './verified-claims.sink';
+
+/**
+ * Deny when neither the revocation cache nor the database can answer.
+ *
+ * Stated explicitly rather than left to the default, because it is a real
+ * trade-off and the next person should see that it was chosen: uncertainty
+ * about whether a session is dead has to fall to refusal, or a Redis outage
+ * becomes a window in which every revoked session works again.
+ */
+const AUTH_GUARD_SETTINGS: AuthGuardOptions = { onRevocationUnavailable: 'deny' };
 
 @Module({
-  controllers: [JwksController],
-  providers: [KeysService, TokenService],
-  exports: [KeysService, TokenService],
+  imports: [DatabaseModule, RedisModule],
+  controllers: [AuthController, JwksController],
+  providers: [
+    KeysService,
+    TokenService,
+    SessionService,
+    AuthService,
+    RequestClaimsSink,
+    revocationCacheProvider,
+    { provide: TOKEN_VERIFIER, useExisting: TokenService },
+    { provide: REVOCATION_CHECKER, useExisting: REVOCATION_CACHE },
+    { provide: REVOCATION_FALLBACK, useExisting: SessionService },
+    { provide: VERIFIED_CLAIMS_SINK, useExisting: RequestClaimsSink },
+    { provide: AUTH_GUARD_OPTIONS, useValue: AUTH_GUARD_SETTINGS },
+  ],
+  exports: [
+    KeysService,
+    TokenService,
+    SessionService,
+    // The guard's dependencies, so `AppModule` can construct `AuthGuard` in
+    // its own injector and thereby fix its position among the global guards.
+    TOKEN_VERIFIER,
+    REVOCATION_CHECKER,
+    REVOCATION_FALLBACK,
+    VERIFIED_CLAIMS_SINK,
+    AUTH_GUARD_OPTIONS,
+  ],
 })
 export class AuthModule {}

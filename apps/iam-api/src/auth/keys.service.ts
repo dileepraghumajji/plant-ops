@@ -27,6 +27,13 @@
  */
 
 import { Inject, Injectable } from '@nestjs/common';
+import {
+  privateKeyFromPem,
+  publicKeyFromPem,
+  signCompactJws,
+  parseCompactJws,
+  verifyCompactJws,
+} from '@plantops/auth-kit';
 import type { EnvConfig } from '@plantops/config';
 import {
   JWKS_CACHE_MAX_AGE_SECONDS,
@@ -38,13 +45,6 @@ import {
 import { randomUUID } from 'node:crypto';
 import type { KeyObject } from 'node:crypto';
 import { ENV } from '../config/config.module';
-import {
-  privateKeyFromPem,
-  publicKeyFromPem,
-  signCompactJws,
-  parseCompactJws,
-  verifyCompactJws,
-} from './jws';
 
 export { JWKS_CACHE_MAX_AGE_SECONDS };
 

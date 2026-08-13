@@ -9,6 +9,12 @@
  * outright is cheaper than auditing a dependency's option matrix on every
  * upgrade.
  *
+ * It lives in `auth-kit` rather than in the IAM because the IAM signs and every
+ * consuming module verifies, and those two must agree byte for byte. Two
+ * implementations of "the same" JWS handling is how a signer and a verifier
+ * drift into disagreeing about a padded segment — which is a token that works
+ * in one process and fails in the next.
+ *
  * ## The invariants that make this safe
  *
  * 1. **The algorithm is never read from the token.** {@link verifyCompactJws}
@@ -18,8 +24,9 @@
  *    construction: there is no HMAC code path in this file for a forged header
  *    to select.
  * 2. **The key is never taken from the token.** The header's `kid` selects from
- *    a closed, locally-held set (see `keys.service.ts`); it is a lookup key,
- *    never key material. `jwk`/`jku`/`x5u` headers are ignored entirely.
+ *    a closed, locally-held set (`keys.service.ts` in the IAM, the fetched JWKS
+ *    in a module); it is a lookup key, never key material. `jwk`/`jku`/`x5u`
+ *    headers are ignored entirely.
  * 3. **Segments are validated before decoding.** Node's base64url decoder is
  *    lenient — it will quietly accept standard-base64 `+`/`/`, padding, and
  *    trailing junk — so two different strings can decode to the same bytes.

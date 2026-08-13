@@ -11,6 +11,7 @@
  */
 
 import { Body, Controller, Get, HttpCode, Post } from '@nestjs/common';
+import { Public } from '@plantops/auth-kit';
 import {
   IamErrorCode,
   type IamErrorResponse,
@@ -31,8 +32,15 @@ const createWidgetSchema = z.object({
 
 class CreateWidgetDto extends createZodDto(createWidgetSchema) {}
 
-/** One route per failure mode the real surface cannot produce yet. */
+/**
+ * One route per failure mode the real surface cannot produce yet.
+ *
+ * `@Public()` because these are about the *filter*, not about the guard: with
+ * authentication required they would all answer 401 and the envelope claims
+ * would go untested. The guard's own behaviour is `auth.guard.spec.ts`.
+ */
 @Controller('__test')
+@Public()
 class FailingController {
   @Get('boom')
   boom(): never {

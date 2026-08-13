@@ -13,9 +13,11 @@
  * a transaction, looks identical from the application side and is a complete
  * isolation failure at the database.
  *
- * Session 8 replaces `/auth/*`-less inertness here with a real `AuthGuard`;
- * until then this route answers 401 for everyone, because no code path yet
- * produces `VerifiedClaims`.
+ * Since Session 8 the claims are real: `AuthGuard` verifies a bearer token and
+ * `RequestClaimsSink` brands it, so this route now reports what Postgres
+ * believes about a genuinely authenticated caller. The `!claims` branch below
+ * is unreachable through the guard and stays as a fail-closed backstop against
+ * a route that ever loses it.
  */
 
 import { Controller, Get, Req } from '@nestjs/common';

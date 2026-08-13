@@ -22,7 +22,10 @@ const named = [...migrations].map((migration) => ({
 describe('migration chain', () => {
   it('ships the chain in the Doc 07 §4 order', () => {
     // Extensions and enums, registry, tenant, mapping, audit — then indexes.
-    // RLS and the bootstrap seed are Session 5 and extend this list.
+    // RLS and the bootstrap seed are Session 5; the pre-auth functions the
+    // login path reads and writes through are Session 8, and come last because
+    // they depend on `write_audit` and on the app role's grants already
+    // existing (migrations 0007 and 0010).
     expect(named.map((migration) => migration.className)).toEqual([
       'Extensions1786406400001',
       'RegistryTables1786406400002',
@@ -35,6 +38,7 @@ describe('migration chain', () => {
       'RlsJoinTables1786406400009',
       'AuditWriteFn1786406400010',
       'BootstrapSeed1786406400011',
+      'AuthFunctions1786406400012',
     ]);
   });
 

@@ -20,6 +20,7 @@
  */
 
 import { Controller, Get, Header } from '@nestjs/common';
+import { Public } from '@plantops/auth-kit';
 import { IAM_ROUTE_PREFIX, type JwksResponse } from '@plantops/contracts';
 import { RateLimit } from '../common/rate-limit.decorator';
 import { SkipTransaction } from '../common/transaction-context';
@@ -37,6 +38,7 @@ import { JWKS_CACHE_MAX_AGE_SECONDS, KeysService } from './keys.service';
 const JWKS_RATE_LIMIT = { limit: 600, windowSeconds: 60, failOpen: true } as const;
 
 @Controller(IAM_ROUTE_PREFIX)
+@Public()
 @SkipTransaction()
 export class JwksController {
   constructor(private readonly keys: KeysService) {}
