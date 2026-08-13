@@ -39,12 +39,24 @@ export class Session {
 
   /**
    * Hash of the opaque refresh token, rotated on every use (Doc 03 §4). The
-   * token itself is never stored. Uniquely indexed because the refresh flow
-   * looks a session up *by* it; Session 9 adds the previous-hash grace state
-   * beside it.
+   * token itself is never stored. Uniquely indexed — the constraint that two
+   * live sessions can never share a token — though from Session 9 the refresh
+   * flow finds the session by id rather than by this column.
    */
   @Column({ name: 'refresh_token_hash', type: 'text', nullable: true })
   refreshTokenHash!: string | null;
+
+  /**
+   * The token one generation back, and when it stopped being current — together,
+   * the reuse grace window Doc 03 §4 requires so that two clients refreshing at
+   * once do not look like theft. Both are null until the first rotation, and
+   * `session_rotation_state` (migration 0013) keeps them null or set together.
+   */
+  @Column({ name: 'previous_refresh_token_hash', type: 'text', nullable: true })
+  previousRefreshTokenHash!: string | null;
+
+  @Column({ name: 'rotated_at', type: 'timestamptz', nullable: true })
+  rotatedAt!: Date | null;
 
   @Column({ name: 'issued_at', type: 'timestamptz', default: () => 'now()' })
   issuedAt!: Date;

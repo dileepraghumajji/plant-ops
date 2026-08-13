@@ -14,12 +14,15 @@
  * context the token established — so a caller physically cannot touch another
  * tenant's sessions, whatever this code gets wrong.
  *
- * {@link SessionService.begin} and {@link SessionService.isRevoked} cannot.
- * `begin` runs during login, before any token exists and therefore before any
- * context does; `isRevoked` runs inside `AuthGuard`, which is *before* the
- * transaction is opened at all. Both go through the migration-0012 definer
- * functions, which is the sanctioned pre-auth doorway — see that migration for
- * why it exists and what keeps it narrow.
+ * {@link SessionService.begin}, {@link SessionService.rotateRefreshToken} and
+ * {@link SessionService.isRevoked} cannot. `begin` runs during login, before any
+ * token exists and therefore before any context does; `rotateRefreshToken` runs
+ * during refresh, where the caller presents a refresh token rather than an
+ * access token and so has no verified `cid` either; `isRevoked` runs inside
+ * `AuthGuard`, which is *before* the transaction is opened at all. All three go
+ * through the migration-0012 and -0013 definer functions, which are the
+ * sanctioned pre-auth doorway — see those migrations for why they exist and what
+ * keeps them narrow.
  *
  * ## Ordering: commit, then publish
  *
@@ -41,12 +44,16 @@ import {
   type JwtClaims,
   type SessionDTO,
 } from '@plantops/contracts';
-import { IAM_SCHEMA, type VerifiedClaims } from '@plantops/db';
+import { IAM_SCHEMA, type RefreshOutcome, type VerifiedClaims } from '@plantops/db';
 import { ENV } from '../config/config.module';
 import { afterCommit, entityManager } from '../common/transaction-context';
 import { DatabaseService } from '../database/database.service';
 import { REVOCATION_CACHE } from './revocation.provider';
-import { hashRefreshToken, mintRefreshToken } from './refresh-token.util';
+import {
+  formatRefreshToken,
+  hashRefreshSecret,
+  mintRefreshSecret,
+} from './refresh-token.util';
 
 const S = `"${IAM_SCHEMA}"`;
 
@@ -72,6 +79,38 @@ interface SessionRow {
   revoked_at: Date | null;
 }
 
+export interface RotateRefreshInput {
+  /** From the token itself — an address, not a claim of identity. */
+  sessionId: string;
+  /** The secret half of the token the client presented. */
+  presentedSecret: string;
+  /** The secret to install if — and only if — this turns out to be a rotation. */
+  successorSecret: string;
+}
+
+/** One row of `iam.auth_rotate_refresh_token`. */
+interface RotationRow {
+  outcome: RefreshOutcome;
+  client_id: string | null;
+  user_id: string | null;
+}
+
+/**
+ * What the database decided.
+ *
+ * The subject is present on every outcome that has one, and absent on `invalid`
+ * — where there is no session, and therefore nobody to name. Modelled as a union
+ * so a caller cannot reach for a `clientId` on the branch that does not have
+ * one.
+ */
+export type RotationResult =
+  | { outcome: 'invalid' }
+  | {
+      outcome: Exclude<RefreshOutcome, 'invalid'>;
+      clientId: string;
+      userId: string;
+    };
+
 @Injectable()
 export class SessionService implements RevocationFallback {
   private readonly logger = new Logger(SessionService.name);
@@ -95,7 +134,7 @@ export class SessionService implements RevocationFallback {
    * this service asserted (Doc 07 §6).
    */
   async begin(input: BeginSessionInput): Promise<StartedSession | null> {
-    const refreshToken = mintRefreshToken();
+    const secret = mintRefreshSecret();
     const refreshExpiresAt = new Date(
       Date.now() + this.env.REFRESH_TOKEN_TTL_SECONDS * 1000,
     );
@@ -105,16 +144,76 @@ export class SessionService implements RevocationFallback {
       [
         input.clientId,
         input.userId,
-        hashRefreshToken(refreshToken),
+        hashRefreshSecret(secret),
         refreshExpiresAt.toISOString(),
         input.deviceLabel ?? null,
       ],
     )) as { session_id: string | null }[];
 
     const sessionId = rows[0]?.session_id ?? null;
+    // The session id is prefixed to the token only now, because the database
+    // generated it — which is why the *hash* above covers the secret alone
+    // (see `refresh-token.util.ts`).
     return sessionId === null
       ? null
-      : { sessionId, refreshToken, refreshExpiresAt };
+      : {
+          sessionId,
+          refreshToken: formatRefreshToken(sessionId, secret),
+          refreshExpiresAt,
+        };
+  }
+
+  /**
+   * One rotation attempt, decided entirely inside the database (Doc 03 §4).
+   *
+   * The caller supplies the secret it was handed and the secret it would like
+   * next; what comes back is which of the four things just happened. Every part
+   * of that judgement — is the session live, is this the current generation, is
+   * a one-generation-old token still inside its window, is this compromise —
+   * belongs to `iam.auth_rotate_refresh_token`, and not because SQL is a nicer
+   * language for it. Split across a read here and a write there, two concurrent
+   * refreshes would both see the same current hash and both rotate, and each
+   * client would walk away holding a token the other had already superseded. The
+   * function's `select … for update` is what makes the race resolve to one
+   * winner and one *recognised* loser.
+   *
+   * ## On the pool, not the request transaction
+   *
+   * Every other write in this service runs on the ambient transaction, so that a
+   * failed request leaves nothing behind. This one must do the opposite, and for
+   * the same reason `AuthService.recordFailure` does: three of its four outcomes
+   * end in a thrown 401, the interceptor rolls the transaction back on the way
+   * out, and the `reuse` branch's revocation and `auth.refresh.reuse_detected`
+   * audit would roll back with it — silently discarding the response to a
+   * detected compromise, which is precisely the event that must survive.
+   *
+   * There is nothing here for the rotation to be atomically coupled to anyway:
+   * the function is one statement, and everything it decides and writes is
+   * already inside it.
+   */
+  async rotateRefreshToken(input: RotateRefreshInput): Promise<RotationResult> {
+    const rows = (await this.database.dataSource.query(
+      `select * from ${S}.auth_rotate_refresh_token($1, $2, $3, $4)`,
+      [
+        input.sessionId,
+        hashRefreshSecret(input.presentedSecret),
+        hashRefreshSecret(input.successorSecret),
+        this.env.REFRESH_REUSE_GRACE_SECONDS,
+      ],
+    )) as RotationRow[];
+
+    const row = rows[0];
+    // No row at all would mean the function did not run, not that it declined —
+    // and "declined" is the only thing this method is allowed to guess.
+    if (row === undefined) return { outcome: 'invalid' };
+
+    return row.outcome === 'invalid'
+      ? { outcome: 'invalid' }
+      : {
+          outcome: row.outcome,
+          clientId: row.client_id as string,
+          userId: row.user_id as string,
+        };
   }
 
   /**
