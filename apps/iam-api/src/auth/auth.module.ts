@@ -38,9 +38,14 @@
  * verify tokens locally and send their users here to rotate. So it stays
  * unexported, and its key prefix stays out of `@plantops/contracts` — see
  * `refresh-replay.cache.ts`.
+ *
+ * `PASSWORD_RESET_DELIVERY` (Session 10) is the same kind of thing from the
+ * other direction: an outbound port with a deliberately inadequate default, so
+ * that the channel is a deployment decision rather than something the auth
+ * module picked.
  */
 
-import { Module } from '@nestjs/common';
+import { Module, type Provider } from '@nestjs/common';
 import {
   AUTH_GUARD_OPTIONS,
   REVOCATION_CHECKER,
@@ -49,12 +54,20 @@ import {
   VERIFIED_CLAIMS_SINK,
   type AuthGuardOptions,
 } from '@plantops/auth-kit';
+import type { EnvConfig } from '@plantops/config';
+import { ENV } from '../config/config.module';
 import { DatabaseModule } from '../database/database.module';
 import { RedisModule } from '../redis/redis.module';
+import { AccountStateService } from './account-state.service';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwksController } from './jwks.controller';
 import { KeysService } from './keys.service';
+import {
+  LoggingPasswordResetDelivery,
+  PASSWORD_RESET_DELIVERY,
+} from './password-reset.delivery';
+import { PasswordResetService } from './password-reset.service';
 import { refreshReplayCacheProvider } from './refresh-replay.provider';
 import { RefreshService } from './refresh.service';
 import { REVOCATION_CACHE, revocationCacheProvider } from './revocation.provider';
@@ -72,6 +85,21 @@ import { RequestClaimsSink } from './verified-claims.sink';
  */
 const AUTH_GUARD_SETTINGS: AuthGuardOptions = { onRevocationUnavailable: 'deny' };
 
+/**
+ * Where a reset token goes once it exists (Doc 03 §7).
+ *
+ * The default binding logs it outside production and refuses to log it inside
+ * production — see `password-reset.delivery.ts` for why that split is the whole
+ * design. A deployment with a mail transport overrides this provider; nothing
+ * else in the module changes, which is the point of the port.
+ */
+const passwordResetDeliveryProvider: Provider = {
+  provide: PASSWORD_RESET_DELIVERY,
+  inject: [ENV],
+  useFactory: (env: EnvConfig) =>
+    new LoggingPasswordResetDelivery(env.NODE_ENV === 'production'),
+};
+
 @Module({
   imports: [DatabaseModule, RedisModule],
   controllers: [AuthController, JwksController],
@@ -81,7 +109,10 @@ const AUTH_GUARD_SETTINGS: AuthGuardOptions = { onRevocationUnavailable: 'deny' 
     SessionService,
     AuthService,
     RefreshService,
+    PasswordResetService,
+    AccountStateService,
     RequestClaimsSink,
+    passwordResetDeliveryProvider,
     refreshReplayCacheProvider,
     revocationCacheProvider,
     { provide: TOKEN_VERIFIER, useExisting: TokenService },
@@ -94,6 +125,10 @@ const AUTH_GUARD_SETTINGS: AuthGuardOptions = { onRevocationUnavailable: 'deny' 
     KeysService,
     TokenService,
     SessionService,
+    // Session 16's user-admin surface calls these transitions from its own
+    // controller; the state machine itself stays here, beside the login path
+    // that enforces it.
+    AccountStateService,
     // The guard's dependencies, so `AppModule` can construct `AuthGuard` in
     // its own injector and thereby fix its position among the global guards.
     TOKEN_VERIFIER,

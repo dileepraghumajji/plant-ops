@@ -26,7 +26,9 @@ describe('migration chain', () => {
     // login path reads and writes through are Session 8, and come last because
     // they depend on `write_audit` and on the app role's grants already
     // existing (migrations 0007 and 0010). Session 9's rotation state and its
-    // own definer function follow for the same reason.
+    // own definer function follow for the same reason, and Session 10's reset
+    // tokens and lockout policy after them — 0014 *replaces* two of 0012's
+    // functions, so it can only run once they exist.
     expect(named.map((migration) => migration.className)).toEqual([
       'Extensions1786406400001',
       'RegistryTables1786406400002',
@@ -41,6 +43,7 @@ describe('migration chain', () => {
       'BootstrapSeed1786406400011',
       'AuthFunctions1786406400012',
       'RefreshRotation1786406400013',
+      'PasswordResetAccountState1786406400014',
     ]);
   });
 

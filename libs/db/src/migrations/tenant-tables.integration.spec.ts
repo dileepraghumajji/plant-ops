@@ -175,6 +175,8 @@ describeWithDb('tenant, mapping and audit migrations against Postgres', () => {
         'client_application',
         'menu_permission',
         'nav_node',
+        // Not Doc 01's — Session 10's reset credential (Doc 03 §7).
+        'password_reset_token',
         'permission',
         'role',
         'role_binding',
@@ -197,6 +199,7 @@ describeWithDb('tenant, mapping and audit migrations against Postgres', () => {
         'role_binding',
         'user_identity',
         'session',
+        'password_reset_token',
       ];
       const rows = await query<{ table_name: string; is_nullable: string }>(
         `select table_name, is_nullable from information_schema.columns

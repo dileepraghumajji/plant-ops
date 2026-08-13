@@ -209,6 +209,29 @@ describe('parseEnv — TTLs and spec bounds', () => {
     },
   );
 
+  it('defaults the account-lockout and reset policy (Doc 03 §7–8)', () => {
+    const env = parseEnv(validEnv());
+    expect(env.LOGIN_MAX_FAILED_ATTEMPTS).toBe(5);
+    expect(env.PASSWORD_RESET_TTL_SECONDS).toBe(3_600);
+  });
+
+  it.each([['0'], ['-1'], ['500'], ['2.5']])(
+    'refuses a lockout threshold of %s',
+    (value) => {
+      // Zero especially: a security control with an off switch spelled as a
+      // falsy value is one that gets disabled by an empty variable.
+      expect(
+        issuesOf(validEnv({ LOGIN_MAX_FAILED_ATTEMPTS: value }))[0],
+      ).toContain('LOGIN_MAX_FAILED_ATTEMPTS');
+    },
+  );
+
+  it('refuses a reset TTL above 24 hours', () => {
+    expect(
+      issuesOf(validEnv({ PASSWORD_RESET_TTL_SECONDS: '172800' }))[0],
+    ).toContain('PASSWORD_RESET_TTL_SECONDS');
+  });
+
   it.each([['0'], ['-30'], ['abc'], ['12.5']])(
     'refuses a nonsensical TTL: %s',
     (value) => {

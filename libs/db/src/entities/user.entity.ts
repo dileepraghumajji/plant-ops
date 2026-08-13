@@ -61,6 +61,25 @@ export class User {
   @Column({ name: 'is_client_admin', type: 'boolean', default: false })
   isClientAdmin!: boolean;
 
+  /**
+   * Consecutive failed password attempts since the last success (Doc 03 §8).
+   *
+   * A column rather than a cache key: a lockout counter that evicts is a
+   * credential-stuffing budget that refills on its own. Zeroed by a successful
+   * login, by a completed password reset, and by the lock it triggers — see
+   * migration 0014.
+   */
+  @Column({ name: 'failed_login_attempts', type: 'integer', default: 0 })
+  failedLoginAttempts!: number;
+
+  /**
+   * When the most recent failure was. Not consulted by the policy — the
+   * threshold is a plain count — but it is what tells an administrator looking
+   * at a locked account whether this was an attack or a bad week.
+   */
+  @Column({ name: 'last_failed_login_at', type: 'timestamptz', nullable: true })
+  lastFailedLoginAt!: Date | null;
+
   @Column({ name: 'created_at', type: 'timestamptz', default: () => 'now()' })
   createdAt!: Date;
 

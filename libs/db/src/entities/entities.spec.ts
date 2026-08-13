@@ -19,6 +19,7 @@ import { CLIENT_STATUSES, Client } from './client.entity.js';
 import { ClientApplication } from './client-application.entity.js';
 import { MenuPermission } from './menu-permission.entity.js';
 import { NAV_NODE_KINDS, NavNode } from './nav-node.entity.js';
+import { PasswordResetToken } from './password-reset-token.entity.js';
 import { Permission } from './permission.entity.js';
 import { Role } from './role.entity.js';
 import { RoleBinding } from './role-binding.entity.js';
@@ -67,6 +68,9 @@ const ALL: readonly (readonly [table: string, entity: object])[] = [
   ['role_binding', RoleBinding],
   ['user_identity', UserIdentity],
   ['session', Session],
+  // Session 10's reset credential — a mechanism (Doc 03 §7), not one of Doc
+  // 01's model tables, but subject to every convention below all the same.
+  ['password_reset_token', PasswordResetToken],
   ['audit_trail', AuditTrail],
 ];
 
@@ -74,7 +78,7 @@ const ALL: readonly (readonly [table: string, entity: object])[] = [
 const COMPOSITE_KEY_ENTITIES = [ClientApplication, RolePermission, MenuPermission];
 
 describe('entity registry', () => {
-  it('loads every table of Doc 01, and only those', () => {
+  it('loads every table the schema has, and only those', () => {
     expect([...entities]).toEqual(ALL.map(([, entity]) => entity));
   });
 
@@ -154,6 +158,7 @@ describe('tenant ownership (Doc 01 §6.6, Doc 07 §6)', () => {
     ['role_binding', RoleBinding],
     ['user_identity', UserIdentity],
     ['session', Session],
+    ['password_reset_token', PasswordResetToken],
   ] as const)('gives %s a non-null client_id for RLS to key off', (_label, entity) => {
     const clientId = columnOf(entity, 'clientId');
     expect(clientId?.options.name).toBe('client_id');
@@ -408,6 +413,61 @@ describe('session (Doc 01 §4.7, Doc 03 §6)', () => {
     expect(columnsOf(Session).map((column) => column.options.name)).not.toContain(
       'previous_refresh_token',
     );
+  });
+});
+
+describe('user — the lockout counter (Doc 03 §8, migration 0014)', () => {
+  it('counts failures on the row it locks, not in a cache', () => {
+    const attempts = columnOf(User, 'failedLoginAttempts');
+    expect(attempts?.options.name).toBe('failed_login_attempts');
+    expect(attempts?.options.type).toBe('integer');
+    // Not nullable: "no failures yet" is zero. A null would make every read
+    // branch on a state that means the same thing.
+    expect(attempts?.options.nullable).toBeFalsy();
+    expect(attempts?.options.default).toBe(0);
+  });
+
+  it('records when the last failure was, nullably', () => {
+    expect(columnOf(User, 'lastFailedLoginAt')?.options.name).toBe(
+      'last_failed_login_at',
+    );
+    expect(columnOf(User, 'lastFailedLoginAt')?.options.nullable).toBe(true);
+  });
+
+  it('still keeps no credential material on the user row', () => {
+    // The counter is about credentials; it must not become an excuse to put
+    // one here. Hashes stay on `user_identity` (Doc 01 §4.6).
+    const names = columnsOf(User).map((column) => String(column.options.name));
+    expect(names.filter((name) => /hash|secret|password/.test(name))).toEqual([]);
+  });
+});
+
+describe('password_reset_token (Doc 03 §7, migration 0014)', () => {
+  it('stores only the hash of the token', () => {
+    expect(columnName(PasswordResetToken, 'tokenHash')).toBe('token_hash');
+    expect(
+      columnsOf(PasswordResetToken).map((column) => column.options.name),
+    ).not.toContain('token');
+  });
+
+  it('is time-boxed and single-use', () => {
+    // Both halves of Doc 03 §7's "tokenized, time-boxed": an expiry the row
+    // carries, and a spend marker that is set exactly once.
+    expect(columnOf(PasswordResetToken, 'expiresAt')?.options.nullable).toBeFalsy();
+    expect(columnOf(PasswordResetToken, 'usedAt')?.options.nullable).toBe(true);
+  });
+
+  it('has no updated_at — a token is issued and spent, never edited', () => {
+    const names = columnsOf(PasswordResetToken).map((column) => column.options.name);
+    expect(names).toContain('created_at');
+    expect(names).not.toContain('updated_at');
+  });
+
+  it('finds a token by hash through a unique index', () => {
+    const index = indexesOf(PasswordResetToken).find(
+      (candidate) => candidate.name === 'password_reset_token_token_hash_key',
+    );
+    expect(index?.unique).toBe(true);
   });
 });
 
