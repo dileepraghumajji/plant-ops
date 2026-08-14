@@ -19,8 +19,13 @@ import { createZodDto } from '../../common/validation.pipe';
  * in manifests keyed by it, and gets typed by hand into deployment config.
  * Allowing case would make `Gatepass` and `gatepass` two applications that read
  * as one, and the unique index would not save anyone from it.
+ *
+ * Exported because `manifest.dto.ts` validates the same field. Two spellings of
+ * "what an application key is" would let a manifest name a key this endpoint
+ * would refuse — which is the one disagreement the manifest, being the primary
+ * registration path, must not have with the form path.
  */
-const applicationKey = z
+export const applicationKey = z
   .string()
   .trim()
   .min(1, 'key is required')
@@ -30,14 +35,14 @@ const applicationKey = z
     'key must start with a lowercase letter and contain only lowercase letters, digits, "-" or "_"',
   );
 
-const displayName = z.string().trim().min(1, 'name is required').max(160);
+export const displayName = z.string().trim().min(1, 'name is required').max(160);
 
 /**
  * Bounded and optional. It is operator-authored prose rendered into an admin
  * screen (Doc 09), so the only rule it needs is a length that keeps a list view
  * usable.
  */
-const description = z.string().trim().max(1000);
+export const description = z.string().trim().max(1000);
 
 /**
  * Per-application settings (Doc 01 §3.1) — an opaque `jsonb` blob this API does

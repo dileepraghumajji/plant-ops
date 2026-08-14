@@ -14,9 +14,6 @@
  *   cascade away data that role mappings and audit rows still refer to.
  * - **`GET /iam/applications/:id`.** Not in Doc 06 §4, and it would return
  *   exactly what the list does.
- * - **`POST /iam/applications/:id/manifest`.** Session 14. It is the declarative
- *   form of the three sub-resource routes below, and it lands on this same
- *   controller.
  *
  * ## Authorization
  *
@@ -51,6 +48,7 @@ import {
 import {
   IAM_ROUTE_PREFIX,
   type ApplicationDTO,
+  type ManifestUpsertResponse,
   type NavCatalogResponse,
   type NavNodeCatalogDTO,
   type NavPermissionsResult,
@@ -65,8 +63,10 @@ import {
   PaginationDto,
   UpdateApplicationDto,
 } from './dto/applications.dto';
+import { ApplicationManifestDto } from './dto/manifest.dto';
 import { CreateNavNodesDto, NavPermissionsDto } from './dto/nav.dto';
 import { CreatePermissionsDto } from './dto/permissions.dto';
+import { ManifestService } from './manifest.service';
 import { NavService } from './nav.service';
 import { PermissionsService } from './permissions.service';
 
@@ -90,6 +90,7 @@ export class ApplicationsController {
     private readonly applications: ApplicationsService,
     private readonly permissions: PermissionsService,
     private readonly nav: NavService,
+    private readonly manifest: ManifestService,
   ) {}
 
   // ── the application itself (Doc 02 §2 step 1) ─────────────────────────────
@@ -187,5 +188,31 @@ export class ApplicationsController {
     @Body() body: NavPermissionsDto,
   ): Promise<NavPermissionsResult> {
     return this.nav.unmap(id, body.mappings);
+  }
+
+  // ── the whole of the above, declaratively (Doc 02 §2) ─────────────────────
+
+  /**
+   * Upserts an application's permission and nav catalog from its manifest.
+   *
+   * A 200, not a 201. The four routes above each create something and say so;
+   * this one is idempotent by definition — the same document uploaded twice
+   * creates nothing the second time — and there is no single resource a
+   * `Location` could point at. What the caller wants back is what moved, which
+   * is `ManifestUpsertResponse.diff`.
+   *
+   * The body is the manifest itself rather than `{ manifest: … }`: it is a file
+   * an application ships, and a wrapper would mean the file on disk and the body
+   * on the wire are two different documents (`tools/upload-manifest.ts` posts
+   * the file unchanged, which is the point).
+   */
+  @Post(':id/manifest')
+  @HttpCode(HttpStatus.OK)
+  @RateLimit(REGISTRY_RATE_LIMIT)
+  upsertManifest(
+    @Param('id', applicationId()) id: string,
+    @Body() body: ApplicationManifestDto,
+  ): Promise<ManifestUpsertResponse> {
+    return this.manifest.upsert(id, body);
   }
 }

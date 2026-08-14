@@ -33,8 +33,12 @@ export const MAX_PERMISSIONS_PER_REQUEST = 200;
  * `(application_id, key)` pair the schema enforces; adding a prefix rule here
  * would reject a legitimate catalog for a naming preference the spec does not
  * state.
+ *
+ * Exported for `manifest.dto.ts`, which validates the same keys arriving by the
+ * declarative route — see `applications.dto.ts` for why the two must not have
+ * separate definitions.
  */
-const permissionKey = z
+export const permissionKey = z
   .string()
   .trim()
   .min(1, 'key is required')
