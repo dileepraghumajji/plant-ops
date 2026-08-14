@@ -13,6 +13,21 @@ export const NavNodeKind = {
 export type NavNodeKind = (typeof NavNodeKind)[keyof typeof NavNodeKind];
 
 /**
+ * The three kinds as a list, in the order the Postgres enum declares its labels
+ * (migration 0001).
+ *
+ * Exists for the same reason `SERVICE_ACCOUNT_STATUS_VALUES` does: a request
+ * schema needs an array to build a closed enum from, and deriving it from the
+ * object above with `Object.values` would lose the tuple type that makes
+ * `z.enum` produce a `NavNodeKind` rather than a `string`.
+ */
+export const NAV_NODE_KIND_VALUES = [
+  NavNodeKind.MODULE,
+  NavNodeKind.MENU,
+  NavNodeKind.SUB_MENU,
+] as const satisfies readonly NavNodeKind[];
+
+/**
  * A node in the resolved tree. Only visible nodes are present: leaves the
  * subject holds no mapped permission for are pruned, and containers left
  * without a visible descendant are pruned with them (Doc 05 §3).

@@ -13,4 +13,5 @@ export * from './jwt.js';
 export * from './manifest.js';
 export * from './nav.js';
 export * from './pagination.js';
+export * from './registry.js';
 export * from './service-accounts.js';
