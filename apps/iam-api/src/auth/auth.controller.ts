@@ -51,10 +51,11 @@ import {
   type TokenPairResponse,
 } from '@plantops/contracts';
 import type { Request } from 'express';
+import { AUDIT_ACTIONS } from '../audit/audit-actions';
 import { IamException } from '../common/iam.exception';
 import { RateLimit } from '../common/rate-limit.decorator';
 import { verifiedClaimsOf } from '../common/verified-claims';
-import { AuthAuditAction, AuthService } from './auth.service';
+import { AuthService } from './auth.service';
 import {
   LoginDto,
   PasswordResetDto,
@@ -280,7 +281,7 @@ export class AuthController {
     const revoked = await this.sessions.revoke(
       id,
       claimsOf(request),
-      AuthAuditAction.SESSION_REVOKED,
+      AUDIT_ACTIONS.SESSION_REVOKED,
     );
     if (!revoked) throw IamException.notFound('The session');
   }
