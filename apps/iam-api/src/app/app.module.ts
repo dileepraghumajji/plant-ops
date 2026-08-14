@@ -55,6 +55,7 @@ import { DatabaseModule } from '../database/database.module';
 import { HealthModule } from '../health/health.module';
 import { IamModule } from '../iam/iam.module';
 import { RedisModule } from '../redis/redis.module';
+import { RegistryModule } from '../registry/registry.module';
 import { ServiceAccountsModule } from '../service-accounts/service-accounts.module';
 
 @Module({
@@ -65,6 +66,7 @@ import { ServiceAccountsModule } from '../service-accounts/service-accounts.modu
     HealthModule,
     AuthModule,
     IamModule,
+    RegistryModule,
     ServiceAccountsModule,
   ],
   providers: [

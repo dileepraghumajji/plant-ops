@@ -9,6 +9,7 @@
  */
 
 import type {
+  ApplicationDTO,
   ApplicationManifest,
   CachedGrants,
   IamErrorResponse,
@@ -16,11 +17,13 @@ import type {
   JwtClaimKey,
   JwtClaims,
   ManifestNavNode,
+  NavNodeCatalogDTO,
   NavNodeDTO,
   NavigationResponse,
   Paginated,
   ResolvedGrants,
   SubjectType,
+  UpdateApplicationRequest,
 } from './index.js';
 import type {
   Equal,
@@ -28,7 +31,12 @@ import type {
   Extends,
   RequiredKeys,
 } from './type-assertions.js';
-import { IamErrorCode, JWT_CLAIM_KEYS, NavNodeKind } from './index.js';
+import {
+  IamErrorCode,
+  JWT_CLAIM_KEYS,
+  NAV_NODE_KIND_VALUES,
+  NavNodeKind,
+} from './index.js';
 
 export type ContractTypeAssertions = [
   // --- JWT claims: exactly the seven of Doc 03 §2, no more -----------------
@@ -92,6 +100,21 @@ export type ContractTypeAssertions = [
     >
   >,
 
+  // --- Registry (Doc 06 §4) -------------------------------------------------
+  // The catalog tree and the resolved tree share a `kind` vocabulary and
+  // nothing else: one is what exists, the other is what a subject may see.
+  Expect<Equal<NavNodeCatalogDTO['kind'], NavNodeDTO['kind']>>,
+  // `requires` and `children` are always present, so a consumer walking the
+  // tree needs no guards for either.
+  Expect<
+    Equal<'requires' | 'children' extends RequiredKeys<NavNodeCatalogDTO> ? true : false, true>
+  >,
+  // Nothing about an application is optional in a response; a `description`
+  // that is absent versus null is a distinction no consumer can act on.
+  Expect<Equal<RequiredKeys<ApplicationDTO>, keyof ApplicationDTO>>,
+  // The key is not patchable — it is what every manifest is written against.
+  Expect<Equal<'key' extends keyof UpdateApplicationRequest ? true : false, false>>,
+
   // --- Pagination -----------------------------------------------------------
   Expect<
     Equal<
@@ -116,6 +139,9 @@ describe('contracts', () => {
       'exp',
     ]);
     expect(Object.values(NavNodeKind)).toEqual(['module', 'menu', 'sub_menu']);
+    // The list a request schema builds its closed enum from, in the order
+    // migration 0001 declares the Postgres labels.
+    expect(NAV_NODE_KIND_VALUES).toEqual(Object.values(NavNodeKind));
     expect(IamErrorCode.SCOPE_DENIED).toBe('SCOPE_DENIED');
   });
 });
