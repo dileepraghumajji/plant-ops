@@ -55,6 +55,7 @@ import { DatabaseModule } from '../database/database.module';
 import { HealthModule } from '../health/health.module';
 import { IamModule } from '../iam/iam.module';
 import { RedisModule } from '../redis/redis.module';
+import { ServiceAccountsModule } from '../service-accounts/service-accounts.module';
 
 @Module({
   imports: [
@@ -64,6 +65,7 @@ import { RedisModule } from '../redis/redis.module';
     HealthModule,
     AuthModule,
     IamModule,
+    ServiceAccountsModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: HttpExceptionFilter },

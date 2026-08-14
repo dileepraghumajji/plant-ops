@@ -26,10 +26,19 @@
  * - **{@link VERIFIED_CLAIMS_SINK} → `RequestClaimsSink`.** The single place
  *   claims become branded and therefore usable as an RLS context (Doc 07 §5).
  *
- * `TokenService` and `KeysService` stay exported because Session 11
- * (service-account exchange) and Session 23 (`PermissionGuard`) build on them
- * and must sign with the same key set rather than grow their own — as Session
- * 9's `RefreshService`, which lives here, already does.
+ * `TokenService` and `KeysService` stay exported because Session 23's
+ * `PermissionGuard` builds on them and must sign with the same key set rather
+ * than grow its own — as `RefreshService` and Session 11's
+ * `ServiceTokenService`, which both live here, already do.
+ *
+ * ## Why the exchange lives here and the CRUD does not
+ *
+ * `ServiceTokenService` is `/auth/token`: a pre-authentication path that mints
+ * an access token from a credential, which is this module's whole subject. The
+ * `/iam/service-accounts` surface that *creates* those credentials is an
+ * ordinary authenticated administrative CRUD and lives in its own module — it
+ * has more in common with the user admin of Session 16 than with anything here.
+ * The seam between them is one row read by key.
  *
  * ## A fifth binding, and why it is not among the four
  *
@@ -71,6 +80,7 @@ import { PasswordResetService } from './password-reset.service';
 import { refreshReplayCacheProvider } from './refresh-replay.provider';
 import { RefreshService } from './refresh.service';
 import { REVOCATION_CACHE, revocationCacheProvider } from './revocation.provider';
+import { ServiceTokenService } from './service-token.service';
 import { SessionService } from './session.service';
 import { TokenService } from './token.service';
 import { RequestClaimsSink } from './verified-claims.sink';
@@ -110,6 +120,7 @@ const passwordResetDeliveryProvider: Provider = {
     AuthService,
     RefreshService,
     PasswordResetService,
+    ServiceTokenService,
     AccountStateService,
     RequestClaimsSink,
     passwordResetDeliveryProvider,
