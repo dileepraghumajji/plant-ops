@@ -14,9 +14,13 @@
  * already applied, and every mutation records itself through the one audit path
  * (Doc 10 §3).
  *
- * The services are exported because Session 14's `ManifestService` is the
- * declarative form of exactly these operations and will compose them rather than
- * re-implement the inserts.
+ * `ManifestService` (Session 14) is the declarative form of exactly these
+ * operations, and it composes them rather than re-implementing the inserts —
+ * which is why it sits in the same module and takes all three as dependencies.
+ *
+ * The services are exported because later sessions reach for them: Session 23
+ * seeds the IAM's own manifest through `ManifestService`, and Session 22 hangs
+ * nav-cache invalidation off the catalog writers.
  */
 
 import { Module } from '@nestjs/common';
@@ -24,13 +28,14 @@ import { AuditModule } from '../audit/audit.module';
 import { DatabaseModule } from '../database/database.module';
 import { ApplicationsController } from './applications.controller';
 import { ApplicationsService } from './applications.service';
+import { ManifestService } from './manifest.service';
 import { NavService } from './nav.service';
 import { PermissionsService } from './permissions.service';
 
 @Module({
   imports: [AuditModule, DatabaseModule],
   controllers: [ApplicationsController],
-  providers: [ApplicationsService, PermissionsService, NavService],
-  exports: [ApplicationsService, PermissionsService, NavService],
+  providers: [ApplicationsService, PermissionsService, NavService, ManifestService],
+  exports: [ApplicationsService, PermissionsService, NavService, ManifestService],
 })
 export class RegistryModule {}

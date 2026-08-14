@@ -25,8 +25,11 @@ export const MAX_PERMISSIONS_PER_MAPPING = 50;
  * Looser than a permission key: it needs no dot, because it is already scoped by
  * the application and by its position in the tree. `dc.approvals` and `settings`
  * are both fine.
+ *
+ * Exported for `manifest.dto.ts` — see `applications.dto.ts` for why the two
+ * routes into the catalog must agree on what a key is.
  */
-const navKey = z
+export const navKey = z
   .string()
   .trim()
   .min(1, 'key is required')
@@ -44,7 +47,7 @@ const navKey = z
  * an off-site redirect that the person who added the node chose, not the one who
  * clicked it.
  */
-const route = z
+export const navRoute = z
   .string()
   .trim()
   .min(1)
@@ -58,7 +61,7 @@ export const navNodeInputSchema = z
     /** What the menu actually shows (Doc 05 §4). */
     label: z.string().trim().min(1, 'label is required').max(160),
     /** Omitted on a pure container — a node that groups rather than navigates. */
-    route: route.optional(),
+    route: navRoute.optional(),
     /** An icon *key*; the frontend maps it to its own set (Doc 05 §7). */
     icon: z.string().trim().min(1).max(64).optional(),
     sort_order: z.number().int().min(0).max(100_000).optional(),

@@ -80,6 +80,20 @@ export const AUDIT_ACTIONS = {
   APPLICATION_MANIFEST_UPSERTED: 'application.manifest.upserted',
   APPLICATION_DEACTIVATED: 'application.deactivated',
   PERMISSION_CREATED: 'permission.created',
+  /**
+   * Both beyond Doc 10 §4, which lists only `permission.created` — the manifest
+   * upsert of Session 14 is the writer, and it is the only path that can edit or
+   * retire a permission (Doc 02 §7).
+   *
+   * `permission.deactivated` earns its own action rather than living inside the
+   * manifest summary because of what it does: every role that maps the key keeps
+   * the mapping and silently stops granting anything (Doc 04 §7 treats it as an
+   * invalidation trigger for exactly that reason). "When did this permission go
+   * away" must be answerable by an action filter, the way `nav.node.deactivated`
+   * — its exact counterpart, which Doc 10 §4 does list — already is.
+   */
+  PERMISSION_UPDATED: 'permission.updated',
+  PERMISSION_DEACTIVATED: 'permission.deactivated',
   NAV_NODE_CREATED: 'nav.node.created',
   NAV_NODE_UPDATED: 'nav.node.updated',
   NAV_NODE_DEACTIVATED: 'nav.node.deactivated',
