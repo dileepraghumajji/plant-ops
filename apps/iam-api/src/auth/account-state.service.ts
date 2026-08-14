@@ -40,10 +40,11 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { ACCOUNT_AUDIT_ACTIONS, IAM_SCHEMA, type UserStatus } from '@plantops/db';
+import { IAM_SCHEMA, type UserStatus } from '@plantops/db';
+import { AUDIT_ACTIONS, type AuditAction } from '../audit/audit-actions';
+import { AuditService } from '../audit/audit.service';
 import { afterCommit, entityManager } from '../common/transaction-context';
 import { SessionService } from './session.service';
-import { AuthAuditAction } from './auth.service';
 
 const S = `"${IAM_SCHEMA}"`;
 
@@ -59,7 +60,10 @@ const UNCHANGED: AccountStateChange = { changed: false, revokedSessions: [] };
 
 @Injectable()
 export class AccountStateService {
-  constructor(private readonly sessions: SessionService) {}
+  constructor(
+    private readonly audit: AuditService,
+    private readonly sessions: SessionService,
+  ) {}
 
   /**
    * Locks an account and logs it out everywhere (Doc 03 §8).
@@ -70,7 +74,7 @@ export class AccountStateService {
    * 0014's header has the full argument for one vocabulary rather than two.
    */
   lock(userId: string, reason?: string): Promise<AccountStateChange> {
-    return this.transition(userId, 'locked', ACCOUNT_AUDIT_ACTIONS.ACCOUNT_LOCKED, {
+    return this.transition(userId, 'locked', AUDIT_ACTIONS.ACCOUNT_LOCKED, {
       revokeSessions: true,
       payload: reason === undefined ? {} : { reason },
     });
@@ -89,7 +93,7 @@ export class AccountStateService {
    * administrator should be able to do by accident.
    */
   unlock(userId: string): Promise<AccountStateChange> {
-    return this.transition(userId, 'active', ACCOUNT_AUDIT_ACTIONS.ACCOUNT_UNLOCKED, {
+    return this.transition(userId, 'active', AUDIT_ACTIONS.ACCOUNT_UNLOCKED, {
       revokeSessions: false,
       from: ['locked'],
     });
@@ -105,7 +109,7 @@ export class AccountStateService {
    * until it expires.
    */
   disable(userId: string): Promise<AccountStateChange> {
-    return this.transition(userId, 'disabled', ACCOUNT_AUDIT_ACTIONS.ACCOUNT_DISABLED, {
+    return this.transition(userId, 'disabled', AUDIT_ACTIONS.USER_DISABLED, {
       revokeSessions: true,
     });
   }
@@ -127,7 +131,7 @@ export class AccountStateService {
   private async transition(
     userId: string,
     status: UserStatus,
-    action: string,
+    action: AuditAction,
     options: {
       revokeSessions: boolean;
       /** Statuses this transition is legal from. Defaults to any but the target. */
@@ -157,13 +161,10 @@ export class AccountStateService {
 
     if (rows.length === 0) return UNCHANGED;
 
-    await entityManager().query(
-      `select ${S}.write_audit($1, 'user', $2, $3::jsonb)`,
-      [action, userId, JSON.stringify(options.payload ?? {})],
-    );
+    await this.audit.record(action, { type: 'user', id: userId }, options.payload);
 
     const revokedSessions = options.revokeSessions
-      ? await this.sessions.revokeAllForUser(userId, AuthAuditAction.SESSION_REVOKED)
+      ? await this.sessions.revokeAllForUser(userId, AUDIT_ACTIONS.SESSION_REVOKED)
       : [];
 
     if (revokedSessions.length > 0) {

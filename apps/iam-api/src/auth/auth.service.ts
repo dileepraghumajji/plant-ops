@@ -64,6 +64,7 @@ import {
 } from '@plantops/contracts';
 import { IAM_SCHEMA, type LoginFailureReason, type VerifiedClaims } from '@plantops/db';
 import { ENV } from '../config/config.module';
+import { AUDIT_ACTIONS } from '../audit/audit-actions';
 import { IamException } from '../common/iam.exception';
 import { entityManager } from '../common/transaction-context';
 import { DatabaseService } from '../database/database.service';
@@ -72,12 +73,6 @@ import { SessionService } from './session.service';
 import { TokenService } from './token.service';
 
 const S = `"${IAM_SCHEMA}"`;
-
-/** Action strings from the Doc 10 §4 catalog. Session 12 makes this typed. */
-export const AuthAuditAction = {
-  LOGOUT: 'auth.logout',
-  SESSION_REVOKED: 'auth.session.revoked',
-} as const;
 
 export interface LoginInput {
   email: string;
@@ -170,7 +165,7 @@ export class AuthService {
    * it failed — and because `revoked_at` is never overwritten.
    */
   async logout(claims: VerifiedClaims): Promise<void> {
-    await this.sessions.revoke(claims.sid, claims, AuthAuditAction.LOGOUT);
+    await this.sessions.revoke(claims.sid, claims, AUDIT_ACTIONS.LOGOUT);
   }
 
   /**

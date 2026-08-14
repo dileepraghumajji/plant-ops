@@ -64,6 +64,7 @@ import {
   type AuthGuardOptions,
 } from '@plantops/auth-kit';
 import type { EnvConfig } from '@plantops/config';
+import { AuditModule } from '../audit/audit.module';
 import { ENV } from '../config/config.module';
 import { DatabaseModule } from '../database/database.module';
 import { RedisModule } from '../redis/redis.module';
@@ -111,7 +112,7 @@ const passwordResetDeliveryProvider: Provider = {
 };
 
 @Module({
-  imports: [DatabaseModule, RedisModule],
+  imports: [AuditModule, DatabaseModule, RedisModule],
   controllers: [AuthController, JwksController],
   providers: [
     KeysService,

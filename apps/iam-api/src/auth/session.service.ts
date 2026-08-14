@@ -46,6 +46,8 @@ import {
 } from '@plantops/contracts';
 import { IAM_SCHEMA, type RefreshOutcome, type VerifiedClaims } from '@plantops/db';
 import { ENV } from '../config/config.module';
+import type { AuditAction } from '../audit/audit-actions';
+import { AuditService } from '../audit/audit.service';
 import { afterCommit, entityManager } from '../common/transaction-context';
 import { DatabaseService } from '../database/database.service';
 import { REVOCATION_CACHE } from './revocation.provider';
@@ -118,6 +120,7 @@ export class SessionService implements RevocationFallback {
   constructor(
     @Inject(ENV) private readonly env: EnvConfig,
     @Inject(REVOCATION_CACHE) private readonly revocations: RevocationCache,
+    private readonly audit: AuditService,
     private readonly database: DatabaseService,
   ) {}
 
@@ -252,7 +255,11 @@ export class SessionService implements RevocationFallback {
    * `revoked_at` is never overwritten (a revocation time is a fact), and a
    * client retrying a force-logout should not be told it failed.
    */
-  async revoke(sessionId: string, claims: VerifiedClaims, action: string): Promise<boolean> {
+  async revoke(
+    sessionId: string,
+    claims: VerifiedClaims,
+    action: AuditAction,
+  ): Promise<boolean> {
     const column = claims.sty === SubjectType.USER ? 'user_id' : 'service_account_id';
 
     // Wrapped in a CTE so the statement's command is SELECT. A bare
@@ -274,10 +281,7 @@ export class SessionService implements RevocationFallback {
 
     if (rows.length === 0) return false;
 
-    await entityManager().query(
-      `select ${S}.write_audit($1, 'session', $2, '{}'::jsonb)`,
-      [action, sessionId],
-    );
+    await this.audit.record(action, { type: 'session', id: sessionId });
 
     // After COMMIT, never before: until the transaction lands there is no
     // revocation to announce, and a rollback would leave every verifier in the
@@ -305,7 +309,7 @@ export class SessionService implements RevocationFallback {
    * out at 14:02" is the thing they are looking for; a single aggregate row
    * would leave every individual session's ending unexplained.
    */
-  async revokeAllForUser(userId: string, action: string): Promise<string[]> {
+  async revokeAllForUser(userId: string, action: AuditAction): Promise<string[]> {
     // The same CTE shape as `revoke`, and for the same reason: TypeORM's
     // Postgres driver returns `[rows, rowCount]` for a bare UPDATE, so the
     // `returning` clause has to be wrapped to come back as rows.
@@ -322,10 +326,7 @@ export class SessionService implements RevocationFallback {
     )) as { id: string }[];
 
     for (const { id } of rows) {
-      await entityManager().query(
-        `select ${S}.write_audit($1, 'session', $2, '{}'::jsonb)`,
-        [action, id],
-      );
+      await this.audit.record(action, { type: 'session', id });
     }
 
     return rows.map((row) => row.id);

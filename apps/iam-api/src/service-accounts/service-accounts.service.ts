@@ -23,6 +23,10 @@
  * actor from the context the token established rather than from anything this
  * service asserts (Doc 07 §6).
  *
+ * Since Session 12 those audit calls go through `AuditService`, which is what
+ * couples them to that transaction structurally and redacts their payloads
+ * (Doc 10 §3, §8).
+ *
  * ## Interim authorization, and why it is not nothing
  *
  * Doc 06 §10 gates this surface on `iam.client.svc.*`, which needs the
@@ -58,10 +62,11 @@ import {
 import {
   IAM_SCHEMA,
   RLS_SETTINGS,
-  SERVICE_ACCOUNT_AUDIT_ACTIONS,
   hashSecret,
   type VerifiedClaims,
 } from '@plantops/db';
+import { AUDIT_ACTIONS } from '../audit/audit-actions';
+import { AuditService } from '../audit/audit.service';
 import { IamException } from '../common/iam.exception';
 import { entityManager } from '../common/transaction-context';
 import {
@@ -90,6 +95,8 @@ export interface CreateServiceAccountInput {
 
 @Injectable()
 export class ServiceAccountsService {
+  constructor(private readonly audit: AuditService) {}
+
   /**
    * Creates an account and returns its secret, once (Doc 06 §10).
    *
@@ -118,13 +125,18 @@ export class ServiceAccountsService {
     )) as ServiceAccountRow[];
 
     const row = rows[0];
-    await this.audit(SERVICE_ACCOUNT_AUDIT_ACTIONS.CREATED, row.id, {
-      name: row.name,
-      // The key, never the secret. It is the public half, and an audit trail
-      // that cannot say *which* account was created is not one an operator can
-      // act on (Doc 10 §8).
-      account_key: row.key,
-    });
+    await this.audit.record(
+      AUDIT_ACTIONS.SERVICE_ACCOUNT_CREATED,
+      { type: 'service_account', id: row.id },
+      {
+        name: row.name,
+        // The key, never the secret. It is the public half, and an audit trail
+        // that cannot say *which* account was created is not one an operator can
+        // act on (Doc 10 §8) — which is why `redact.ts` deliberately leaves
+        // `account_key` alone while catching `key_hash`.
+        account_key: row.key,
+      },
+    );
 
     return { ...toDto(row), account_secret: accountSecret };
   }
@@ -204,9 +216,11 @@ export class ServiceAccountsService {
     const row = rows[0];
     if (row === undefined) return null;
 
-    await this.audit(SERVICE_ACCOUNT_AUDIT_ACTIONS.ROTATED, row.id, {
-      account_key: row.key,
-    });
+    await this.audit.record(
+      AUDIT_ACTIONS.SERVICE_ACCOUNT_ROTATED,
+      { type: 'service_account', id: row.id },
+      { account_key: row.key },
+    );
 
     return { ...toDto(row), account_secret: accountSecret };
   }
@@ -255,11 +269,11 @@ export class ServiceAccountsService {
 
     const row = changed[0];
     if (row !== undefined) {
-      await this.audit(
+      await this.audit.record(
         status === ServiceAccountStatus.REVOKED
-          ? SERVICE_ACCOUNT_AUDIT_ACTIONS.REVOKED
-          : SERVICE_ACCOUNT_AUDIT_ACTIONS.REACTIVATED,
-        row.id,
+          ? AUDIT_ACTIONS.SERVICE_ACCOUNT_REVOKED
+          : AUDIT_ACTIONS.SERVICE_ACCOUNT_REACTIVATED,
+        { type: 'service_account', id: row.id },
         { account_key: row.key },
       );
       return toDto(row);
@@ -307,24 +321,6 @@ export class ServiceAccountsService {
     if (row?.platform !== true && row?.client_admin !== true) {
       throw IamException.permissionDenied();
     }
-  }
-
-  /**
-   * One audit record, through the non-forgeable path (Doc 07 §6).
-   *
-   * In the caller's transaction, so a rolled-back change leaves no record of
-   * having happened — Doc 10 §3's same-transaction rule, which Session 12's
-   * `AuditService` will formalise and route these calls through.
-   */
-  private async audit(
-    action: string,
-    id: string,
-    payload: Record<string, unknown>,
-  ): Promise<void> {
-    await entityManager().query(
-      `select ${S}.write_audit($1, 'service_account', $2, $3::jsonb)`,
-      [action, id, JSON.stringify(payload)],
-    );
   }
 }
 
