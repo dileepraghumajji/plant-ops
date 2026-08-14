@@ -45,6 +45,7 @@ import { type MiddlewareConsumer, Module, type NestModule } from '@nestjs/common
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR, APP_PIPE } from '@nestjs/core';
 import { AuthGuard } from '@plantops/auth-kit';
 import { AuthModule } from '../auth/auth.module';
+import { ClientsModule } from '../clients/clients.module';
 import { HttpExceptionFilter } from '../common/http-exception.filter';
 import { RequestIdMiddleware } from '../common/request-id.middleware';
 import { TenantContextInterceptor } from '../common/tenant-context.interceptor';
@@ -67,6 +68,7 @@ import { ServiceAccountsModule } from '../service-accounts/service-accounts.modu
     AuthModule,
     IamModule,
     RegistryModule,
+    ClientsModule,
     ServiceAccountsModule,
   ],
   providers: [

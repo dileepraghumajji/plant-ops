@@ -100,6 +100,19 @@ export const AUDIT_ACTIONS = {
   MENU_PERMISSION_MAPPED: 'menu_permission.mapped',
   MENU_PERMISSION_UNMAPPED: 'menu_permission.unmapped',
   CLIENT_CREATED: 'client.created',
+  /**
+   * Beyond Doc 10 §4, which lists only `client.created` and `client.suspended`
+   * — the same gap `application.updated` fills on the catalog side, and filled
+   * the same way. An ordinary edit (a renamed tenant, a changed `config`) has to
+   * be recorded as *something*, and recording it as a suspension would make the
+   * action filter that finds real suspensions useless.
+   *
+   * Reactivation rides here rather than earning its own action: it is the
+   * ordinary case of a status edit, and `before`/`after` in the payload already
+   * says which way it went. Suspension is the one that is singled out, because
+   * it is the edit that locks an organisation out (Doc 06 §5).
+   */
+  CLIENT_UPDATED: 'client.updated',
   CLIENT_SUSPENDED: 'client.suspended',
   CLIENT_APPLICATION_ENABLED: 'client_application.enabled',
   CLIENT_APPLICATION_DISABLED: 'client_application.disabled',

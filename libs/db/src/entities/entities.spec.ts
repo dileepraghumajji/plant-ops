@@ -10,6 +10,8 @@
  */
 
 import {
+  CLIENT_STATUS_VALUES,
+  ClientStatus,
   NavNodeKind,
   SCOPE_PATH_LABEL_PREFIX,
   SERVICE_ACCOUNT_STATUS_VALUES,
@@ -237,6 +239,14 @@ describe('Postgres enums (migration 0001)', () => {
     // status the API accepts and the column rejects.
     expect([...SERVICE_ACCOUNT_STATUSES]).toEqual([...SERVICE_ACCOUNT_STATUS_VALUES]);
     expect([...SERVICE_ACCOUNT_STATUSES]).toEqual(Object.values(ServiceAccountStatus));
+  });
+
+  it('agrees with @plantops/contracts on the client states', () => {
+    // The same two-vocabulary problem, for `PATCH /iam/clients/:id` (Doc 06 §5).
+    // Suspension is the tenant off switch, so a drift here would be an API that
+    // accepts a status login never checks for.
+    expect([...CLIENT_STATUSES]).toEqual([...CLIENT_STATUS_VALUES]);
+    expect([...CLIENT_STATUSES]).toEqual(Object.values(ClientStatus));
   });
 });
 

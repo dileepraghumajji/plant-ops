@@ -56,7 +56,7 @@ import { entityManager } from '../common/transaction-context';
 import { ApplicationsService } from './applications.service';
 import { rethrowAsConflict } from './conflict';
 import { PermissionsService } from './permissions.service';
-import { assertPlatformAdmin } from './platform-admin';
+import { assertPlatformAdmin } from '../common/platform-admin';
 
 const S = `"${IAM_SCHEMA}"`;
 
