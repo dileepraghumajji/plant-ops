@@ -9,7 +9,12 @@
  * next to the migrations.
  */
 
-import { NavNodeKind, SCOPE_PATH_LABEL_PREFIX } from '@plantops/contracts';
+import {
+  NavNodeKind,
+  SCOPE_PATH_LABEL_PREFIX,
+  SERVICE_ACCOUNT_STATUS_VALUES,
+  ServiceAccountStatus,
+} from '@plantops/contracts';
 import { getMetadataArgsStorage } from 'typeorm';
 import { ENUM_VALUES } from '../migrations/index.js';
 import { IAM_ENUMS, IAM_SCHEMA } from '../schema.js';
@@ -221,6 +226,17 @@ describe('Postgres enums (migration 0001)', () => {
 
   it('agrees with @plantops/contracts on the nav kind discriminator', () => {
     expect([...NAV_NODE_KINDS]).toEqual(Object.values(NavNodeKind));
+  });
+
+  it('agrees with @plantops/contracts on the service-account states', () => {
+    // Two vocabularies for one column: the Postgres enum (0001) that this
+    // entity mirrors, and the wire status `@plantops/contracts` publishes for
+    // `PATCH /iam/service-accounts/:id`. Contracts cannot import this lib —
+    // it has zero dependencies by design (Doc 08 §3) — so the values are spelled
+    // twice, and this is what stops the two spellings from drifting into a
+    // status the API accepts and the column rejects.
+    expect([...SERVICE_ACCOUNT_STATUSES]).toEqual([...SERVICE_ACCOUNT_STATUS_VALUES]);
+    expect([...SERVICE_ACCOUNT_STATUSES]).toEqual(Object.values(ServiceAccountStatus));
   });
 });
 

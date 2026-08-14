@@ -18,6 +18,10 @@ import { createZodDto } from '../common/validation.pipe';
 import { PASSWORD_MAX_LENGTH, passwordSchema } from './password.util';
 import { RESET_TOKEN_MAX_LENGTH } from './password-reset.util';
 import { REFRESH_TOKEN_MAX_LENGTH } from './refresh-token.util';
+import {
+  SERVICE_ACCOUNT_KEY_MAX_LENGTH,
+  SERVICE_ACCOUNT_SECRET_MAX_LENGTH,
+} from './service-credentials.util';
 
 /**
  * Slugs are the tenant half of the login credential (Doc 01 §3.4). Bounded and
@@ -126,3 +130,32 @@ export const passwordResetSchema = z.object({
 });
 
 export class PasswordResetDto extends createZodDto(passwordResetSchema) {}
+
+/**
+ * `POST /auth/token` — the client-credentials exchange (Doc 03 §5).
+ *
+ * Both fields are bounded and neither is shape-checked, which is the same
+ * treatment `refresh_token` gets and for the same reason: a 400 for a
+ * malformed key and a 401 for a wrong one would let a caller tell which strings
+ * are worth presenting. The bounds stay because the key reaches a database
+ * lookup and the secret reaches argon2id, both on an unauthenticated endpoint.
+ *
+ * Doc 03 §5 also allows HTTP Basic for this exchange. The JSON body is what is
+ * implemented: it is one parsing path rather than two, it keeps the credential
+ * out of a header that proxies and access logs habitually capture, and Basic can
+ * be added later as an alternative encoding of the same two fields without
+ * changing anything below the controller.
+ */
+export const serviceTokenSchema = z.object({
+  account_key: z
+    .string()
+    .trim()
+    .min(1, 'account_key is required')
+    .max(SERVICE_ACCOUNT_KEY_MAX_LENGTH),
+  account_secret: z
+    .string()
+    .min(1, 'account_secret is required')
+    .max(SERVICE_ACCOUNT_SECRET_MAX_LENGTH),
+});
+
+export class ServiceTokenDto extends createZodDto(serviceTokenSchema) {}

@@ -1,16 +1,18 @@
 /**
- * `POST /auth/login`, `/auth/logout`, `/auth/sessions` (Doc 06 §3).
+ * `POST /auth/login`, `/auth/logout`, `/auth/token`, `/auth/sessions`
+ * (Doc 06 §3, §10).
  *
  * ## Which routes are public, and why exactly these
  *
  * `AuthGuard` is registered app-wide, so a route is authenticated unless it
- * says otherwise. Login and refresh are `@Public()` here — between them they are
- * the routes that exist to *produce* the token everything else requires, and
- * refresh in particular is reached precisely when the access token has expired,
- * so requiring one would make it unreachable. Logout, the session list and the
- * revoke endpoint all carry a bearer token and are guarded like any other
- * endpoint, which is what lets them act on `claims.sid` and `claims.sub`
- * instead of trusting a body.
+ * says otherwise. Login, refresh, the two password-reset halves and the
+ * service-account exchange are `@Public()` here — between them they are the
+ * routes that exist to *produce* the token everything else requires, or (in
+ * reset's case) to reach somebody who cannot obtain one. Refresh in particular
+ * is reached precisely when the access token has expired, so requiring one would
+ * make it unreachable. Logout, the session list and the revoke endpoint all
+ * carry a bearer token and are guarded like any other endpoint, which is what
+ * lets them act on `claims.sid` and `claims.sub` instead of trusting a body.
  *
  * ## The throttle on login is a security control, not a capacity one
  *
@@ -44,6 +46,7 @@ import {
 import { Public } from '@plantops/auth-kit';
 import {
   AUTH_ROUTE_PREFIX,
+  type AccessTokenResponse,
   type SessionDTO,
   type TokenPairResponse,
 } from '@plantops/contracts';
@@ -57,9 +60,11 @@ import {
   PasswordResetDto,
   PasswordResetRequestDto,
   RefreshDto,
+  ServiceTokenDto,
 } from './auth.dto';
 import { PasswordResetService } from './password-reset.service';
 import { RefreshService } from './refresh.service';
+import { ServiceTokenService } from './service-token.service';
 import { SessionService } from './session.service';
 
 /** Ten attempts a minute per caller, and no free pass when Redis is down. */
@@ -92,6 +97,27 @@ const REFRESH_RATE_LIMIT = { limit: 30, windowSeconds: 60 } as const;
 const SESSION_RATE_LIMIT = { limit: 60, windowSeconds: 60 } as const;
 
 /**
+ * The client-credentials exchange is throttled and fails **open** — like
+ * refresh, and pointedly not like login.
+ *
+ * Login's fail-closed posture buys something specific: an attacker's guesses at
+ * a human-chosen password stop when the counter store does. Nothing analogous is
+ * on offer here. An `account_secret` is 256 bits from the CSPRNG (Doc 03 §7), so
+ * the throttle is not what makes guessing hopeless and refusing to serve without
+ * Redis would not make it more so.
+ *
+ * What failing closed *would* cost is the entire point of these identities:
+ * every module-to-module call in the platform re-authenticates at least every
+ * five minutes (Doc 03 §5), so a cache blip would become a fleet-wide outage of
+ * inter-module traffic within one TTL — with no human anywhere to notice or
+ * retry.
+ *
+ * Sixty a minute is roomy for a fleet of modules on a five-minute cycle behind
+ * one egress address, and still bounds a loop.
+ */
+const SERVICE_TOKEN_RATE_LIMIT = { limit: 60, windowSeconds: 60 } as const;
+
+/**
  * Reset is the tightest limit on the surface, and it fails **closed**.
  *
  * Requesting a reset is unauthenticated, costs an email, and invalidates the
@@ -117,6 +143,7 @@ export class AuthController {
     private readonly refreshes: RefreshService,
     private readonly sessions: SessionService,
     private readonly passwordResets: PasswordResetService,
+    private readonly serviceTokens: ServiceTokenService,
   ) {}
 
   @Post('login')
@@ -193,6 +220,27 @@ export class AuthController {
     await this.passwordResets.complete({
       token: body.token,
       newPassword: body.new_password,
+    });
+  }
+
+  /**
+   * The client-credentials exchange (Doc 03 §5, Doc 06 §10).
+   *
+   * `@Public()` for the reason login is: it is a route that exists to *produce*
+   * the token everything else requires, and the credential it takes is the
+   * account's own key and secret rather than a bearer token.
+   *
+   * The response is an {@link AccessTokenResponse} — no `refresh_token`, by
+   * design. Doc 03 §5: "no refresh; re-request as needed".
+   */
+  @Post('token')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @RateLimit(SERVICE_TOKEN_RATE_LIMIT)
+  serviceToken(@Body() body: ServiceTokenDto): Promise<AccessTokenResponse> {
+    return this.serviceTokens.exchange({
+      accountKey: body.account_key,
+      accountSecret: body.account_secret,
     });
   }
 
