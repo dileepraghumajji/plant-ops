@@ -30,6 +30,10 @@
 
 import { Controller, Get, Res } from '@nestjs/common';
 import { Public } from '@plantops/auth-kit';
+// The one platform-typed import left in a controller: `/ready` sets its own
+// status code and a cache header on the raw response, which no return value can
+// express. Everything that only needed the *claims* off the request now takes
+// `@Claims()` and imports nothing from express (`common/claims.decorator.ts`).
 import type { Response } from 'express';
 import { SkipRateLimit } from '../common/rate-limit.decorator';
 import { SkipTransaction } from '../common/transaction-context';

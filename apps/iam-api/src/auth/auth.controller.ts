@@ -41,7 +41,6 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
-  Req,
 } from '@nestjs/common';
 import { Public } from '@plantops/auth-kit';
 import {
@@ -50,11 +49,11 @@ import {
   type SessionDTO,
   type TokenPairResponse,
 } from '@plantops/contracts';
-import type { Request } from 'express';
+import type { VerifiedClaims } from '@plantops/db';
 import { AUDIT_ACTIONS } from '../audit/audit-actions';
+import { Claims } from '../common/claims.decorator';
 import { IamException } from '../common/iam.exception';
 import { RateLimit } from '../common/rate-limit.decorator';
-import { verifiedClaimsOf } from '../common/verified-claims';
 import { AuthService } from './auth.service';
 import {
   LoginDto,
@@ -249,14 +248,14 @@ export class AuthController {
   @Post('logout')
   @HttpCode(HttpStatus.NO_CONTENT)
   @RateLimit(SESSION_RATE_LIMIT)
-  async logout(@Req() request: Request): Promise<void> {
-    await this.auth.logout(claimsOf(request));
+  async logout(@Claims() claims: VerifiedClaims): Promise<void> {
+    await this.auth.logout(claims);
   }
 
   @Get('sessions')
   @RateLimit(SESSION_RATE_LIMIT)
-  sessionList(@Req() request: Request): Promise<SessionDTO[]> {
-    return this.sessions.listForSubject(claimsOf(request));
+  sessionList(@Claims() claims: VerifiedClaims): Promise<SessionDTO[]> {
+    return this.sessions.listForSubject(claims);
   }
 
   /**
@@ -275,27 +274,14 @@ export class AuthController {
   @HttpCode(HttpStatus.NO_CONTENT)
   @RateLimit(SESSION_RATE_LIMIT)
   async revokeSession(
-    @Req() request: Request,
+    @Claims() claims: VerifiedClaims,
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
   ): Promise<void> {
     const revoked = await this.sessions.revoke(
       id,
-      claimsOf(request),
+      claims,
       AUDIT_ACTIONS.SESSION_REVOKED,
     );
     if (!revoked) throw IamException.notFound('The session');
   }
-}
-
-/**
- * The verified claims for this request.
- *
- * The guard has already refused anything without them, so reaching the throw is
- * a wiring bug — a route that lost its guard — and it fails closed rather than
- * running the handler with no subject.
- */
-function claimsOf(request: Request) {
-  const claims = verifiedClaimsOf(request);
-  if (!claims) throw IamException.authRequired();
-  return claims;
 }

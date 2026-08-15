@@ -28,7 +28,7 @@
  * Nothing on this surface is tenant-scoped. Catalog rows carry no `client_id`
  * (Doc 07 §6), the authorization question is answered from the derived RLS
  * context rather than from the token, and `iam.write_audit` takes its actor from
- * that same context (Doc 10 §3). A `@Req()` parameter here would be an unused
+ * that same context (Doc 10 §3). A `@Claims()` parameter here would be an unused
  * argument that looked like a tenant check.
  */
 

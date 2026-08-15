@@ -15,18 +15,17 @@
  *
  * Since Session 8 the claims are real: `AuthGuard` verifies a bearer token and
  * `RequestClaimsSink` brands it, so this route now reports what Postgres
- * believes about a genuinely authenticated caller. The `!claims` branch below
- * is unreachable through the guard and stays as a fail-closed backstop against
- * a route that ever loses it.
+ * believes about a genuinely authenticated caller. The fail-closed backstop
+ * against a route that ever loses its guard is `@Claims()` itself, which throws
+ * `AUTH_REQUIRED` rather than handing a handler no subject — this controller no
+ * longer carries its own copy of that check.
  */
 
-import { Controller, Get, Req } from '@nestjs/common';
+import { Controller, Get } from '@nestjs/common';
 import { IAM_ROUTE_PREFIX } from '@plantops/contracts';
-import { RLS_SETTINGS } from '@plantops/db';
-import type { Request } from 'express';
-import { IamException } from '../common/iam.exception';
+import { RLS_SETTINGS, type VerifiedClaims } from '@plantops/db';
+import { Claims } from '../common/claims.decorator';
 import { entityManager } from '../common/transaction-context';
-import { verifiedClaimsOf } from '../common/verified-claims';
 
 /** What the *database* believes about the caller, not what the app assumed. */
 export interface WhoAmIResponse {
@@ -44,10 +43,7 @@ export interface WhoAmIResponse {
 @Controller(IAM_ROUTE_PREFIX)
 export class WhoAmIController {
   @Get('whoami')
-  async whoami(@Req() request: Request): Promise<WhoAmIResponse> {
-    const claims = verifiedClaimsOf(request);
-    if (!claims) throw IamException.authRequired();
-
+  async whoami(@Claims() claims: VerifiedClaims): Promise<WhoAmIResponse> {
     // `current_setting(name, true)` — the second argument returns null for an
     // unset setting instead of raising, which is what makes the *absence* of a
     // context observable here rather than a 500.

@@ -32,7 +32,6 @@ import {
   Patch,
   Post,
   Query,
-  Req,
 } from '@nestjs/common';
 import {
   IAM_ROUTE_PREFIX,
@@ -40,10 +39,10 @@ import {
   type ServiceAccountDTO,
   type ServiceAccountSecretDTO,
 } from '@plantops/contracts';
-import type { Request } from 'express';
+import type { VerifiedClaims } from '@plantops/db';
+import { Claims } from '../common/claims.decorator';
 import { IamException } from '../common/iam.exception';
 import { RateLimit } from '../common/rate-limit.decorator';
-import { verifiedClaimsOf } from '../common/verified-claims';
 import {
   CreateServiceAccountDto,
   PaginationDto,
@@ -72,19 +71,19 @@ export class ServiceAccountsController {
   @HttpCode(HttpStatus.CREATED)
   @RateLimit(MINTING_RATE_LIMIT)
   create(
-    @Req() request: Request,
+    @Claims() claims: VerifiedClaims,
     @Body() body: CreateServiceAccountDto,
   ): Promise<ServiceAccountSecretDTO> {
-    return this.accounts.create(claimsOf(request), { name: body.name });
+    return this.accounts.create(claims, { name: body.name });
   }
 
   @Get()
   @RateLimit(ADMIN_RATE_LIMIT)
   list(
-    @Req() request: Request,
+    @Claims() claims: VerifiedClaims,
     @Query() query: PaginationDto,
   ): Promise<Paginated<ServiceAccountDTO>> {
-    return this.accounts.list(claimsOf(request), query);
+    return this.accounts.list(claims, query);
   }
 
   /**
@@ -98,10 +97,10 @@ export class ServiceAccountsController {
   @HttpCode(HttpStatus.OK)
   @RateLimit(MINTING_RATE_LIMIT)
   async rotate(
-    @Req() request: Request,
+    @Claims() claims: VerifiedClaims,
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
   ): Promise<ServiceAccountSecretDTO> {
-    const rotated = await this.accounts.rotate(claimsOf(request), id);
+    const rotated = await this.accounts.rotate(claims, id);
     if (rotated === null) throw IamException.notFound('The service account');
     return rotated;
   }
@@ -110,25 +109,12 @@ export class ServiceAccountsController {
   @Patch(':id')
   @RateLimit(ADMIN_RATE_LIMIT)
   async update(
-    @Req() request: Request,
+    @Claims() claims: VerifiedClaims,
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
     @Body() body: UpdateServiceAccountDto,
   ): Promise<ServiceAccountDTO> {
-    const updated = await this.accounts.setStatus(claimsOf(request), id, body.status);
+    const updated = await this.accounts.setStatus(claims, id, body.status);
     if (updated === null) throw IamException.notFound('The service account');
     return updated;
   }
-}
-
-/**
- * The verified claims for this request.
- *
- * The guard has already refused anything without them, so reaching the throw is
- * a wiring bug — a route that lost its guard — and it fails closed rather than
- * running the handler with no subject.
- */
-function claimsOf(request: Request) {
-  const claims = verifiedClaimsOf(request);
-  if (!claims) throw IamException.authRequired();
-  return claims;
 }

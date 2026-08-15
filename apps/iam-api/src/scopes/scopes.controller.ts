@@ -47,18 +47,17 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
-  Req,
 } from '@nestjs/common';
 import {
   IAM_ROUTE_PREFIX,
   type ScopeNodeDTO,
   type ScopeTreeResponse,
 } from '@plantops/contracts';
-import type { Request } from 'express';
+import type { VerifiedClaims } from '@plantops/db';
+import { Claims } from '../common/claims.decorator';
 import { IamException } from '../common/iam.exception';
 import { RateLimit } from '../common/rate-limit.decorator';
 import { Transactional } from '../common/transaction-context';
-import { verifiedClaimsOf } from '../common/verified-claims';
 import { CreateScopeNodeDto, UpdateScopeNodeDto } from './dto/scopes.dto';
 import { ScopesService } from './scopes.service';
 
@@ -84,16 +83,16 @@ export class ScopesController {
   @HttpCode(HttpStatus.CREATED)
   @RateLimit(SCOPES_RATE_LIMIT)
   create(
-    @Req() request: Request,
+    @Claims() claims: VerifiedClaims,
     @Body() body: CreateScopeNodeDto,
   ): Promise<ScopeNodeDTO> {
-    return this.scopes.create(claimsOf(request), body);
+    return this.scopes.create(claims, body);
   }
 
   @Get()
   @RateLimit(SCOPES_RATE_LIMIT)
-  tree(@Req() request: Request): Promise<ScopeTreeResponse> {
-    return this.scopes.tree(claimsOf(request));
+  tree(@Claims() claims: VerifiedClaims): Promise<ScopeTreeResponse> {
+    return this.scopes.tree(claims);
   }
 
   /** Rename and/or move. See the header for why the isolation lives here. */
@@ -101,11 +100,11 @@ export class ScopesController {
   @RateLimit(MOVE_RATE_LIMIT)
   @Transactional({ isolation: 'REPEATABLE READ', retries: 2 })
   async update(
-    @Req() request: Request,
+    @Claims() claims: VerifiedClaims,
     @Param('id', uuidParam()) id: string,
     @Body() body: UpdateScopeNodeDto,
   ): Promise<ScopeNodeDTO> {
-    const updated = await this.scopes.update(claimsOf(request), id, body);
+    const updated = await this.scopes.update(claims, id, body);
     if (updated === null) throw IamException.notFound('The scope node');
     return updated;
   }
@@ -122,23 +121,10 @@ export class ScopesController {
   @HttpCode(HttpStatus.NO_CONTENT)
   @RateLimit(SCOPES_RATE_LIMIT)
   async remove(
-    @Req() request: Request,
+    @Claims() claims: VerifiedClaims,
     @Param('id', uuidParam()) id: string,
   ): Promise<void> {
-    const removed = await this.scopes.remove(claimsOf(request), id);
+    const removed = await this.scopes.remove(claims, id);
     if (!removed) throw IamException.notFound('The scope node');
   }
-}
-
-/**
- * The verified claims for this request.
- *
- * The guard has already refused anything without them, so reaching the throw is
- * a wiring bug — a route that lost its guard — and it fails closed rather than
- * running the handler with no subject.
- */
-function claimsOf(request: Request) {
-  const claims = verifiedClaimsOf(request);
-  if (!claims) throw IamException.authRequired();
-  return claims;
 }
