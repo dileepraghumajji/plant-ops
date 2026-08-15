@@ -1,4 +1,19 @@
 {
+  "permissions": {
+    "allow": [
+      "PowerShell(npx nx show project @plantops/db --json 2>&1)",
+      "Bash(node -e ' *)",
+      "Read(//d/tools/**)",
+      "Bash(tar -xf \"/c/Users/dilee/AppData/Local/Temp/claude/d--projects-plant-ops/ceab1fe4-ee0f-4472-b034-ac3cae86bd77/scratchpad/pg17.zip\")",
+      "Bash(git checkout *)",
+      "Bash(git commit *)",
+      "Bash(git merge *)",
+      "Bash(git branch *)"
+    ]
+  },
+  "enabledPlugins": {
+    "nx@nx-claude-plugins": true
+  },
   "extraKnownMarketplaces": {
     "nx-claude-plugins": {
       "source": {
@@ -7,12 +22,11 @@
       }
     }
   },
-  "enabledPlugins": {
-    "nx@nx-claude-plugins": true
-  },
   "sandbox": {
     "network": {
-      "allowedDomains": ["www.google-analytics.com"]
+      "allowedDomains": [
+        "www.google-analytics.com"
+      ]
     }
   }
 }
