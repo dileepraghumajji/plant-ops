@@ -107,9 +107,12 @@ export class FakeDatabaseService {
           return active;
         },
         connect: async () => undefined,
-        startTransaction: async () => {
+        // The isolation level is recorded rather than ignored: a route that
+        // asks for `REPEATABLE READ` (Doc 04 §7.1) and silently gets the
+        // default is a correctness bug no assertion about rows would catch.
+        startTransaction: async (isolation?: string) => {
           active = true;
-          this.events.push('begin');
+          this.events.push(isolation === undefined ? 'begin' : `begin:${isolation}`);
         },
         commitTransaction: async () => {
           active = false;

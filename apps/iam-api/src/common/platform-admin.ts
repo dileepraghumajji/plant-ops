@@ -40,8 +40,8 @@
  *
  * A Nest guard runs *before* `TenantContextInterceptor` opens the transaction,
  * so at guard time there is no RLS context to read — the setting is
- * transaction-local by design. Same reasoning as
- * `ServiceAccountsService.assertAdministrator`.
+ * transaction-local by design. Same reasoning as `assertAdministrator` in
+ * `administrator.ts`, the client-tier counterpart of this file.
  *
  * ## The refusal is a 403, not a 404
  *

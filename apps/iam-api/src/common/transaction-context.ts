@@ -99,3 +99,55 @@ export const SKIP_TRANSACTION_METADATA = 'iam:skip-transaction';
  * a transaction on it.
  */
 export const SkipTransaction = () => SetMetadata(SKIP_TRANSACTION_METADATA, true);
+
+export const TRANSACTION_OPTIONS_METADATA = 'iam:transaction-options';
+
+/**
+ * The isolation levels a handler may ask for.
+ *
+ * Narrower than TypeORM's own union on purpose: `READ UNCOMMITTED` is not
+ * offered, because in PostgreSQL it is a synonym for `READ COMMITTED` and
+ * writing it would state an intention the database cannot honour.
+ */
+export type TransactionIsolation =
+  | 'READ COMMITTED'
+  | 'REPEATABLE READ'
+  | 'SERIALIZABLE';
+
+export interface TransactionOptions {
+  /** Defaults to the connection's own level — `READ COMMITTED`. */
+  isolation?: TransactionIsolation;
+  /**
+   * Extra attempts after a serialization failure (SQLSTATE 40001) or a
+   * deadlock (40P01). Zero — the default — means the error surfaces.
+   */
+  retries?: number;
+}
+
+/**
+ * Declares how this handler's request transaction is opened (Doc 04 §7.1).
+ *
+ * The isolation level has to be chosen *before* the transaction starts, and by
+ * the time a service runs, `TenantContextInterceptor` has already opened one and
+ * applied the RLS context inside it — Postgres refuses `set transaction
+ * isolation level` after the first statement. So the level is metadata on the
+ * route, read by the interceptor, rather than an argument a service could pass.
+ *
+ * Retrying likewise cannot live in a service: a serialization failure aborts the
+ * whole transaction block, so every statement after it fails too. The only thing
+ * that can retry is whatever owns the transaction, which is the interceptor —
+ * it discards the runner and re-runs the handler from the top on a fresh one.
+ *
+ * ```ts
+ * ⁣@Patch(':id')
+ * ⁣@Transactional({ isolation: 'REPEATABLE READ', retries: 2 })
+ * move(…) { … }
+ * ```
+ *
+ * **Only for handlers whose effects are all inside the transaction.** A retried
+ * handler runs twice, so anything it does outside Postgres would happen twice as
+ * well. Work registered with {@link afterCommit} is safe by construction: the
+ * failed attempt's callbacks are discarded with its scope and never run.
+ */
+export const Transactional = (options: TransactionOptions) =>
+  SetMetadata(TRANSACTION_OPTIONS_METADATA, options);
