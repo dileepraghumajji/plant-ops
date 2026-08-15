@@ -33,6 +33,7 @@ import {
 import type { Request, Response } from 'express';
 import { QueryFailedError } from 'typeorm';
 import { IamException } from './iam.exception';
+import { isSerializationFailure } from './pg-errors';
 import { requestIdOf } from './request-id.middleware';
 
 /** SQLSTATE 23505 — unique violation. Doc 06 §2 calls this a 409 CONFLICT. */
@@ -136,6 +137,20 @@ export class HttpExceptionFilter implements ExceptionFilter {
       return {
         code: IamErrorCode.CONFLICT,
         message: 'The request conflicts with existing data',
+      };
+    }
+
+    // A lost race, not a fault: the request was refused so that a concurrent one
+    // could be serialized (Doc 04 §7.1). `TenantContextInterceptor` retries this
+    // where the handler asked it to, so reaching the filter means either the
+    // retries ran out or the route never opted in — in both cases the honest
+    // answer is a 409 that says the request is repeatable, rather than a 500
+    // that says the server broke.
+    if (isSerializationFailure(exception)) {
+      return {
+        code: IamErrorCode.CONFLICT,
+        message:
+          'The request conflicted with a concurrent change and was not applied; retry it',
       };
     }
 

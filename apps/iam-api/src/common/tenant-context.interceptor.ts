@@ -32,6 +32,19 @@
  * That ordering is required wherever a change is published outside Postgres —
  * a revoked `sid` reaching the cache today (Doc 03 §6), the grant invalidation
  * fan-out in Session 22 (Doc 04 §7.1).
+ *
+ * ## Isolation, and retrying a lost race
+ *
+ * A handler marked `@Transactional({ isolation, retries })` gets its transaction
+ * opened at that level, and a serialization failure inside it re-runs the whole
+ * handler on a fresh transaction. Both belong here rather than in a service, for
+ * reasons the decorator's own comment sets out: the level must be chosen before
+ * the first statement — and `applyRlsContext` is already a statement — while a
+ * 40001 aborts the entire block, so nothing running *inside* it can recover.
+ *
+ * The retry is what Doc 04 §7.1 asks for by name ("a binding insert that races a
+ * move on the same subtree should serialize behind it — retry on serialization
+ * failure"), and today the scope-node move is its only user.
  */
 
 import {
@@ -45,8 +58,12 @@ import { Reflector } from '@nestjs/core';
 import { applyRlsContext } from '@plantops/db';
 import { type Observable, defaultIfEmpty, firstValueFrom, from } from 'rxjs';
 import { DatabaseService } from '../database/database.service';
+import { isSerializationFailure } from './pg-errors';
 import {
   SKIP_TRANSACTION_METADATA,
+  TRANSACTION_OPTIONS_METADATA,
+  type TransactionIsolation,
+  type TransactionOptions,
   runInTransactionContext,
 } from './transaction-context';
 import { verifiedClaimsOf } from './verified-claims';
@@ -67,16 +84,50 @@ export class TenantContextInterceptor implements NestInterceptor {
     );
     if (skip || context.getType() !== 'http') return next.handle();
 
-    return from(this.runInTransaction(context, next));
+    const options =
+      this.reflector.getAllAndOverride<TransactionOptions>(
+        TRANSACTION_OPTIONS_METADATA,
+        [context.getHandler(), context.getClass()],
+      ) ?? {};
+
+    return from(this.run(context, next, options));
+  }
+
+  /**
+   * Runs the request, retrying a lost race up to `retries` times.
+   *
+   * No backoff between attempts, deliberately. A 40001 is only reported once the
+   * transaction it lost to has finished, so the retry starts against committed
+   * state — there is nothing to wait for, and a sleep here would add latency to
+   * the one request that already paid for a rollback.
+   */
+  private async run(
+    context: ExecutionContext,
+    next: CallHandler,
+    options: TransactionOptions,
+  ): Promise<unknown> {
+    const maxAttempts = 1 + (options.retries ?? 0);
+
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await this.runInTransaction(context, next, options.isolation);
+      } catch (error) {
+        if (attempt >= maxAttempts || !isSerializationFailure(error)) throw error;
+        this.logger.warn(
+          `Serialization failure on attempt ${attempt}/${maxAttempts}; retrying`,
+        );
+      }
+    }
   }
 
   private async runInTransaction(
     context: ExecutionContext,
     next: CallHandler,
+    isolation?: TransactionIsolation,
   ): Promise<unknown> {
     const runner = this.database.dataSource.createQueryRunner();
     await runner.connect();
-    await runner.startTransaction();
+    await runner.startTransaction(isolation);
 
     try {
       const claims = verifiedClaimsOf(context.switchToHttp().getRequest());

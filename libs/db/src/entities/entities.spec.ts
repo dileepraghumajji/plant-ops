@@ -13,8 +13,10 @@ import {
   CLIENT_STATUS_VALUES,
   ClientStatus,
   NavNodeKind,
+  SCOPE_NODE_KIND_VALUES,
   SCOPE_PATH_LABEL_PREFIX,
   SERVICE_ACCOUNT_STATUS_VALUES,
+  ScopeNodeKind,
   ServiceAccountStatus,
 } from '@plantops/contracts';
 import { getMetadataArgsStorage } from 'typeorm';
@@ -239,6 +241,14 @@ describe('Postgres enums (migration 0001)', () => {
     // status the API accepts and the column rejects.
     expect([...SERVICE_ACCOUNT_STATUSES]).toEqual([...SERVICE_ACCOUNT_STATUS_VALUES]);
     expect([...SERVICE_ACCOUNT_STATUSES]).toEqual(Object.values(ServiceAccountStatus));
+  });
+
+  it('agrees with @plantops/contracts on the scope-node kinds', () => {
+    // The same two-vocabulary problem again, for `POST /iam/scopes` (Doc 06 §6).
+    // A drift here would be an API that accepts a kind the column rejects — and
+    // it would surface as a 500 on the one surface a tenant admin uses most.
+    expect([...SCOPE_NODE_KINDS]).toEqual([...SCOPE_NODE_KIND_VALUES]);
+    expect([...SCOPE_NODE_KINDS]).toEqual(Object.values(ScopeNodeKind));
   });
 
   it('agrees with @plantops/contracts on the client states', () => {

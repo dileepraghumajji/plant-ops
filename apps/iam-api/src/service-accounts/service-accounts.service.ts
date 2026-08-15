@@ -30,19 +30,24 @@
  * ## Interim authorization, and why it is not nothing
  *
  * Doc 06 §10 gates this surface on `iam.client.svc.*`, which needs the
- * `PermissionGuard` that arrives in Session 23. Until then
- * {@link ServiceAccountsService.assertAdministrator} admits two subjects: a
- * platform admin (derived from a binding at the platform scope root, Doc 04 §10
- * — never asserted by a caller), and a user carrying `user.is_client_admin`,
- * which Doc 01 §3.6 describes as exactly this shortcut, "still enforced via
- * permissions" once permissions exist. Both are rows the database confirms under
- * the caller's own RLS context.
+ * `PermissionGuard` that arrives in Session 23. Until then `assertAdministrator`
+ * (`common/administrator.ts`) admits two subjects: a platform admin (derived
+ * from a binding at the platform scope root, Doc 04 §10 — never asserted by a
+ * caller), and a user carrying `user.is_client_admin`, which Doc 01 §3.6
+ * describes as exactly this shortcut, "still enforced via permissions" once
+ * permissions exist. Both are rows the database confirms under the caller's own
+ * RLS context.
+ *
+ * It lived here as a private method until Session 16 needed the identical rule
+ * for the scope tree (Doc 06 §6) and moved it to `common/`, beside the
+ * platform-tier check — the reason `platform-admin.ts` gives for being shared:
+ * two copies of "what an administrator is" end with the two disagreeing.
  *
  * The alternative — shipping the surface ungated because the real check is two
  * sessions away — would let any authenticated user in a tenant mint a machine
  * identity for that tenant, which is a credential with no expiry and no session
- * to revoke. Session 23 replaces the private method below with a decorator and
- * deletes it; the endpoints do not move.
+ * to revoke. Session 23 replaces the call with a decorator; the endpoints do not
+ * move.
  *
  * A **service** subject is refused unless it is a platform admin. A machine
  * identity that can mint machine identities turns one leaked secret into a
@@ -52,22 +57,16 @@
 import { Injectable } from '@nestjs/common';
 import {
   ServiceAccountStatus,
-  SubjectType,
   normalizePagination,
   paginated,
   type Paginated,
   type ServiceAccountDTO,
   type ServiceAccountSecretDTO,
 } from '@plantops/contracts';
-import {
-  IAM_SCHEMA,
-  RLS_SETTINGS,
-  hashSecret,
-  type VerifiedClaims,
-} from '@plantops/db';
+import { IAM_SCHEMA, hashSecret, type VerifiedClaims } from '@plantops/db';
 import { AUDIT_ACTIONS } from '../audit/audit-actions';
 import { AuditService } from '../audit/audit.service';
-import { IamException } from '../common/iam.exception';
+import { assertAdministrator } from '../common/administrator';
 import { entityManager } from '../common/transaction-context';
 import {
   mintAccountKey,
@@ -112,7 +111,7 @@ export class ServiceAccountsService {
     claims: VerifiedClaims,
     input: CreateServiceAccountInput,
   ): Promise<ServiceAccountSecretDTO> {
-    await this.assertAdministrator(claims);
+    await assertAdministrator(claims);
 
     const accountKey = mintAccountKey();
     const accountSecret = mintAccountSecret();
@@ -156,7 +155,7 @@ export class ServiceAccountsService {
     claims: VerifiedClaims,
     query: { page?: number; limit?: number } = {},
   ): Promise<Paginated<ServiceAccountDTO>> {
-    await this.assertAdministrator(claims);
+    await assertAdministrator(claims);
 
     const { page, limit } = normalizePagination(query);
 
@@ -194,7 +193,7 @@ export class ServiceAccountsService {
     claims: VerifiedClaims,
     id: string,
   ): Promise<ServiceAccountSecretDTO | null> {
-    await this.assertAdministrator(claims);
+    await assertAdministrator(claims);
 
     const accountSecret = mintAccountSecret();
 
@@ -253,7 +252,7 @@ export class ServiceAccountsService {
     id: string,
     status: ServiceAccountStatus,
   ): Promise<ServiceAccountDTO | null> {
-    await this.assertAdministrator(claims);
+    await assertAdministrator(claims);
 
     const changed = (await entityManager().query(
       `with changed as (
@@ -290,38 +289,6 @@ export class ServiceAccountsService {
     return current[0] === undefined ? null : toDto(current[0]);
   }
 
-  /**
-   * The interim permission check. See the header for what replaces it.
-   *
-   * Both arms read state the database owns, under the RLS context the token
-   * established: `app.is_platform_admin` was derived from a binding by
-   * `applyRlsContext` and cannot be asserted by a caller, and the
-   * `is_client_admin` lookup is confined to the caller's own tenant, so a user
-   * id from another client matches nothing.
-   *
-   * The refusal is `PERMISSION_DENIED` — a 403, not a 404. The endpoint's
-   * existence is not a secret and no target is being named yet; the 404-shaped
-   * denials in this service are the ones that would otherwise reveal that a
-   * *specific account* exists in another tenant.
-   */
-  private async assertAdministrator(claims: VerifiedClaims): Promise<void> {
-    const rows = (await entityManager().query(
-      `select coalesce(current_setting($1, true), 'false') = 'true' as platform,
-              exists (
-                select 1 from ${S}."user" u
-                 where u.id = $2::uuid and u.is_client_admin
-              ) as client_admin`,
-      [
-        RLS_SETTINGS.IS_PLATFORM_ADMIN,
-        claims.sty === SubjectType.USER ? claims.sub : null,
-      ],
-    )) as { platform: boolean; client_admin: boolean }[];
-
-    const row = rows[0];
-    if (row?.platform !== true && row?.client_admin !== true) {
-      throw IamException.permissionDenied();
-    }
-  }
 }
 
 function toDto(row: ServiceAccountRow): ServiceAccountDTO {
