@@ -57,6 +57,7 @@ import { HealthModule } from '../health/health.module';
 import { IamModule } from '../iam/iam.module';
 import { RedisModule } from '../redis/redis.module';
 import { RegistryModule } from '../registry/registry.module';
+import { RolesModule } from '../roles/roles.module';
 import { ScopesModule } from '../scopes/scopes.module';
 import { ServiceAccountsModule } from '../service-accounts/service-accounts.module';
 
@@ -71,6 +72,7 @@ import { ServiceAccountsModule } from '../service-accounts/service-accounts.modu
     RegistryModule,
     ClientsModule,
     ScopesModule,
+    RolesModule,
     ServiceAccountsModule,
   ],
   providers: [
