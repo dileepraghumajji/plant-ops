@@ -16,9 +16,12 @@ import type { User } from './user.entity.js';
 /**
  * Lifecycle states, in the order the Postgres enum declares its labels.
  *
- * Declared here rather than in `@plantops/contracts` because no API DTO
- * exposes it yet; it moves there the moment one does, and `entities.spec.ts`
- * pins it to migration 0001 in the meantime.
+ * Since Session 15 `@plantops/contracts` publishes the same two values as
+ * `ClientStatus`, because `ClientDTO` now exposes them on the wire (Doc 06 §5).
+ * They stay spelled twice — contracts depends on nothing, this file depends on
+ * TypeORM — and `entities.spec.ts` pins both to migration 0001's enum, which is
+ * what keeps the API from accepting a status the column would reject. Same
+ * arrangement as {@link ServiceAccountStatus}.
  */
 export const CLIENT_STATUSES = ['active', 'suspended'] as const;
 export type ClientStatus = (typeof CLIENT_STATUSES)[number];

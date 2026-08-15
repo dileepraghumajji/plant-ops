@@ -165,3 +165,104 @@ export async function applyRlsContext(
     isPlatformAdmin ? 'true' : 'false',
   ]);
 }
+
+/**
+ * Runs `work` with `app.current_client_id` pointed at `targetClientId` — the
+ * "dedicated provisioning flow" Doc 07 §6 reserves for platform-initiated
+ * writes to tenant tables (Session 15, Doc 02 §3).
+ *
+ * ## Why this has to exist at all
+ *
+ * Every tenant policy in migration 0007 is asymmetric: `using` admits a platform
+ * admin across tenants, `with check` does not. Writes are pinned to
+ * `app.current_client_id` with no platform arm, deliberately, so that a platform
+ * action cannot land a row under the wrong tenant. That is the right rule and it
+ * leaves exactly one thing impossible: creating a tenant, enabling an
+ * application for it, or seeding its first admin — all of which are writes to
+ * tenant tables made by a caller whose own tenant is the platform client.
+ *
+ * Doc 07 §6 names the resolution rather than an exception: *"If any tenant-table
+ * write genuinely must be platform-initiated, it runs inside a context where
+ * `app.current_client_id` is set to the intended client — never via a platform
+ * bypass on the `with check`."* This function is that context, in one place, so
+ * the pattern is not re-implemented per service.
+ *
+ * ## Why it does not violate the provenance rule
+ *
+ * `targetClientId` comes from a path segment, which {@link applyRlsContext} would
+ * never accept — and the difference is what the value is being used *for*. There
+ * it would decide **authority**: a caller naming their own tenant would be
+ * granting themselves access to it. Here authority has already been decided and
+ * is not in question — the caller must *already* be a platform admin, which the
+ * database confirms below from the derived flag, and a platform admin already
+ * reads every tenant through the `using` arm. Pointing the context at one tenant
+ * **narrows** what this transaction may write; it cannot widen it. A non-platform
+ * caller reaching this function is refused before any context changes.
+ *
+ * ## Restoring, and why the failure path is best-effort
+ *
+ * The previous value is put back whether `work` returned or threw, because a
+ * service may catch a uniqueness failure and answer 409 while the request
+ * carries on, and the audit write for the *next* operation in that transaction
+ * must not be stamped with the tenant this call was visiting.
+ * `app.is_platform_admin` is never touched.
+ *
+ * On the failure path the restore is **swallowed**, and that is load-bearing
+ * rather than defensive. Postgres aborts the whole transaction block on any
+ * error, so after a failed `work` every further statement — the restoring
+ * `set_config` included — is refused with "current transaction is aborted". A
+ * `finally` that let that surface would replace the caller's real error with a
+ * generic 500, turning every duplicate-slug and duplicate-email conflict on this
+ * surface into an apparent outage. The context it fails to restore cannot matter
+ * in that state: nothing can be read or written until the rollback.
+ *
+ * Like `applyRlsContext`, this **must run inside a transaction** — the settings
+ * are transaction-local, which is what keeps them from leaking across a pooled
+ * connection.
+ *
+ * @throws {Error} when the current context is not a platform admin. That is a
+ * programming error rather than a denial: every route reaching this has already
+ * run its own platform check, which is what produces the 403 Doc 06 §2 asks for.
+ */
+export async function withProvisioningTenant<T>(
+  executor: Executor,
+  targetClientId: string,
+  work: () => Promise<T>,
+): Promise<T> {
+  const rows = (await executor.query(
+    `select coalesce(current_setting($1, true), 'false') = 'true' as platform,
+            coalesce(current_setting($2, true), '') as previous`,
+    [RLS_SETTINGS.IS_PLATFORM_ADMIN, RLS_SETTINGS.CLIENT_ID],
+  )) as { platform: boolean; previous: string }[];
+
+  const context = rows[0];
+  if (context?.platform !== true) {
+    throw new Error(
+      'withProvisioningTenant() requires a platform-admin context (Doc 07 §6). ' +
+        'Call the surface\'s own platform check first, so a non-platform caller ' +
+        'is refused with a 403 rather than reaching this.',
+    );
+  }
+
+  await executor.query(`select set_config($1, $2, true)`, [
+    RLS_SETTINGS.CLIENT_ID,
+    targetClientId,
+  ]);
+
+  const restore = (): Promise<unknown> =>
+    executor.query(`select set_config($1, $2, true)`, [
+      RLS_SETTINGS.CLIENT_ID,
+      context.previous,
+    ]);
+
+  let result: T;
+  try {
+    result = await work();
+  } catch (error) {
+    await restore().catch(() => undefined);
+    throw error;
+  }
+
+  await restore();
+  return result;
+}

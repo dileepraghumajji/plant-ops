@@ -6,6 +6,7 @@
  * anything else in. Keep it stable: changes here ripple to every consumer.
  */
 
+export * from './clients.js';
 export * from './constants.js';
 export * from './errors.js';
 export * from './grants.js';

@@ -1,15 +1,22 @@
 /**
- * The interim authorization for the platform registry surface (Doc 06 §4).
+ * The interim authorization for the whole platform tier (Doc 06 §4–5).
+ *
+ * Lives in `common/` rather than beside one feature because there are now two
+ * platform surfaces that need the identical check — the application registry
+ * (Doc 06 §4, Session 13) and client provisioning (Doc 06 §5, Session 15) — and
+ * a second copy of "what a platform admin is" is the kind of duplication that
+ * ends with the two disagreeing about who counts as one.
  *
  * ## What replaces this, and when
  *
- * Doc 06 §4 gates every route below `/iam/applications` on `iam.platform.*`,
- * which needs the `PermissionGuard` and the seeded IAM manifest that arrive in
- * Session 23. Until then the check is the one the roadmap names for Session 13:
- * the caller must be a **platform subject** — in practice the bootstrap account
- * of migration 0011, or anything later bound at the platform scope root.
+ * Doc 06 §4–5 gate every route below `/iam/applications` and `/iam/clients` on
+ * `iam.platform.*`, which needs the `PermissionGuard` and the seeded IAM
+ * manifest that arrive in Session 23. Until then the check is the one the
+ * roadmap names for Session 13: the caller must be a **platform subject** — in
+ * practice the bootstrap account of migration 0011, or anything later bound at
+ * the platform scope root.
  *
- * Session 23 replaces every `assertPlatformAdmin()` below with
+ * Session 23 replaces every `assertPlatformAdmin()` call with
  * `@RequirePermission('iam.platform.app.create')` and friends, and deletes this
  * file. The endpoints do not move.
  *
@@ -38,14 +45,14 @@
  *
  * ## The refusal is a 403, not a 404
  *
- * The registry endpoints' existence is not a secret and no target has been named
- * yet. The 404-shaped denials in this module are the ones that would otherwise
- * confirm that a *specific* application or key exists.
+ * The platform endpoints' existence is not a secret and no target has been named
+ * yet. The 404-shaped denials in the services that call this are the ones that
+ * would otherwise confirm that a *specific* application, key or client exists.
  */
 
 import { RLS_SETTINGS } from '@plantops/db';
-import { IamException } from '../common/iam.exception';
-import { entityManager } from '../common/transaction-context';
+import { IamException } from './iam.exception';
+import { entityManager } from './transaction-context';
 
 /**
  * Refuses the request unless the caller is a platform subject.

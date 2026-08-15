@@ -19,7 +19,7 @@
  *
  * Every route is authenticated by the app-wide `AuthGuard` and additionally
  * requires a platform subject, checked inside each service. That check is not a
- * guard for the reason `platform-admin.ts` explains — a guard runs before the
+ * guard for the reason `common/platform-admin.ts` explains — a guard runs before the
  * transaction that carries the RLS context exists — and it is interim: Session
  * 23 replaces it with `@RequirePermission('iam.platform.*')`.
  *

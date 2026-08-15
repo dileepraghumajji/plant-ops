@@ -25,7 +25,7 @@
  * `app.is_platform_admin` — the policies of migration 0008. The service-level
  * `assertPlatformAdmin()` in front of each method is the interim gate that turns
  * a would-be policy violation into the 403 Doc 06 §2 asks for; see
- * `platform-admin.ts` for what replaces it in Session 23 and why it is not a
+ * `common/platform-admin.ts` for what replaces it in Session 23 and why it is not a
  * guard.
  *
  * Audit goes through `AuditService`, so every record is written in the same
@@ -44,7 +44,7 @@ import { AUDIT_ACTIONS } from '../audit/audit-actions';
 import { AuditService } from '../audit/audit.service';
 import { entityManager } from '../common/transaction-context';
 import { rethrowAsConflict } from './conflict';
-import { assertPlatformAdmin } from './platform-admin';
+import { assertPlatformAdmin } from '../common/platform-admin';
 
 const S = `"${IAM_SCHEMA}"`;
 

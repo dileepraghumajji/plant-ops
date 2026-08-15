@@ -80,7 +80,7 @@ import {
 } from './manifest-diff';
 import { NavService } from './nav.service';
 import { PermissionsService } from './permissions.service';
-import { assertPlatformAdmin } from './platform-admin';
+import { assertPlatformAdmin } from '../common/platform-admin';
 
 const S = `"${IAM_SCHEMA}"`;
 
