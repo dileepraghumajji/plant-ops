@@ -9,6 +9,14 @@
  * `@RequirePermission('iam.client.…')` once the `PermissionGuard` and the seeded
  * IAM manifest exist.
  *
+ * How that guard gets its own RLS context — rather than borrowing the request's,
+ * which does not exist yet, or opening the request transaction itself, which a
+ * guard cannot close — is decided in
+ * `docs/adr/0001-permission-guard-connection-strategy.md`: on a grants-cache
+ * miss it opens its own `QueryRunner`, applies `applyRlsContext` from the
+ * verified claims, resolves on that manager and releases. Same pattern as
+ * `AuditService.recordDenial`.
+ *
  * ## Why the two tiers do not share one function
  *
  * They ask different questions. `assertPlatformAdmin()` asks whether the caller
