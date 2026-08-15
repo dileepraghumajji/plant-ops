@@ -30,7 +30,10 @@
  * Authenticated by the app-wide `AuthGuard`, then checked inside the service —
  * not as a guard, because a guard runs before the transaction that carries the
  * RLS context exists (`common/administrator.ts`). Interim until Session 23
- * replaces it with `@RequirePermission('iam.client.role.*')`.
+ * replaces it with `@RequirePermission('iam.client.role.*')`, whose guard
+ * carries its own connection and RLS context rather than the request's
+ * (`docs/adr/0001-permission-guard-connection-strategy.md`) — the routes,
+ * status codes and envelopes below are unaffected by the swap.
  */
 
 import {
@@ -46,7 +49,6 @@ import {
   Post,
   Put,
   Query,
-  Req,
 } from '@nestjs/common';
 import {
   IAM_ROUTE_PREFIX,
@@ -54,10 +56,10 @@ import {
   type RoleDTO,
   type RolePermissionsResponse,
 } from '@plantops/contracts';
-import type { Request } from 'express';
+import type { VerifiedClaims } from '@plantops/db';
+import { Claims } from '../common/claims.decorator';
 import { IamException } from '../common/iam.exception';
 import { RateLimit } from '../common/rate-limit.decorator';
-import { verifiedClaimsOf } from '../common/verified-claims';
 import {
   CreateRoleDto,
   RolesPaginationDto,
@@ -79,27 +81,30 @@ export class RolesController {
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @RateLimit(ROLES_RATE_LIMIT)
-  create(@Req() request: Request, @Body() body: CreateRoleDto): Promise<RoleDTO> {
-    return this.roles.create(claimsOf(request), body);
+  create(
+    @Claims() claims: VerifiedClaims,
+    @Body() body: CreateRoleDto,
+  ): Promise<RoleDTO> {
+    return this.roles.create(claims, body);
   }
 
   @Get()
   @RateLimit(ROLES_RATE_LIMIT)
   list(
-    @Req() request: Request,
+    @Claims() claims: VerifiedClaims,
     @Query() query: RolesPaginationDto,
   ): Promise<Paginated<RoleDTO>> {
-    return this.roles.list(claimsOf(request), query);
+    return this.roles.list(claims, query);
   }
 
   @Patch(':id')
   @RateLimit(ROLES_RATE_LIMIT)
   async update(
-    @Req() request: Request,
+    @Claims() claims: VerifiedClaims,
     @Param('id', uuidParam()) id: string,
     @Body() body: UpdateRoleDto,
   ): Promise<RoleDTO> {
-    const updated = await this.roles.update(claimsOf(request), id, body);
+    const updated = await this.roles.update(claims, id, body);
     if (updated === null) throw IamException.notFound('The role');
     return updated;
   }
@@ -116,20 +121,20 @@ export class RolesController {
   @HttpCode(HttpStatus.NO_CONTENT)
   @RateLimit(ROLES_RATE_LIMIT)
   async remove(
-    @Req() request: Request,
+    @Claims() claims: VerifiedClaims,
     @Param('id', uuidParam()) id: string,
   ): Promise<void> {
-    const removed = await this.roles.remove(claimsOf(request), id);
+    const removed = await this.roles.remove(claims, id);
     if (!removed) throw IamException.notFound('The role');
   }
 
   @Get(':id/permissions')
   @RateLimit(ROLES_RATE_LIMIT)
   async permissions(
-    @Req() request: Request,
+    @Claims() claims: VerifiedClaims,
     @Param('id', uuidParam()) id: string,
   ): Promise<RolePermissionsResponse> {
-    const mapping = await this.roles.permissions(claimsOf(request), id);
+    const mapping = await this.roles.permissions(claims, id);
     if (mapping === null) throw IamException.notFound('The role');
     return mapping;
   }
@@ -138,29 +143,12 @@ export class RolesController {
   @Put(':id/permissions')
   @RateLimit(ROLES_RATE_LIMIT)
   async setPermissions(
-    @Req() request: Request,
+    @Claims() claims: VerifiedClaims,
     @Param('id', uuidParam()) id: string,
     @Body() body: SetRolePermissionsDto,
   ): Promise<RolePermissionsResponse> {
-    const mapping = await this.roles.setPermissions(
-      claimsOf(request),
-      id,
-      body.permission_ids,
-    );
+    const mapping = await this.roles.setPermissions(claims, id, body.permission_ids);
     if (mapping === null) throw IamException.notFound('The role');
     return mapping;
   }
-}
-
-/**
- * The verified claims for this request.
- *
- * The guard has already refused anything without them, so reaching the throw is
- * a wiring bug — a route that lost its guard — and it fails closed rather than
- * running the handler with no subject.
- */
-function claimsOf(request: Request) {
-  const claims = verifiedClaimsOf(request);
-  if (!claims) throw IamException.authRequired();
-  return claims;
 }

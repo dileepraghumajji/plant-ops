@@ -306,6 +306,7 @@
 **Files to Modify:** `app.module.ts`.
 **Dependencies:** Sessions 20, 6
 **Acceptance Criteria:**
+- **`resolve()` takes an explicit `EntityManager` as its first parameter and never calls `entityManager()`** — a deliberate, documented exception to the ambient-transaction convention, decided in `docs/adr/0001-permission-guard-connection-strategy.md`. Session 23's `PermissionGuard` runs before the request transaction exists and must be able to call it on its own connection; writing it against `entityManager()` would force a rewrite inside Session 23. The controller's own routes pass `entityManager()`, so their behaviour inside the request transaction is unchanged. `resolver.service.ts`'s header states the reason and points at the ADR.
 - Grants = union over non-expired bindings of role permissions × covering paths; `scopes[permKey]` reduced to the **minimal covering set** (descendant dropped when ancestor present).
 - Point check: binding at Plant covers its Gates (ltree `<@`); sibling/other-plant nodes denied; permission asymmetry preserved (`dc.approve` ⇏ `dc.create`).
 - Cache key `perms:{clientId}:{sty}:{subjectId}` with version field + ≤10 min TTL; cache miss repopulates from Postgres.
@@ -334,6 +335,8 @@
 **Files to Modify:** Every iam-api controller (decorators), `app.module.ts`, bootstrap seed (bind platform account to `iam.platform.*` at platform scope).
 **Dependencies:** Sessions 21, 22, 12
 **Acceptance Criteria:**
+- **On a grants-cache miss the guard opens its own `QueryRunner`, applies `applyRlsContext` from the verified claims, calls `resolve(runner.manager, …)`, then commits and releases in a `finally`** — the `AuditService.recordDenial` pattern, per `docs/adr/0001-permission-guard-connection-strategy.md`. The guard must not open, reuse or leave open the request transaction: a guard has no "after" phase, so `TenantContextInterceptor` stays its sole owner. Denials go through the existing `recordDenial`, already narrowed to the two `authz.*` actions.
+- Retrofitting the decorators deletes `common/platform-admin.ts` and `common/administrator.ts`; no endpoint, status code or envelope moves.
 - Client admin calling a platform endpoint → 403 `PERMISSION_DENIED`; permission held but wrong scope → 403 `SCOPE_DENIED`; both audited (`authz.permission_denied/scope_denied` with attempted permission + target).
 - No binding ⇒ no access (deny-by-default unit-tested); platform-admin path skips tenant coverage but stays permission-gated.
 - IAM manifest seeds `iam.platform.*` / `iam.client.*` permissions + admin nav via the real manifest endpoint.

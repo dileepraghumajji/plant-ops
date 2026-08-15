@@ -147,6 +147,8 @@ The guard:
 4. Resolves the target scope node from the request and runs the coverage check.
 5. Rejects with `403` (permission) or `403`+reason (scope) on failure; every denial is audited.
 
+**Which connection step 2 runs on.** A guard runs *before* the per-request transaction and therefore before the RLS context exists (Doc 07 §5) — so on a cache miss it cannot use the ambient request transaction, and a query on a bare pooled connection would match nothing. `resolve()` therefore takes an explicit executor: request handlers pass the request transaction, and the guard opens its own short-lived connection with the RLS context applied from the verified claims, then releases it before the handler's transaction opens. The guard never opens the request transaction — it has no "after" phase in which to close one. See `docs/adr/0001-permission-guard-connection-strategy.md`; this is a mechanism note, not a change to the contract above.
+
 ## 9. Deny-by-default
 
 No binding ⇒ no access. There is no implicit inheritance across the *permission* dimension (holding `dc.approve` does not imply `dc.create`) — only across the *scope* dimension (ancestor covers descendant). This asymmetry is deliberate and must be preserved.

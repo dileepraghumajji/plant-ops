@@ -47,7 +47,10 @@
  * ## Interim authorization, and where tenant isolation actually comes from
  *
  * `assertAdministrator()` in front of every method, replaced in Session 23 by
- * `@RequirePermission('iam.client.role.*')` (`common/administrator.ts`).
+ * `@RequirePermission('iam.client.role.*')` (`common/administrator.ts`) — a
+ * guard that resolves grants on its own connection, because at guard time the
+ * request transaction that carries the RLS context does not exist yet
+ * (`docs/adr/0001-permission-guard-connection-strategy.md`).
  * Isolation does not depend on it: every statement below runs under the request's
  * RLS context and additionally pins `client_id` to the token's `cid`, so another
  * tenant's role is invisible rather than forbidden and comes back as the same 404

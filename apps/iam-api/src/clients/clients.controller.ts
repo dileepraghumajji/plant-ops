@@ -30,7 +30,7 @@
  * These routes are *about* tenants without being *scoped to* one. The tenant is
  * the `:id` path segment, which is a target rather than an authority: what the
  * caller may do with it is decided by the derived platform flag in the RLS
- * context, never by the token's `cid`. A `@Req()` parameter here would be an
+ * context, never by the token's `cid`. A `@Claims()` parameter here would be an
  * unused argument that looked like a tenant check.
  */
 

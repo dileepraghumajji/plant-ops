@@ -20,6 +20,14 @@
  * `@RequirePermission('iam.platform.app.create')` and friends, and deletes this
  * file. The endpoints do not move.
  *
+ * *How* that guard reads its data — the part that is not obvious from "replaced
+ * by a guard" — is settled in `docs/adr/0001-permission-guard-connection-strategy.md`:
+ * the guard resolves grants from the Redis cache, and on a miss opens its own
+ * `QueryRunner`, applies `applyRlsContext` from the verified claims and calls
+ * `ResolverService.resolve(manager, …)` on it, releasing before the request
+ * transaction opens. That is `AuditService.recordDenial`'s pattern. It does
+ * *not* open the request transaction — see below.
+ *
  * ## Why it reads a session setting rather than a table
  *
  * `app.is_platform_admin` is **derived**, not asserted: `applyRlsContext` sets
@@ -42,6 +50,13 @@
  * so at guard time there is no RLS context to read — the setting is
  * transaction-local by design. Same reasoning as `assertAdministrator` in
  * `administrator.ts`, the client-tier counterpart of this file.
+ *
+ * Moving the transaction *into* the guard is not the fix, and Session 23 must
+ * not attempt it: a guard has no "after" phase, so it cannot own a transaction
+ * across the handler. Opening in a guard and committing in an interceptor
+ * splits ownership — a request refused between the two leaks the runner, and
+ * the interceptor's rollback path stops seeing every failure. The interceptor
+ * keeps owning the request transaction; the guard brings its own connection.
  *
  * ## The refusal is a 403, not a 404
  *
