@@ -69,6 +69,7 @@ import { AppModule } from '../app/app.module';
 import { runInTransactionContext } from '../common/transaction-context';
 import { ENV } from '../config/config.module';
 import { DatabaseService } from '../database/database.service';
+import { createTestApplication } from '../testing/app-harness';
 import { AccountStateService } from './account-state.service';
 import {
   PASSWORD_RESET_DELIVERY,
@@ -175,7 +176,7 @@ describeWithDb(
         .useValue((delivery = new CapturingDelivery()))
         .compile();
 
-      app = moduleRef.createNestApplication();
+      app = createTestApplication(moduleRef);
       await app.init();
       await app.listen(0);
       baseUrl = `http://127.0.0.1:${(app.getHttpServer().address() as AddressInfo).port}`;

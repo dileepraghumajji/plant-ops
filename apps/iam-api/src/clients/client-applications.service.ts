@@ -34,7 +34,7 @@ import { Injectable } from '@nestjs/common';
 import type { ClientApplicationDTO } from '@plantops/contracts';
 import { IAM_SCHEMA, withProvisioningTenant } from '@plantops/db';
 import { AUDIT_ACTIONS } from '../audit/audit-actions';
-import { AuditService } from '../audit/audit.service';
+import { AuditService, type AuditEntry } from '../audit/audit.service';
 import { IamException } from '../common/iam.exception';
 import { assertPlatformAdmin } from '../common/platform-admin';
 import { entityManager } from '../common/transaction-context';
@@ -126,6 +126,7 @@ export class ClientApplicationsService {
       const before = new Map(existing.map((row) => [row.application_id, row.enabled]));
 
       const rows: ClientApplicationRow[] = [];
+      const audited: AuditEntry[] = [];
       for (const entry of resolved) {
         const [row] = (await manager.query(
           `with upserted as (
@@ -151,14 +152,18 @@ export class ClientApplicationsService {
 
         rows.push(row);
 
+        // Only the rows this call actually turned on — re-enabling what was
+        // already enabled writes nothing, the rule `update` states below.
         if (before.get(entry.id) !== true) {
-          await this.audit.record(
-            AUDIT_ACTIONS.CLIENT_APPLICATION_ENABLED,
-            { type: 'client_application', id: row.application_id },
-            { client_id: clientId, application_key: row.application_key },
-          );
+          audited.push({
+            action: AUDIT_ACTIONS.CLIENT_APPLICATION_ENABLED,
+            target: { type: 'client_application', id: row.application_id },
+            payload: { client_id: clientId, application_key: row.application_key },
+          });
         }
       }
+
+      await this.audit.recordMany(audited);
 
       return rows.map(toDto);
     });

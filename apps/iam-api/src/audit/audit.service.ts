@@ -27,6 +27,13 @@
  * 3. **From the catalog** (Doc 10 §4). `action` is an {@link AuditAction}, so a
  *    misspelling does not compile.
  *
+ * {@link AuditService.recordMany} is the same method for N records at once. It
+ * exists for the paths where the count is not fixed by the request — a role
+ * delete cascading its bindings, a bulk logout, a manifest upsert — and it is a
+ * statement-count change and nothing else: same rows, same redaction, same
+ * transaction. Where the count is one, or is fixed and small, `record` reads
+ * better and stays.
+ *
  * What this service deliberately does *not* do is decide the actor or the
  * tenant. Those are derived inside `iam.write_audit` from the session context
  * the verified token established (migration 0010) — there is no parameter for
@@ -77,6 +84,27 @@ const S = `"${IAM_SCHEMA}"`;
 
 const WRITE_AUDIT = `select ${S}.write_audit($1, $2, $3, $4::jsonb)`;
 
+/**
+ * The batched form — see {@link AuditService.recordMany}.
+ *
+ * `unnest` over four parallel arrays rather than a `values` list assembled at
+ * runtime, so the statement text is the same string whatever N is: one entry in
+ * the plan cache instead of one per batch size, and no path by which a caller's
+ * array could reach the SQL as text. The four casts are what give the parameters
+ * their types — an untyped array parameter would arrive as `text[]` and the
+ * `uuid`/`jsonb` arguments would not resolve.
+ */
+const WRITE_AUDIT_MANY = `select ${S}.write_audit(e.action, e.target_type, e.target_id, e.payload)
+     from unnest($1::text[], $2::text[], $3::uuid[], $4::jsonb[])
+       as e(action, target_type, target_id, payload)`;
+
+/** One row of a {@link AuditService.recordMany} batch. */
+export interface AuditEntry {
+  action: AuditAction;
+  target: AuditTarget;
+  payload?: AuditPayload;
+}
+
 @Injectable()
 export class AuditService {
   private readonly logger = new Logger(AuditService.name);
@@ -108,6 +136,42 @@ export class AuditService {
       target.type,
       target.id,
       JSON.stringify(redactPayload(payload)),
+    ]);
+  }
+
+  /**
+   * Records N actions in one round-trip, in the caller's transaction.
+   *
+   * Identical to N calls to {@link AuditService.record} in every way that shows
+   * up in the trail — one row per entry, same redaction, same catalog-typed
+   * action, same ambient transaction, so the same rollback takes all of them —
+   * and different only in how many times it goes to the database. Doc 10 §4's
+   * per-record granularity is a property of the *rows*; the round-trip count is
+   * incidental, and a role delete that cascades 500 grants should not hold the
+   * transaction open across 500 sequential statements to say so, least of all
+   * while the row it is about to delete is still there and lockable.
+   *
+   * Order within a batch is not meaningful, and was not meaningful before:
+   * `write_audit` stamps `now()`, which is transaction time, and a random uuid,
+   * so every row of one transaction ties on both — write order is not
+   * recoverable from the trail whichever form wrote it. What the records say
+   * about rows that no longer exist is what establishes ordering, and that is
+   * unchanged.
+   *
+   * An empty batch issues no statement at all, so the caller that found nothing
+   * to audit does not have to be the caller that remembers to check.
+   *
+   * @throws when there is no transaction in scope, for the reason `record`
+   * does.
+   */
+  async recordMany(entries: readonly AuditEntry[]): Promise<void> {
+    if (entries.length === 0) return;
+
+    await entityManager().query(WRITE_AUDIT_MANY, [
+      entries.map((entry) => entry.action),
+      entries.map((entry) => entry.target.type),
+      entries.map((entry) => entry.target.id),
+      entries.map((entry) => JSON.stringify(redactPayload(entry.payload ?? {}))),
     ]);
   }
 

@@ -1,0 +1,294 @@
+/**
+ * What each handler returns, for the generated document.
+ *
+ * ## Why a map rather than a decorator on every handler
+ *
+ * The obvious shape is `@ApiOkResponse(...)` above each route, and it is the
+ * shape `@nestjs/swagger` expects. It is rejected here for the reason
+ * `validation.pipe.ts` rejected `class-validator`: it puts a second, parallel
+ * description of the API into the controllers, where it sits next to the real
+ * one and drifts from it silently. A controller should say what it *does*; the
+ * document is a projection of that, not a second copy maintained by hand.
+ *
+ * The objection to a central map is drift of the other kind — a route added
+ * with no entry here. That is closed by the type, not by discipline:
+ * {@link ControllerResponses} is an exhaustive `Record` over the controller's
+ * own method names, so a new handler fails `nx typecheck` until it is described.
+ * `openapi.spec.ts` closes the remaining half, that every controller the
+ * application registers appears below at all.
+ *
+ * ## Statuses are declared, not inferred
+ *
+ * The status could be read from `@HttpCode`, and the generator does read it —
+ * but it is repeated here so the two must agree (`openapi.spec.ts` asserts it).
+ * A `@HttpCode(204)` added to a handler that still returns a body is exactly the
+ * kind of change that produces a document nobody notices is wrong.
+ */
+
+import type { Type } from '@nestjs/common';
+import type { ZodType } from 'zod';
+import { AuthController } from '../auth/auth.controller';
+import { JwksController } from '../auth/jwks.controller';
+import { ClientsController } from '../clients/clients.controller';
+import { HealthController } from '../health/health.controller';
+import { WhoAmIController } from '../iam/whoami.controller';
+import { ApplicationsController } from '../registry/applications.controller';
+import { RolesController } from '../roles/roles.controller';
+import { ScopesController } from '../scopes/scopes.controller';
+import { ServiceAccountsController } from '../service-accounts/service-accounts.controller';
+import {
+  accessTokenSchema,
+  applicationSchema,
+  clientAdminSchema,
+  clientApplicationSchema,
+  clientSchema,
+  jwksSchema,
+  livenessSchema,
+  manifestUpsertSchema,
+  navCatalogSchema,
+  navNodeCatalogSchema,
+  navPermissionsResultSchema,
+  paginatedApplicationsSchema,
+  paginatedClientsSchema,
+  paginatedPermissionsSchema,
+  paginatedRolesSchema,
+  paginatedServiceAccountsSchema,
+  permissionSchema,
+  readinessSchema,
+  roleSchema,
+  rolePermissionsSchema,
+  scopeNodeSchema,
+  scopeTreeSchema,
+  serviceAccountSchema,
+  serviceAccountSecretSchema,
+  sessionSchema,
+  tokenPairSchema,
+  whoAmISchema,
+} from './schemas';
+
+/** One documented response. `schema` absent means no body. */
+export interface ResponseBody {
+  readonly status: number;
+  readonly description: string;
+  readonly schema?: ZodType;
+  /** The handler returns an array of `schema`. */
+  readonly array?: true;
+}
+
+/** One handler's success response, plus what else it is documented to do. */
+export interface ResponseSpec extends ResponseBody {
+  /**
+   * Further **non-error** responses. Exactly one route needs this today:
+   * `/ready` answers 503 with the same report it answers 200 with, which is the
+   * point of a readiness probe (Doc 06 §13).
+   */
+  readonly also?: readonly ResponseBody[];
+  /**
+   * Envelope statuses beyond the universal ones (`openapi.ts`).
+   *
+   * Listed per route rather than blanket-applied, because a document that
+   * claims every route can return every code tells an integrating team nothing
+   * about which failures are worth handling.
+   */
+  readonly errors?: readonly number[];
+  /**
+   * `false` for the ops endpoints of Doc 06 §13, which are outside the error
+   * envelope entirely — they answer with a report and a status code.
+   */
+  readonly envelope?: false;
+}
+
+/** The method names of a controller — its routes, and nothing else. */
+type HandlerName<T> = {
+  [K in keyof T]: T[K] extends (...args: never[]) => unknown ? K : never;
+}[keyof T];
+
+/** Exhaustive over the controller's handlers: a new route will not compile. */
+export type ControllerResponses<T> = Readonly<
+  Record<HandlerName<T>, ResponseSpec>
+>;
+
+const ok = (schema: ZodType, description = 'Success'): ResponseBody => ({
+  status: 200,
+  description,
+  schema,
+});
+const okList = (schema: ZodType, description = 'Success'): ResponseBody => ({
+  status: 200,
+  description,
+  schema,
+  array: true,
+});
+const created = (schema: ZodType, description = 'Created'): ResponseBody => ({
+  status: 201,
+  description,
+  schema,
+});
+const createdList = (schema: ZodType, description = 'Created'): ResponseBody => ({
+  status: 201,
+  description,
+  schema,
+  array: true,
+});
+const noContent = (description: string): ResponseBody => ({
+  status: 204,
+  description,
+});
+
+/** `<success>` plus the envelope statuses that route genuinely produces. */
+const failing = (
+  success: ResponseBody,
+  ...errors: readonly number[]
+): ResponseSpec => ({ ...success, errors });
+
+/**
+ * The two shapes the admin surfaces repeat.
+ *
+ * `403` because both the platform (`assertPlatformAdmin`) and the client-admin
+ * (`assertAdministrator`) checks refuse there; `404` because every by-id route
+ * can miss inside the caller's tenant; `409` where a natural key can collide.
+ */
+const DENIED_OR_MISSING = [403, 404] as const;
+const DENIED_MISSING_OR_DUPLICATE = [403, 404, 409] as const;
+
+/** Pairs a controller with its responses, inferring the handler names from it. */
+function routes<T>(
+  controller: Type<T>,
+  responses: ControllerResponses<T>,
+): readonly [Type<unknown>, Readonly<Record<string, ResponseSpec>>] {
+  return [
+    controller as Type<unknown>,
+    responses as Readonly<Record<string, ResponseSpec>>,
+  ];
+}
+
+export const ROUTE_RESPONSES: ReadonlyMap<
+  Type<unknown>,
+  Readonly<Record<string, ResponseSpec>>
+> = new Map([
+  routes(AuthController, {
+    // 401 is declared rather than inherited: these routes are `@Public()`, so
+    // the generator adds no 401 of its own, and yet a rejected credential is
+    // the single most important failure on the surface.
+    login: failing(ok(tokenPairSchema, 'An access/refresh token pair'), 401, 423),
+    refresh: failing(ok(tokenPairSchema, 'A rotated token pair'), 401),
+    requestPasswordReset: {
+      status: 202,
+      // The 202 *is* the contract: Doc 03 §7 answers identically whether or not
+      // the address matched, so there is nothing a body could carry without
+      // leaking the thing the identical answer exists to hide.
+      description: 'Accepted, whether or not the address matched an account',
+    },
+    completePasswordReset: failing(noContent('The password was changed'), 401),
+    serviceToken: failing(ok(accessTokenSchema, 'A service-account token'), 401),
+    logout: noContent('The current session was revoked'),
+    sessionList: okList(sessionSchema, 'The subject’s sessions'),
+    revokeSession: failing(noContent('The session was revoked'), 404),
+  }),
+
+  routes(JwksController, {
+    jwks: ok(jwksSchema, 'The public keys tokens are verified against'),
+  }),
+
+  routes(HealthController, {
+    // Outside the envelope: Doc 06 §13. A probe reads status codes.
+    live: { ...ok(livenessSchema, 'The process is alive'), envelope: false },
+    ready: {
+      ...ok(readinessSchema, 'Every dependency answered'),
+      also: [
+        {
+          status: 503,
+          description: 'At least one dependency did not; the report names it',
+          schema: readinessSchema,
+        },
+      ],
+      envelope: false,
+    },
+  }),
+
+  routes(WhoAmIController, {
+    whoami: ok(whoAmISchema, 'The caller, as the database sees them'),
+  }),
+
+  routes(ApplicationsController, {
+    create: failing(created(applicationSchema), 403, 409),
+    list: failing(ok(paginatedApplicationsSchema), 403),
+    update: failing(ok(applicationSchema), ...DENIED_MISSING_OR_DUPLICATE),
+    addPermissions: failing(
+      createdList(permissionSchema),
+      ...DENIED_MISSING_OR_DUPLICATE,
+    ),
+    listPermissions: failing(ok(paginatedPermissionsSchema), ...DENIED_OR_MISSING),
+    addNavNodes: failing(
+      createdList(navNodeCatalogSchema),
+      ...DENIED_MISSING_OR_DUPLICATE,
+    ),
+    navTree: failing(ok(navCatalogSchema), ...DENIED_OR_MISSING),
+    mapNavPermissions: failing(
+      ok(navPermissionsResultSchema, 'What the call changed'),
+      ...DENIED_OR_MISSING,
+    ),
+    unmapNavPermissions: failing(
+      ok(navPermissionsResultSchema, 'What the call changed'),
+      ...DENIED_OR_MISSING,
+    ),
+    upsertManifest: failing(
+      ok(manifestUpsertSchema, 'The diff the upsert applied'),
+      ...DENIED_MISSING_OR_DUPLICATE,
+    ),
+  }),
+
+  routes(ClientsController, {
+    create: failing(created(clientSchema), 403, 409),
+    list: failing(ok(paginatedClientsSchema), 403),
+    update: failing(ok(clientSchema), ...DENIED_MISSING_OR_DUPLICATE),
+    enableApplications: failing(
+      createdList(clientApplicationSchema),
+      ...DENIED_MISSING_OR_DUPLICATE,
+    ),
+    listApplications: failing(okList(clientApplicationSchema), ...DENIED_OR_MISSING),
+    updateApplication: failing(ok(clientApplicationSchema), ...DENIED_OR_MISSING),
+    createAdmin: failing(
+      created(clientAdminSchema, 'The tenant’s first administrator'),
+      ...DENIED_MISSING_OR_DUPLICATE,
+    ),
+  }),
+
+  routes(ScopesController, {
+    create: failing(created(scopeNodeSchema), ...DENIED_MISSING_OR_DUPLICATE),
+    tree: failing(ok(scopeTreeSchema), 403),
+    update: failing(ok(scopeNodeSchema), ...DENIED_MISSING_OR_DUPLICATE),
+    remove: failing(
+      noContent('The node was deleted'),
+      ...DENIED_MISSING_OR_DUPLICATE,
+    ),
+  }),
+
+  routes(RolesController, {
+    create: failing(created(roleSchema), ...DENIED_MISSING_OR_DUPLICATE),
+    list: failing(ok(paginatedRolesSchema), 403),
+    update: failing(ok(roleSchema), ...DENIED_MISSING_OR_DUPLICATE),
+    remove: failing(
+      noContent('The role and its bindings were deleted'),
+      ...DENIED_MISSING_OR_DUPLICATE,
+    ),
+    permissions: failing(ok(rolePermissionsSchema), ...DENIED_OR_MISSING),
+    setPermissions: failing(
+      ok(rolePermissionsSchema, 'The role’s new permission set'),
+      ...DENIED_MISSING_OR_DUPLICATE,
+    ),
+  }),
+
+  routes(ServiceAccountsController, {
+    create: failing(
+      created(serviceAccountSecretSchema, 'The account; secret shown once'),
+      ...DENIED_MISSING_OR_DUPLICATE,
+    ),
+    list: failing(ok(paginatedServiceAccountsSchema), 403),
+    rotate: failing(
+      ok(serviceAccountSecretSchema, 'The account; new secret shown once'),
+      ...DENIED_OR_MISSING,
+    ),
+    update: failing(ok(serviceAccountSchema), ...DENIED_OR_MISSING),
+  }),
+]);

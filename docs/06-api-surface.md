@@ -14,6 +14,29 @@
 - Idempotent manifest uploads (upsert by natural key).
 - Every mutating endpoint writes an audit record (Doc 10).
 
+### Request body limits
+
+| Route | Ceiling | Env |
+|---|---|---|
+| `POST /iam/applications/:id/manifest` | 4 MB (4 194 304 bytes) | `MANIFEST_BODY_LIMIT_BYTES` |
+| everything else | 64 kB (65 536 bytes) | `REQUEST_BODY_LIMIT_BYTES` |
+
+A body over its ceiling is refused as `400 VALIDATION_FAILED` before the handler runs, with the byte figure in the `message`. It is a 400 rather than a 413 because the code table in §2 is closed — consumers branch on it — and no existing code means "too large"; the status follows the code, as it does everywhere else.
+
+The manifest ceiling is deliberately above the largest document the manifest schema will accept (200 permissions, 200 nav nodes, each node gated by at most 50 permission keys — roughly 2.1 MB at every maximum simultaneously). An upload is therefore never refused for its size before it can be refused for its contents, so a failing manifest always comes back with the field that caused it.
+
+### Response headers
+
+Every response carries `X-Content-Type-Options: nosniff`, and none carries `X-Powered-By`. Error responses additionally carry `X-Request-Id`, matching the envelope's `requestId` (§2).
+
+### Machine-readable description
+
+`apps/iam-api/openapi.json` is an OpenAPI 3.1 document generated from the implementation — routes from Nest's decorator metadata, request bodies and query parameters from the live zod DTO schemas, responses from schemas pinned to `@plantops/contracts` by exact type equality. It is committed, regenerated with `npm run openapi`, and `nx run @plantops/iam-api:openapi:check` fails when it is stale.
+
+**This document remains the specification.** The generated one is a projection of the implementation, published so that an external module team can generate a client and run contract tests rather than read prose — and so that the two can be compared mechanically. Where they disagree, this document is right and the implementation is wrong.
+
+A deployment can also serve it at `GET /openapi.json` by setting `OPENAPI_ENABLED=true`. That is off by default in every environment; where it is off the route answers `404`.
+
 ## 2. Error model
 
 ```json

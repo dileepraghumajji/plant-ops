@@ -55,6 +55,7 @@ import type { DataSource } from 'typeorm';
 import { AppModule } from '../app/app.module';
 import { TokenService } from '../auth/token.service';
 import { entityManager } from '../common/transaction-context';
+import { createTestApplication } from '../testing/app-harness';
 import type { WhoAmIResponse } from './whoami.controller';
 
 const PLACEHOLDER = /REPLACE_ME|[[\]<>]/;
@@ -153,7 +154,7 @@ describeWithDb(`RLS context over HTTP (${configured ? 'live' : 'skipped: no DATA
     }).compile();
 
     // The real DatabaseService and RedisService — the whole point.
-    app = moduleRef.createNestApplication();
+    app = createTestApplication(moduleRef);
     await app.init();
     await app.listen(0);
     baseUrl = `http://127.0.0.1:${(app.getHttpServer().address() as AddressInfo).port}`;

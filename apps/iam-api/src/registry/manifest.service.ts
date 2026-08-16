@@ -62,7 +62,7 @@ import { Injectable } from '@nestjs/common';
 import type { ApplicationManifest, ManifestUpsertResponse } from '@plantops/contracts';
 import { IAM_SCHEMA } from '@plantops/db';
 import { AUDIT_ACTIONS } from '../audit/audit-actions';
-import { AuditService } from '../audit/audit.service';
+import { AuditService, type AuditEntry } from '../audit/audit.service';
 import { IamException } from '../common/iam.exception';
 import { entityManager } from '../common/transaction-context';
 import { ApplicationsService, type ApplicationRow } from './applications.service';
@@ -226,9 +226,15 @@ export class ManifestService {
       await this.permissions.add(applicationId, plan.permissions.created);
     }
 
+    // The updates stay one statement each — they set different values — but
+    // their records do not have to. See {@link AuditService.recordMany}: an
+    // upload that relabels two hundred permissions writes two hundred rows
+    // through one round-trip instead of two hundred.
+    const audited: AuditEntry[] = [];
     for (const update of plan.permissions.updated) {
-      await this.updatePermission(applicationId, update);
+      audited.push(await this.updatePermission(applicationId, update));
     }
+    await this.audit.recordMany(audited);
   }
 
   /**
@@ -238,11 +244,15 @@ export class ManifestService {
    * manifest declares the key, and declaring it is what active means. The audit
    * record still names `is_active` only when it actually changed, because the
    * plan compared it.
+   *
+   * Returns the record rather than writing it, so the caller can write the whole
+   * pass in one statement. The record is still built here, beside the statement
+   * it describes and from the same plan entry.
    */
   private async updatePermission(
     applicationId: string,
     update: PermissionUpdate,
-  ): Promise<void> {
+  ): Promise<AuditEntry> {
     const [row] = (await entityManager().query(
       `with updated as (
          update ${S}."permission"
@@ -259,10 +269,10 @@ export class ManifestService {
       ],
     )) as { id: string }[];
 
-    await this.audit.record(
-      AUDIT_ACTIONS.PERMISSION_UPDATED,
-      { type: 'permission', id: row.id },
-      {
+    return {
+      action: AUDIT_ACTIONS.PERMISSION_UPDATED,
+      target: { type: 'permission', id: row.id },
+      payload: {
         application_id: applicationId,
         key: update.desired.key,
         changed: update.changed,
@@ -277,7 +287,7 @@ export class ManifestService {
           is_active: true,
         }),
       },
-    );
+    };
   }
 
   /**
@@ -311,9 +321,11 @@ export class ManifestService {
 
     const idByKey = await this.navIdsByKey(applicationId);
 
+    const audited: AuditEntry[] = [];
     for (const update of plan.nav.updated) {
-      await this.updateNavNode(applicationId, update, idByKey);
+      audited.push(await this.updateNavNode(applicationId, update, idByKey));
     }
+    await this.audit.recordMany(audited);
 
     return idByKey;
   }
@@ -327,12 +339,15 @@ export class ManifestService {
    * `NavService.add` reports as a 409. A missing key here would be a bug in the
    * plan rather than in the request, which is why it throws rather than
    * producing an `IamException`.
+   *
+   * Returns its record rather than writing it, for the reason
+   * {@link ManifestService.updatePermission} does.
    */
   private async updateNavNode(
     applicationId: string,
     update: NavNodeUpdate,
     idByKey: ReadonlyMap<string, string>,
-  ): Promise<void> {
+  ): Promise<AuditEntry> {
     const { desired } = update;
     const id = idByKey.get(desired.key);
     const parentId = desired.parent_key === null ? null : idByKey.get(desired.parent_key);
@@ -362,17 +377,17 @@ export class ManifestService {
       ],
     );
 
-    await this.audit.record(
-      AUDIT_ACTIONS.NAV_NODE_UPDATED,
-      { type: 'nav_node', id },
-      {
+    return {
+      action: AUDIT_ACTIONS.NAV_NODE_UPDATED,
+      target: { type: 'nav_node', id },
+      payload: {
         application_id: applicationId,
         key: desired.key,
         changed: update.changed,
         before: summarize(update.changed, navFields(update.current)),
         after: summarize(update.changed, navFields({ ...desired, is_active: true })),
       },
-    );
+    };
   }
 
   /**
@@ -412,13 +427,15 @@ export class ManifestService {
           where application_id = $1 and key = $2`,
         [applicationId, key],
       );
-
-      await this.audit.record(
-        AUDIT_ACTIONS.NAV_NODE_DEACTIVATED,
-        { type: 'nav_node', id: navIdByKey.get(key) ?? null },
-        { application_id: applicationId, key },
-      );
     }
+
+    await this.audit.recordMany(
+      plan.nav.deactivated.map((key) => ({
+        action: AUDIT_ACTIONS.NAV_NODE_DEACTIVATED,
+        target: { type: 'nav_node' as const, id: navIdByKey.get(key) ?? null },
+        payload: { application_id: applicationId, key },
+      })),
+    );
 
     if (plan.permissions.deactivated.length === 0) return;
 
@@ -432,13 +449,13 @@ export class ManifestService {
       [applicationId, plan.permissions.deactivated],
     )) as { id: string; key: string }[];
 
-    for (const row of rows) {
-      await this.audit.record(
-        AUDIT_ACTIONS.PERMISSION_DEACTIVATED,
-        { type: 'permission', id: row.id },
-        { application_id: applicationId, key: row.key },
-      );
-    }
+    await this.audit.recordMany(
+      rows.map((row) => ({
+        action: AUDIT_ACTIONS.PERMISSION_DEACTIVATED,
+        target: { type: 'permission' as const, id: row.id },
+        payload: { application_id: applicationId, key: row.key },
+      })),
+    );
   }
 
   private async navIdsByKey(applicationId: string): Promise<Map<string, string>> {

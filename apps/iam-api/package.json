@@ -21,6 +21,27 @@
           }
         }
       },
+      "openapi": {
+        "executor": "nx:run-commands",
+        "cache": true,
+        "inputs": [
+          "{workspaceRoot}/apps/iam-api/src/**/*.ts",
+          "{workspaceRoot}/libs/contracts/src/**/*.ts",
+          "{workspaceRoot}/tools/emit-openapi.*"
+        ],
+        "outputs": [
+          "{workspaceRoot}/apps/iam-api/openapi.json"
+        ],
+        "options": {
+          "command": "node --conditions=@plantops/source tools/emit-openapi.cjs",
+          "cwd": "{workspaceRoot}"
+        },
+        "configurations": {
+          "check": {
+            "command": "node --conditions=@plantops/source tools/emit-openapi.cjs --check"
+          }
+        }
+      },
       "prune-lockfile": {
         "dependsOn": [
           "build"
