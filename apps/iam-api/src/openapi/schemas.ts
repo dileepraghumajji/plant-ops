@@ -45,6 +45,7 @@ import {
   NAV_NODE_KIND_VALUES,
   SCOPE_NODE_KIND_VALUES,
   SERVICE_ACCOUNT_STATUS_VALUES,
+  USER_STATUS_VALUES,
   type NavNodeCatalogDTO,
   type ScopeNodeDTO,
 } from '@plantops/contracts';
@@ -477,6 +478,43 @@ export const rolePermissionsSchema = named(
   z.object({ role_id: z.uuid(), permissions: z.array(rolePermissionSchema) }),
 );
 
+// ── users (Doc 06 §8) ───────────────────────────────────────────────────────
+
+export const userSchema = named(
+  'UserDTO',
+  z.object({
+    id: z.uuid(),
+    client_id: z.uuid(),
+    email: z.string(),
+    full_name: z.string(),
+    phone: z.string().nullable(),
+    status: z.enum(USER_STATUS_VALUES),
+    is_client_admin: z.boolean(),
+    created_at: timestamp,
+    updated_at: timestamp,
+  }),
+);
+
+const userBindingSchema = named(
+  'UserBindingDTO',
+  z.object({
+    id: z.uuid(),
+    role_id: z.uuid(),
+    role_name: z.string(),
+    scope_node_id: z.uuid(),
+    scope_node_name: z.string(),
+    scope_node_path: z.string(),
+    expires_at: timestamp.nullable(),
+    expired: z.boolean(),
+    created_at: timestamp,
+  }),
+);
+
+export const userDetailSchema = named(
+  'UserDetailDTO',
+  userSchema.extend({ bindings: z.array(userBindingSchema) }),
+);
+
 // ── service accounts (Doc 06 §10) ───────────────────────────────────────────
 
 export const serviceAccountSchema = named(
@@ -545,6 +583,7 @@ export const paginatedPermissionsSchema = paginated(
 );
 export const paginatedClientsSchema = paginated('PaginatedClientDTO', clientSchema);
 export const paginatedRolesSchema = paginated('PaginatedRoleDTO', roleSchema);
+export const paginatedUsersSchema = paginated('PaginatedUserDTO', userSchema);
 export const paginatedServiceAccountsSchema = paginated(
   'PaginatedServiceAccountDTO',
   serviceAccountSchema,

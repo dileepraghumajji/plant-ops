@@ -18,6 +18,8 @@ import {
   SERVICE_ACCOUNT_STATUS_VALUES,
   ScopeNodeKind,
   ServiceAccountStatus,
+  USER_STATUS_VALUES,
+  UserStatus,
 } from '@plantops/contracts';
 import { getMetadataArgsStorage } from 'typeorm';
 import { ENUM_VALUES } from '../migrations/index.js';
@@ -249,6 +251,15 @@ describe('Postgres enums (migration 0001)', () => {
     // it would surface as a 500 on the one surface a tenant admin uses most.
     expect([...SCOPE_NODE_KINDS]).toEqual([...SCOPE_NODE_KIND_VALUES]);
     expect([...SCOPE_NODE_KINDS]).toEqual(Object.values(ScopeNodeKind));
+  });
+
+  it('agrees with @plantops/contracts on the account states', () => {
+    // The same two-vocabulary problem, for `PATCH /iam/users/:id` (Doc 06 §8).
+    // A drift here would be an API that accepts a status login never checks
+    // for — and the state machine of Doc 03 §8 is what decides whether somebody
+    // can get in at all.
+    expect([...USER_STATUSES]).toEqual([...USER_STATUS_VALUES]);
+    expect([...USER_STATUSES]).toEqual(Object.values(UserStatus));
   });
 
   it('agrees with @plantops/contracts on the client states', () => {

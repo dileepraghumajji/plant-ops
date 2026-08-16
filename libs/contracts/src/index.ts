@@ -18,6 +18,7 @@ export * from './registry.js';
 export * from './roles.js';
 export * from './scopes.js';
 export * from './service-accounts.js';
+export * from './users.js';
 
 /**
  * The compile-time assertion helpers (Doc 08 §7).

@@ -84,6 +84,7 @@ import { RegistryModule } from '../registry/registry.module';
 import { RolesModule } from '../roles/roles.module';
 import { ScopesModule } from '../scopes/scopes.module';
 import { ServiceAccountsModule } from '../service-accounts/service-accounts.module';
+import { UsersModule } from '../users/users.module';
 
 @Module({
   imports: [
@@ -97,6 +98,7 @@ import { ServiceAccountsModule } from '../service-accounts/service-accounts.modu
     ClientsModule,
     ScopesModule,
     RolesModule,
+    UsersModule,
     ServiceAccountsModule,
     OpenApiModule,
   ],

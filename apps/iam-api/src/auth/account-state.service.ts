@@ -24,25 +24,43 @@
  * those sessions: a revocation is a fact about a moment, and the account logs in
  * again.
  *
- * ## Why there is no controller in front of this yet
+ * ## …and invalidates the subject's cached grants
  *
- * The route is `PATCH /iam/users/:id` (Doc 06 §8) and it is a client-admin
- * action gated on `iam.client.user.*`, which needs the `PermissionGuard` that
- * arrives in Session 23 and the user-admin surface from Session 16. Wiring an
- * endpoint now would mean either shipping it ungated — an unauthenticated user
- * could disable anybody in their tenant — or inventing an interim check that
- * Session 23 would immediately delete. So the transitions are implemented,
- * audited and tested here, and the endpoint is a later session's two lines.
+ * The other half of Doc 04 §7's row, which reads "user locked/disabled → that
+ * subject (**+ revoke sessions**)": the two are one entry in that table because
+ * they close the same hole from two sides. Killing the sessions stops the
+ * account being used through the IAM; invalidating the grants stops a *consuming
+ * module* answering from a cached grant set that was resolved while the account
+ * was still live (Doc 04 §6's ≤10 minute TTL is otherwise the only bound).
  *
- * The automatic lock is not waiting on any of that: it happens inside
- * `iam.auth_record_login_failure` (migration 0014), where the failure it counts
- * already is.
+ * Published from `afterCommit()`, like the revocation and for the same reason.
+ * It is a stub until Session 22 — see `authz/invalidation.service.ts`.
+ *
+ * Unlock publishes nothing: it removes no access, and a subject whose cached
+ * grants are correct does not need them recomputed.
+ *
+ * ## Who calls this
+ *
+ * `PATCH /iam/users/:id` (Doc 06 §8), through Session 18's `UsersService` —
+ * which resolves the user inside the caller's tenant first, so a `changed:
+ * false` here means the row genuinely did not move rather than that the target
+ * belonged to somebody else.
+ *
+ * The transitions stay here, beside the login path that enforces them, rather
+ * than in that service: the automatic lock shares this vocabulary and this
+ * revocation, and it happens inside `iam.auth_record_login_failure` (migration
+ * 0014) where the failure it counts already is.
  */
 
 import { Injectable } from '@nestjs/common';
+import { SubjectType } from '@plantops/contracts';
 import { IAM_SCHEMA, type UserStatus } from '@plantops/db';
 import { AUDIT_ACTIONS, type AuditAction } from '../audit/audit-actions';
 import { AuditService } from '../audit/audit.service';
+import {
+  GrantInvalidationService,
+  type InvalidationReason,
+} from '../authz/invalidation.service';
 import { afterCommit, entityManager } from '../common/transaction-context';
 import { SessionService } from './session.service';
 
@@ -63,6 +81,7 @@ export class AccountStateService {
   constructor(
     private readonly audit: AuditService,
     private readonly sessions: SessionService,
+    private readonly invalidation: GrantInvalidationService,
   ) {}
 
   /**
@@ -73,9 +92,14 @@ export class AccountStateService {
    * changing, and `actor_id` on the row already says who caused it. Migration
    * 0014's header has the full argument for one vocabulary rather than two.
    */
-  lock(userId: string, reason?: string): Promise<AccountStateChange> {
-    return this.transition(userId, 'locked', AUDIT_ACTIONS.ACCOUNT_LOCKED, {
+  lock(
+    clientId: string,
+    userId: string,
+    reason?: string,
+  ): Promise<AccountStateChange> {
+    return this.transition(clientId, userId, 'locked', AUDIT_ACTIONS.ACCOUNT_LOCKED, {
       revokeSessions: true,
+      invalidatesGrants: 'user.locked',
       payload: reason === undefined ? {} : { reason },
     });
   }
@@ -92,8 +116,8 @@ export class AccountStateService {
    * reactivating somebody through the unlock button is not a thing an
    * administrator should be able to do by accident.
    */
-  unlock(userId: string): Promise<AccountStateChange> {
-    return this.transition(userId, 'active', AUDIT_ACTIONS.ACCOUNT_UNLOCKED, {
+  unlock(clientId: string, userId: string): Promise<AccountStateChange> {
+    return this.transition(clientId, userId, 'active', AUDIT_ACTIONS.ACCOUNT_UNLOCKED, {
       revokeSessions: false,
       from: ['locked'],
     });
@@ -108,9 +132,10 @@ export class AccountStateService {
    * access token is refused by the guard reading that cache and by nothing else
    * until it expires.
    */
-  disable(userId: string): Promise<AccountStateChange> {
-    return this.transition(userId, 'disabled', AUDIT_ACTIONS.USER_DISABLED, {
+  disable(clientId: string, userId: string): Promise<AccountStateChange> {
+    return this.transition(clientId, userId, 'disabled', AUDIT_ACTIONS.USER_DISABLED, {
       revokeSessions: true,
+      invalidatesGrants: 'user.disabled',
     });
   }
 
@@ -118,9 +143,10 @@ export class AccountStateService {
    * One status change, audited, with the force-logout that goes with it.
    *
    * Runs on the request transaction — this is an authenticated administrative
-   * action, so RLS confines it to the caller's tenant and a user id from another
-   * client updates nothing and comes back `changed: false`. The controller that
-   * eventually calls this turns that into the same 404 a nonexistent id gets,
+   * action, so RLS confines it to the caller's tenant, and the statement
+   * additionally pins `client_id` to the tenant the caller named. A user id from
+   * another client therefore updates nothing and comes back `changed: false`.
+   * The controller above turns that into the same 404 a nonexistent id gets,
    * which is what keeps a denial from revealing that a user exists elsewhere
    * (Doc 06 §2).
    *
@@ -129,11 +155,20 @@ export class AccountStateService {
    * because a screen was double-clicked is one nobody can read.
    */
   private async transition(
+    clientId: string,
     userId: string,
     status: UserStatus,
     action: AuditAction,
     options: {
       revokeSessions: boolean;
+      /**
+       * The cause to publish to the grants cache, for the transitions that take
+       * access away. Absent for `unlock`, which gives it back.
+       */
+      invalidatesGrants?: Extract<
+        InvalidationReason,
+        { cause: 'user.locked' | 'user.disabled' }
+      >['cause'];
       /** Statuses this transition is legal from. Defaults to any but the target. */
       from?: readonly UserStatus[];
       payload?: Record<string, unknown>;
@@ -151,12 +186,15 @@ export class AccountStateService {
                 failed_login_attempts = 0,
                 last_failed_login_at = null
           where u.id = $1
+            and u.client_id = $3
             and u.status <> $2::${S}."user_status"
-            ${allowed === undefined ? '' : `and u.status::text = any($3::text[])`}
+            ${allowed === undefined ? '' : `and u.status::text = any($4::text[])`}
           returning u.id
        )
        select id from changed`,
-      allowed === undefined ? [userId, status] : [userId, status, [...allowed]],
+      allowed === undefined
+        ? [userId, status, clientId]
+        : [userId, status, clientId, [...allowed]],
     )) as { id: string }[];
 
     if (rows.length === 0) return UNCHANGED;
@@ -172,6 +210,20 @@ export class AccountStateService {
       // revocation a rollback then undoes would have every verifier in the fleet
       // refusing sessions that are still live.
       afterCommit(() => this.sessions.publishRevocations(revokedSessions));
+    }
+
+    if (options.invalidatesGrants !== undefined) {
+      const cause = options.invalidatesGrants;
+      // Unconditionally, not "if any sessions were revoked": a subject's cached
+      // grants are keyed by subject, not by session, and an account with nothing
+      // logged in can still have an entry a consuming module resolved for it.
+      afterCommit(() =>
+        this.invalidation.publish(
+          clientId,
+          [{ type: SubjectType.USER, id: userId }],
+          { cause, userId },
+        ),
+      );
     }
 
     return { changed: true, revokedSessions };

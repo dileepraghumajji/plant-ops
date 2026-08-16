@@ -6,11 +6,10 @@
  * statement runs on the request transaction `TenantContextInterceptor` opened —
  * and every mutation records itself through the one audit path (Doc 10 §3).
  *
- * `ScopeInvalidationService` is provided here rather than in a shared module
- * because it is a stub with exactly one caller. Session 22 replaces it with the
- * real `authz/invalidation.service.ts`, which will have several, and moving it
- * then is a smaller change than pre-emptively putting a placeholder somewhere
- * central.
+ * `AuthzModule` supplies the grant-invalidation hook a move fires after commit
+ * (Doc 04 §7.1). It was a stub provided here while the scope move was its only
+ * caller; Session 18's lock/disable transitions made it a second one, so it now
+ * lives where Session 22 will replace it.
  *
  * `ScopesService` is exported: Session 20's bindings API has to resolve a scope
  * node and check it belongs to the caller's client before anchoring a grant to
@@ -19,15 +18,15 @@
 
 import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module';
+import { AuthzModule } from '../authz/authz.module';
 import { DatabaseModule } from '../database/database.module';
-import { ScopeInvalidationService } from './scope-invalidation.service';
 import { ScopesController } from './scopes.controller';
 import { ScopesService } from './scopes.service';
 
 @Module({
-  imports: [AuditModule, DatabaseModule],
+  imports: [AuditModule, AuthzModule, DatabaseModule],
   controllers: [ScopesController],
-  providers: [ScopesService, ScopeInvalidationService],
+  providers: [ScopesService],
   exports: [ScopesService],
 })
 export class ScopesModule {}
