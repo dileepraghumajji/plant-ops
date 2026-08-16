@@ -9,8 +9,8 @@
  *   body by calling `next(err)` outside Nest, and Express answered with its
  *   default HTML page — a response `isIamErrorResponse` rejects. Asserting the
  *   envelope here is what proves the parser sits *inside* the filter's reach.
- * - **The manifest route has a larger ceiling than everything else**, and both
- *   numbers come from the environment.
+ * - **The manifest and bulk-upload routes have larger ceilings than everything
+ *   else**, and all three numbers come from the environment.
  * - **`x-powered-by` is gone and `nosniff` is present** on every response,
  *   including the ones no handler produces.
  *
@@ -24,6 +24,7 @@
 import { Body, Controller, HttpCode, Post } from '@nestjs/common';
 import { Public } from '@plantops/auth-kit';
 import {
+  DEFAULT_BULK_UPLOAD_BODY_LIMIT_BYTES,
   DEFAULT_MANIFEST_BODY_LIMIT_BYTES,
   DEFAULT_REQUEST_BODY_LIMIT_BYTES,
 } from '@plantops/config';
@@ -35,7 +36,10 @@ import {
 } from '@plantops/contracts';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { MANIFEST_ROUTE_PATH } from '../common/body-parser.middleware';
+import {
+  BULK_USER_UPLOAD_ROUTE_PATH,
+  MANIFEST_ROUTE_PATH,
+} from '../common/body-parser.middleware';
 import { createZodDto } from '../common/validation.pipe';
 import { type Harness, createHarness, testEnv } from '../testing/app-harness';
 import { CONTENT_TYPE_OPTIONS_HEADER } from './http-hardening';
@@ -43,6 +47,7 @@ import { CONTENT_TYPE_OPTIONS_HEADER } from './http-hardening';
 /** Small enough to keep the suite fast, distinct enough to tell apart. */
 const GLOBAL_LIMIT = 2_048;
 const MANIFEST_LIMIT = 16_384;
+const BULK_UPLOAD_LIMIT = 8_192;
 
 class EchoDto extends createZodDto(z.object({ padding: z.string() })) {}
 
@@ -80,6 +85,7 @@ describe('HTTP hardening (Doc 06 §1)', () => {
       env: testEnv({
         REQUEST_BODY_LIMIT_BYTES: String(GLOBAL_LIMIT),
         MANIFEST_BODY_LIMIT_BYTES: String(MANIFEST_LIMIT),
+        BULK_UPLOAD_BODY_LIMIT_BYTES: String(BULK_UPLOAD_LIMIT),
       }),
     });
     manifestPath = MANIFEST_ROUTE_PATH.replace(':id', randomUUID());
@@ -177,6 +183,53 @@ describe('HTTP hardening (Doc 06 §1)', () => {
     });
   });
 
+  describe('the bulk-upload exemption', () => {
+    it('accepts an upload larger than the global ceiling', async () => {
+      const { accessToken } = harness.tokenFor();
+      const response = await post(
+        harness,
+        BULK_USER_UPLOAD_ROUTE_PATH,
+        padded(GLOBAL_LIMIT * 2),
+        accessToken,
+      );
+      const body = (await response.json()) as IamErrorResponse;
+
+      // The body is nonsense as an upload, so this route still refuses it — the
+      // claim under test is *which* refusal. Reaching the schema at all means
+      // the larger ceiling let it through the parser.
+      expect(body.error.message).not.toContain('byte limit');
+    });
+
+    it('still has a ceiling of its own', async () => {
+      const { accessToken } = harness.tokenFor();
+      const response = await post(
+        harness,
+        BULK_USER_UPLOAD_ROUTE_PATH,
+        padded(BULK_UPLOAD_LIMIT * 2),
+        accessToken,
+      );
+      const body = (await response.json()) as IamErrorResponse;
+
+      expect(response.status).toBe(400);
+      expect(body.error.code).toBe(IamErrorCode.VALIDATION_FAILED);
+      expect(body.error.message).toContain(String(BULK_UPLOAD_LIMIT));
+    });
+
+    it('exempts the bulk route only, not the rest of /iam/users', async () => {
+      const { accessToken } = harness.tokenFor();
+      const response = await post(
+        harness,
+        `${IAM_ROUTE_PREFIX}/users`,
+        padded(GLOBAL_LIMIT * 2),
+        accessToken,
+      );
+      const body = (await response.json()) as IamErrorResponse;
+
+      expect(response.status).toBe(400);
+      expect(body.error.message).toContain(String(GLOBAL_LIMIT));
+    });
+  });
+
   describe('response headers', () => {
     /**
      * A handled success, a router 404 and a filtered error — the three ways a
@@ -213,6 +266,15 @@ describe('the shipped ceilings (Doc 06 §1)', () => {
   it('are the documented defaults', () => {
     expect(DEFAULT_REQUEST_BODY_LIMIT_BYTES).toBe(65_536);
     expect(DEFAULT_MANIFEST_BODY_LIMIT_BYTES).toBe(4_194_304);
+    expect(DEFAULT_BULK_UPLOAD_BODY_LIMIT_BYTES).toBe(1_048_576);
+  });
+
+  it('leaves the bulk ceiling above the largest schema-valid upload', () => {
+    // `MAX_BULK_USER_ROWS` caps an upload at 500 rows, and every field in a row
+    // is separately bounded — roughly 300 kB at every maximum at once, or about
+    // twice that once a CSV's line breaks are JSON-escaped. Below that number, a
+    // size refusal would pre-empt the row-count error that names the problem.
+    expect(DEFAULT_BULK_UPLOAD_BODY_LIMIT_BYTES).toBeGreaterThan(600_000);
   });
 
   it('leaves the manifest ceiling above the largest schema-valid manifest', () => {

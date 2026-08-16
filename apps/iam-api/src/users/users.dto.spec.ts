@@ -8,7 +8,14 @@
  * status transitions and session revocation, is `users.integration.spec.ts`.
  */
 
-import { createUserSchema, updateUserSchema, usersQuerySchema } from './dto/users.dto';
+import { MAX_BULK_USER_ROWS } from '@plantops/contracts';
+import {
+  bulkUserUploadSchema,
+  createUserSchema,
+  updateUserSchema,
+  usersByRoleQuerySchema,
+  usersQuerySchema,
+} from './dto/users.dto';
 
 describe('user request schemas', () => {
   describe('POST /iam/users', () => {
@@ -148,6 +155,87 @@ describe('user request schemas', () => {
 
     it('accepts no parameters at all', () => {
       expect(usersQuerySchema.parse({})).toEqual({});
+    });
+  });
+
+  describe('GET /iam/users/by-role/:roleId', () => {
+    it('coerces the pagination pair and takes nothing else', () => {
+      expect(
+        usersByRoleQuerySchema.parse({ page: '3', limit: '10', status: 'locked' }),
+      ).toEqual({ page: 3, limit: 10 });
+    });
+
+    it('accepts no parameters at all', () => {
+      expect(usersByRoleQuerySchema.parse({})).toEqual({});
+    });
+  });
+
+  describe('POST /iam/users/bulk', () => {
+    it('accepts a CSV document', () => {
+      expect(
+        bulkUserUploadSchema.parse({
+          format: 'csv',
+          content: 'email,full_name\na@b.test,A B',
+        }),
+      ).toEqual({ format: 'csv', content: 'email,full_name\na@b.test,A B' });
+    });
+
+    it('carries JSON rows through untouched, invalid ones included', () => {
+      // The whole point of the endpoint is a per-row verdict, so a row that is
+      // not a user must reach `BulkUploadService` rather than fail the request:
+      // validating here would turn a mixed file into a 400 naming its first bad
+      // row, which is the report reduced to one line.
+      const users = [{ email: 'a@b.test', full_name: 'A B' }, { nonsense: true }, 42];
+
+      expect(bulkUserUploadSchema.parse({ format: 'json', users }).users).toEqual(users);
+    });
+
+    it.each([
+      ['no format', { content: 'email\na@b.test' }],
+      ['a format outside the enum', { format: 'xlsx', content: 'email' }],
+      ['a csv upload with no content', { format: 'csv' }],
+      ['a json upload with no rows array', { format: 'json' }],
+      ['an empty csv document', { format: 'csv', content: '' }],
+      ['an empty rows array', { format: 'json', users: [] }],
+      [
+        'more rows than the bound',
+        { format: 'json', users: Array.from({ length: MAX_BULK_USER_ROWS + 1 }, () => ({})) },
+      ],
+      [
+        'a csv document past the length bound',
+        { format: 'csv', content: 'x'.repeat(600_001) },
+      ],
+    ])('refuses %s', (_case, body) => {
+      expect(bulkUserUploadSchema.safeParse(body).success).toBe(false);
+    });
+
+    it('refuses a body that carries the other arm’s field as well', () => {
+      // Ignoring the surplus field would silently upload one of two documents a
+      // caller sent, and they would have no way to tell which.
+      const both = bulkUserUploadSchema.safeParse({
+        format: 'csv',
+        content: 'email\na@b.test',
+        users: [{ email: 'c@d.test', full_name: 'C D' }],
+      });
+
+      expect(both.success).toBe(false);
+      expect(both.error?.issues[0].path).toEqual(['users']);
+    });
+
+    it('names the missing field rather than the body', () => {
+      const missing = bulkUserUploadSchema.safeParse({ format: 'json' });
+
+      expect(missing.error?.issues[0].path).toEqual(['users']);
+      expect(missing.error?.issues[0].message).toContain('required');
+    });
+
+    it('accepts exactly the bound', () => {
+      const users = Array.from({ length: MAX_BULK_USER_ROWS }, (_, index) => ({
+        email: `person-${index}@acme.test`,
+        full_name: `Person ${index}`,
+      }));
+
+      expect(bulkUserUploadSchema.safeParse({ format: 'json', users }).success).toBe(true);
     });
   });
 });

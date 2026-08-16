@@ -40,6 +40,7 @@ import { UsersController } from '../users/users.controller';
 import {
   accessTokenSchema,
   applicationSchema,
+  bulkUserUploadSchema,
   clientAdminSchema,
   clientApplicationSchema,
   clientSchema,
@@ -54,6 +55,7 @@ import {
   paginatedPermissionsSchema,
   paginatedRolesSchema,
   paginatedServiceAccountsSchema,
+  paginatedUsersByRoleSchema,
   paginatedUsersSchema,
   permissionSchema,
   readinessSchema,
@@ -285,7 +287,21 @@ export const ROUTE_RESPONSES: ReadonlyMap<
 
   routes(UsersController, {
     create: failing(created(userSchema), ...DENIED_MISSING_OR_DUPLICATE),
+    // A 200 and not a 201: the request produces a report about up to five
+    // hundred users, so there is no single created resource to point at
+    // (`BulkUserUploadResponse`). No 409 either — a duplicate address is a
+    // `skipped` row of that report rather than a refusal of the request. The
+    // 400 the universal list already carries is the document-level refusal:
+    // malformed CSV, a header missing a column, too many rows.
+    bulkUpload: failing(
+      ok(bulkUserUploadSchema, 'The per-row result report'),
+      403,
+    ),
     list: failing(ok(paginatedUsersSchema), 403),
+    byRole: failing(
+      ok(paginatedUsersByRoleSchema, 'The role’s holders, with their scopes'),
+      ...DENIED_OR_MISSING,
+    ),
     detail: failing(
       ok(userDetailSchema, 'The user, with the grants they hold'),
       ...DENIED_OR_MISSING,

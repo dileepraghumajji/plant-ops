@@ -1,0 +1,4 @@
+email,full_name,phone,status
+gita.rao@acme.test,Gita Rao,+91 98765 43210,active
+"  Nikhil.Joshi@ACME.test ",Nikhil Joshi,,
+zara.ali@acme.test,"Ali, Zara",,disabled

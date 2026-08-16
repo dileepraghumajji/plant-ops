@@ -65,7 +65,10 @@ import {
   normalizePagination,
   paginated,
   type Paginated,
+  type PaginationQuery,
+  type RoleScopeGrantDTO,
   type UserBindingDTO,
+  type UserByRoleDTO,
   type UserDTO,
   type UserDetailDTO,
 } from '@plantops/contracts';
@@ -107,6 +110,28 @@ const BINDINGS = `
    order by sn.path asc, r.name asc, rb.created_at asc
 `;
 
+/**
+ * Every scope at which a set of users holds one role — the second half of
+ * `GET /iam/users/by-role/:roleId` (Doc 06 §8, Doc 09 §3.3).
+ *
+ * Fetched for the page's users rather than joined into the page itself, because
+ * the page counts *people*: a supervisor holding the role at four plants is one
+ * row of "who has this role" and not four, and a join would make `limit=25` mean
+ * twenty-five bindings belonging to however many users that happened to be.
+ *
+ * Ordered by path so the panel groups a role's reach the way the org tree reads.
+ */
+const BY_ROLE_SCOPES = `
+  select rb.user_id, rb.id as binding_id, rb.scope_node_id,
+         sn.name as scope_node_name, sn.path::text as scope_node_path,
+         rb.expires_at,
+         (rb.expires_at is not null and rb.expires_at <= now()) as expired
+    from ${S}."role_binding" rb
+    join ${S}."scope_node" sn on sn.id = rb.scope_node_id
+   where rb.client_id = $1 and rb.role_id = $2 and rb.user_id = any($3::uuid[])
+   order by sn.path asc, rb.created_at asc
+`;
+
 export interface UserRow {
   id: string;
   client_id: string;
@@ -129,6 +154,16 @@ interface BindingRow {
   expires_at: Date | null;
   expired: boolean;
   created_at: Date;
+}
+
+interface ScopeGrantRow {
+  user_id: string;
+  binding_id: string;
+  scope_node_id: string;
+  scope_node_name: string;
+  scope_node_path: string;
+  expires_at: Date | null;
+  expired: boolean;
 }
 
 export interface CreateUserInput {
@@ -307,6 +342,111 @@ export class UsersService {
     return updated === null
       ? null
       : { ...toDto(updated), bindings: await this.bindings(claims, id) };
+  }
+
+  /**
+   * The people who hold a role, with the scopes they hold it at (Doc 06 §8).
+   *
+   * Doc 09 §3.3's "Users by Role": pick a role, see who has it and where. The
+   * reverse of the detail screen's bindings panel, and deliberately a separate
+   * endpoint rather than a filter on `GET /iam/users` — the answer's unit is a
+   * person *plus their scope context*, which is not a shape the ordinary user
+   * list has anywhere to put.
+   *
+   * A holder appears once however many bindings they have, so `total` is a count
+   * of people. Expired bindings are listed and flagged rather than dropped, for
+   * the reason `UserBindingDTO.expired` gives — including for a holder all of
+   * whose grants have lapsed, who is exactly the row somebody auditing a role is
+   * looking for.
+   *
+   * Returns `null` when no such role is visible to this caller: another tenant's
+   * role is invisible under RLS, so it is the same 404 a nonexistent id gets and
+   * the response cannot be used to discover that a role exists elsewhere
+   * (Doc 06 §2).
+   */
+  async byRole(
+    claims: VerifiedClaims,
+    roleId: string,
+    query: PaginationQuery = {},
+  ): Promise<Paginated<UserByRoleDTO> | null> {
+    await assertAdministrator(claims);
+
+    const [role] = (await entityManager().query(
+      `select id from ${S}."role" where client_id = $1 and id = $2`,
+      [claims.cid, roleId],
+    )) as { id: string }[];
+    if (role === undefined) return null;
+
+    const { page, limit } = normalizePagination(query);
+
+    // `exists` rather than a join with `distinct`: the question is whether the
+    // person holds the role at all, and the scopes they hold it at are a second
+    // query over the page rather than something to de-duplicate a page from.
+    const holds = `
+      u.client_id = $1
+      and exists (
+        select 1 from ${S}."role_binding" rb
+         where rb.client_id = u.client_id and rb.user_id = u.id and rb.role_id = $2
+      )`;
+
+    const rows = (await entityManager().query(
+      // Unqualified: `u` is the only table in the from-list, and the `exists`
+      // subquery names both of its own sides explicitly.
+      `select ${COLUMNS}
+         from ${S}."user" u
+        where ${holds}
+        order by u.full_name asc, u.id asc
+        limit $3 offset $4`,
+      [claims.cid, roleId, limit, (page - 1) * limit],
+    )) as UserRow[];
+
+    const [count] = (await entityManager().query(
+      `select count(*)::int as total from ${S}."user" u where ${holds}`,
+      [claims.cid, roleId],
+    )) as { total: number }[];
+
+    const scopes = await this.scopesByUser(
+      claims,
+      roleId,
+      rows.map((row) => row.id),
+    );
+
+    return paginated(
+      rows.map((row) => ({ ...toDto(row), scopes: scopes.get(row.id) ?? [] })),
+      count?.total ?? rows.length,
+      query,
+    );
+  }
+
+  /** The page's users → the bindings through which each holds `roleId`. */
+  private async scopesByUser(
+    claims: VerifiedClaims,
+    roleId: string,
+    userIds: readonly string[],
+  ): Promise<Map<string, RoleScopeGrantDTO[]>> {
+    const byUser = new Map<string, RoleScopeGrantDTO[]>();
+    if (userIds.length === 0) return byUser;
+
+    const rows = (await entityManager().query(BY_ROLE_SCOPES, [
+      claims.cid,
+      roleId,
+      userIds,
+    ])) as ScopeGrantRow[];
+
+    for (const row of rows) {
+      const grants = byUser.get(row.user_id) ?? [];
+      grants.push({
+        binding_id: row.binding_id,
+        scope_node_id: row.scope_node_id,
+        scope_node_name: row.scope_node_name,
+        scope_node_path: row.scope_node_path,
+        expires_at: row.expires_at?.toISOString() ?? null,
+        expired: row.expired,
+      });
+      byUser.set(row.user_id, grants);
+    }
+
+    return byUser;
   }
 
   /**

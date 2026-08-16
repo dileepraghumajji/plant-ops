@@ -41,6 +41,7 @@
  */
 
 import {
+  BULK_USER_ROW_STATUS_VALUES,
   CLIENT_STATUS_VALUES,
   NAV_NODE_KIND_VALUES,
   SCOPE_NODE_KIND_VALUES,
@@ -515,6 +516,45 @@ export const userDetailSchema = named(
   userSchema.extend({ bindings: z.array(userBindingSchema) }),
 );
 
+const bulkUserRowResultSchema = named(
+  'BulkUserRowResult',
+  z.object({
+    row: z.number().int(),
+    email: z.string().nullable(),
+    status: z.enum(BULK_USER_ROW_STATUS_VALUES),
+    reason: z.string().optional(),
+    user_id: z.uuid().nullable(),
+  }),
+);
+
+export const bulkUserUploadSchema = named(
+  'BulkUserUploadResponse',
+  z.object({
+    total: z.number().int(),
+    created: z.number().int(),
+    skipped: z.number().int(),
+    errored: z.number().int(),
+    results: z.array(bulkUserRowResultSchema),
+  }),
+);
+
+const roleScopeGrantSchema = named(
+  'RoleScopeGrantDTO',
+  z.object({
+    binding_id: z.uuid(),
+    scope_node_id: z.uuid(),
+    scope_node_name: z.string(),
+    scope_node_path: z.string(),
+    expires_at: timestamp.nullable(),
+    expired: z.boolean(),
+  }),
+);
+
+export const userByRoleSchema = named(
+  'UserByRoleDTO',
+  userSchema.extend({ scopes: z.array(roleScopeGrantSchema) }),
+);
+
 // ── service accounts (Doc 06 §10) ───────────────────────────────────────────
 
 export const serviceAccountSchema = named(
@@ -584,6 +624,10 @@ export const paginatedPermissionsSchema = paginated(
 export const paginatedClientsSchema = paginated('PaginatedClientDTO', clientSchema);
 export const paginatedRolesSchema = paginated('PaginatedRoleDTO', roleSchema);
 export const paginatedUsersSchema = paginated('PaginatedUserDTO', userSchema);
+export const paginatedUsersByRoleSchema = paginated(
+  'PaginatedUserByRoleDTO',
+  userByRoleSchema,
+);
 export const paginatedServiceAccountsSchema = paginated(
   'PaginatedServiceAccountDTO',
   serviceAccountSchema,

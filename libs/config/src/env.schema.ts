@@ -45,9 +45,10 @@ export const DEFAULT_READINESS_TIMEOUT_MS = 2_000;
  * small for a manifest upload, which carries an application's whole permission
  * and nav catalogue in one document.
  *
- * So the limit is stated rather than inherited, and the manifest route gets its
- * own. **64 kB** covers every other body on the surface with room to spare — the
- * largest is `PUT /iam/roles/:id/permissions`, a few hundred uuids.
+ * So the limit is stated rather than inherited, and the two routes that carry a
+ * *document* rather than a form get their own. **64 kB** covers every other body
+ * on the surface with room to spare — the largest is
+ * `PUT /iam/roles/:id/permissions`, a few hundred uuids.
  *
  * **4 MB** is not a guess: `manifest.dto.ts` caps a manifest at 200 permissions
  * and 200 nav nodes, and every string in it has a maximum length, so the largest
@@ -57,14 +58,26 @@ export const DEFAULT_READINESS_TIMEOUT_MS = 2_000;
  * never refused for its size before it can be refused for its contents, so an
  * operator debugging an upload always gets the error that names the field.
  *
- * Both are capped: an operator raising a limit is tuning for a real payload,
- * and a limit large enough to matter as a memory-exhaustion lever should have
- * to be argued for rather than typed into an environment variable.
+ * **1 MB** for `POST /iam/users/bulk` is the same computation on a smaller
+ * document. `MAX_BULK_USER_ROWS` caps it at 500 rows, and a row's fields are
+ * bounded by the same schema the single-user create uses — a 320-character
+ * address, a 160-character name, a 40-character phone and a status word — so the
+ * largest upload the schema accepts is roughly 500 × 600 characters, under
+ * 300 kB, and about twice that once a CSV's line breaks are JSON-escaped. 1 MB
+ * sits above that for the same reason the manifest's ceiling sits above 2.1 MB:
+ * a bulk upload should be refused for its row count, which names the problem,
+ * rather than for its byte count, which does not.
+ *
+ * All three are capped: an operator raising a limit is tuning for a real
+ * payload, and a limit large enough to matter as a memory-exhaustion lever
+ * should have to be argued for rather than typed into an environment variable.
  */
 export const DEFAULT_REQUEST_BODY_LIMIT_BYTES = 65_536;
 export const MAX_REQUEST_BODY_LIMIT_BYTES = 1_048_576;
 export const DEFAULT_MANIFEST_BODY_LIMIT_BYTES = 4_194_304;
 export const MAX_MANIFEST_BODY_LIMIT_BYTES = 16_777_216;
+export const DEFAULT_BULK_UPLOAD_BODY_LIMIT_BYTES = 1_048_576;
+export const MAX_BULK_UPLOAD_BODY_LIMIT_BYTES = 4_194_304;
 
 /**
  * Account-lockout and password-reset policy (Doc 03 §7–8).
@@ -318,6 +331,12 @@ export const envSchema = z.object({
     DEFAULT_MANIFEST_BODY_LIMIT_BYTES,
     MAX_MANIFEST_BODY_LIMIT_BYTES,
   ),
+  /** Ceiling for `POST /iam/users/bulk` alone (Doc 06 §8). */
+  BULK_UPLOAD_BODY_LIMIT_BYTES: bytes(
+    'BULK_UPLOAD_BODY_LIMIT_BYTES',
+    DEFAULT_BULK_UPLOAD_BODY_LIMIT_BYTES,
+    MAX_BULK_UPLOAD_BODY_LIMIT_BYTES,
+  ),
 
   JWT_ISSUER: z.string().trim().min(1).default(IAM_ISSUER),
   /** `kid` of the key currently signing (Doc 03 §1). */
@@ -397,17 +416,24 @@ export const envSchema = z.object({
     ),
 })
   /**
-   * The manifest exemption has to be an exemption. Configured the other way
-   * round it is not a smaller ceiling for one route — it is a route that
-   * silently rejects bodies every *other* route accepts, which is the least
-   * guessable failure this pair can produce. The defaults already satisfy it;
-   * only an operator who has changed one of them can trip it.
+   * Both exemptions have to be exemptions. Configured the other way round
+   * neither is a smaller ceiling for one route — each is a route that silently
+   * rejects bodies every *other* route accepts, which is the least guessable
+   * failure this trio can produce. The defaults already satisfy both; only an
+   * operator who has changed one of them can trip either.
    */
   .refine(
     (env) => env.MANIFEST_BODY_LIMIT_BYTES >= env.REQUEST_BODY_LIMIT_BYTES,
     {
       message:
         'MANIFEST_BODY_LIMIT_BYTES must be at least REQUEST_BODY_LIMIT_BYTES — the manifest route raises the global ceiling, it does not lower it',
+    },
+  )
+  .refine(
+    (env) => env.BULK_UPLOAD_BODY_LIMIT_BYTES >= env.REQUEST_BODY_LIMIT_BYTES,
+    {
+      message:
+        'BULK_UPLOAD_BODY_LIMIT_BYTES must be at least REQUEST_BODY_LIMIT_BYTES — the bulk upload route raises the global ceiling, it does not lower it',
     },
   );
 

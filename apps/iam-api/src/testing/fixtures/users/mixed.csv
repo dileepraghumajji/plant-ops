@@ -1,0 +1,9 @@
+email,full_name,phone,status
+gita.rao@acme.test,Gita Rao,+91 98765 43210,active
+not-an-email,Broken Row,,
+GITA.RAO@acme.test,Gita Again,,
+existing@acme.test,Already Here,,
+
+zara.ali@acme.test,,,
+nikhil.joshi@acme.test,Nikhil Joshi,,pending
+sunil.mehta@acme.test,"Mehta, Sunil",,disabled
