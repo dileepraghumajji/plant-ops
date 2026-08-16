@@ -307,7 +307,9 @@ export class SessionService implements RevocationFallback {
    * One audit row per session rather than one for the user. The session list is
    * a screen an administrator reads back (Doc 09), and "this device was logged
    * out at 14:02" is the thing they are looking for; a single aggregate row
-   * would leave every individual session's ending unexplained.
+   * would leave every individual session's ending unexplained. One *statement*
+   * for all of them, though — `recordMany` writes the same rows the loop did,
+   * without holding the transaction open across a round-trip per device.
    */
   async revokeAllForUser(userId: string, action: AuditAction): Promise<string[]> {
     // The same CTE shape as `revoke`, and for the same reason: TypeORM's
@@ -325,9 +327,9 @@ export class SessionService implements RevocationFallback {
       [userId],
     )) as { id: string }[];
 
-    for (const { id } of rows) {
-      await this.audit.record(action, { type: 'session', id });
-    }
+    await this.audit.recordMany(
+      rows.map(({ id }) => ({ action, target: { type: 'session' as const, id } })),
+    );
 
     return rows.map((row) => row.id);
   }

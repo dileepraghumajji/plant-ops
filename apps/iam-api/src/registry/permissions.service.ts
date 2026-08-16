@@ -115,17 +115,22 @@ export class PermissionsService {
       created.push(rows[0]);
     }
 
-    // Audited after the whole array is in, one record per permission. Doing it
-    // inside the loop would be equivalent — same transaction, same rollback —
-    // but this keeps the insert loop's failure path to the one thing it is
-    // about.
-    for (const row of created) {
-      await this.audit.record(
-        AUDIT_ACTIONS.PERMISSION_CREATED,
-        { type: 'permission', id: row.id },
-        { application_id: row.application_id, key: row.key, name: row.name },
-      );
-    }
+    // Audited after the whole array is in, one record per permission and one
+    // statement for the batch. Auditing inside the loop would be equivalent —
+    // same transaction, same rollback — but this keeps the insert loop's failure
+    // path to the one thing it is about, and a manifest declaring a hundred keys
+    // pays for one round-trip here rather than a hundred.
+    await this.audit.recordMany(
+      created.map((row) => ({
+        action: AUDIT_ACTIONS.PERMISSION_CREATED,
+        target: { type: 'permission' as const, id: row.id },
+        payload: {
+          application_id: row.application_id,
+          key: row.key,
+          name: row.name,
+        },
+      })),
+    );
 
     return created.map(toDto);
   }

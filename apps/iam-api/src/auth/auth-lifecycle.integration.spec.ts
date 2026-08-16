@@ -52,6 +52,7 @@ import type { DataSource } from 'typeorm';
 import { AppModule } from '../app/app.module';
 import { ENV } from '../config/config.module';
 import type { WhoAmIResponse } from '../iam/whoami.controller';
+import { createTestApplication } from '../testing/app-harness';
 
 const S = `"${IAM_SCHEMA}"`;
 
@@ -108,7 +109,7 @@ describeWithDb(
         .useValue({ ...env, RATE_LIMIT_ENABLED: false })
         .compile();
 
-      app = moduleRef.createNestApplication();
+      app = createTestApplication(moduleRef);
       await app.init();
       await app.listen(0);
       baseUrl = `http://127.0.0.1:${(app.getHttpServer().address() as AddressInfo).port}`;

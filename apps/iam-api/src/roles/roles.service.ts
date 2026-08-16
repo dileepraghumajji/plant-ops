@@ -392,11 +392,14 @@ export class RolesService {
       [id],
     )) as { mapped: number }[];
 
-    for (const binding of bindings) {
-      await this.audit.record(
-        AUDIT_ACTIONS.ROLE_BINDING_DELETED,
-        { type: 'role_binding', id: binding.id },
-        {
+    // One statement for the whole cascade, however wide it is: the role row is
+    // still present and lockable until the delete below, so the interval this
+    // holds it for should not scale with the number of subjects bound to it.
+    await this.audit.recordMany(
+      bindings.map((binding) => ({
+        action: AUDIT_ACTIONS.ROLE_BINDING_DELETED,
+        target: { type: 'role_binding' as const, id: binding.id },
+        payload: {
           user_id: binding.user_id,
           service_account_id: binding.service_account_id,
           role_id: role.id,
@@ -408,8 +411,8 @@ export class RolesService {
           // disappearing with no act that removed it.
           cause: AUDIT_ACTIONS.ROLE_DELETED,
         },
-      );
-    }
+      })),
+    );
 
     await entityManager().query(
       `delete from ${S}."role" where client_id = $1 and id = $2`,

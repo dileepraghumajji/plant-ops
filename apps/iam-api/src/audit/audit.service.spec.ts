@@ -10,6 +10,12 @@
  * (Whether Postgres then really discards the row is `audit.integration.spec.ts`,
  * which needs a real database to prove.)
  *
+ * **The batch is the same write.** `recordMany` is a round-trip optimisation and
+ * nothing else, so what it has to earn is that *nothing else* changed: the same
+ * connection, the same redaction, one row per entry in the parameters, and no
+ * statement at all for an empty batch. That the rows Postgres then writes are
+ * byte-identical to N `record` calls is `audit.integration.spec.ts`.
+ *
  * **The other direction, for denials.** `recordDenial` must do the opposite —
  * its own connection, its own commit — because the request it accompanies is
  * about to be rolled back by the 403 it produced. Same assertion, inverted.
@@ -179,6 +185,110 @@ describe('AuditService', () => {
       await expect(
         inTransaction(() =>
           service.record(AUDIT_ACTIONS.LOGOUT, { type: 'session', id: randomUUID() }),
+        ),
+      ).rejects.toThrow('connection lost');
+    });
+  });
+
+  describe('recordMany', () => {
+    it('writes N records in one statement, on the caller’s transaction', async () => {
+      const first = randomUUID();
+      const second = randomUUID();
+
+      await inTransaction(() =>
+        service.recordMany([
+          {
+            action: AUDIT_ACTIONS.ROLE_BINDING_DELETED,
+            target: { type: 'role_binding', id: first },
+            payload: { cause: AUDIT_ACTIONS.ROLE_DELETED },
+          },
+          {
+            action: AUDIT_ACTIONS.ROLE_BINDING_DELETED,
+            target: { type: 'role_binding', id: second },
+            payload: { cause: AUDIT_ACTIONS.ROLE_DELETED },
+          },
+        ]),
+      );
+
+      const writes = auditWrites(ambient.queries);
+      // The whole point of the method: two records, one round-trip.
+      expect(writes).toHaveLength(1);
+      expect(writes[0].parameters).toEqual([
+        ['role_binding.deleted', 'role_binding.deleted'],
+        ['role_binding', 'role_binding'],
+        [first, second],
+        ['{"cause":"role.deleted"}', '{"cause":"role.deleted"}'],
+      ]);
+
+      // Same connection rule as `record` — a rollback has to take these too.
+      expect(dataSource.pool.queries).toHaveLength(0);
+    });
+
+    it('issues no statement for an empty batch', async () => {
+      // So a caller that found nothing to audit is not the caller that has to
+      // remember to check.
+      await inTransaction(() => service.recordMany([]));
+
+      expect(ambient.queries).toHaveLength(0);
+    });
+
+    it('redacts per entry, and defaults a missing payload to {}', async () => {
+      await inTransaction(() =>
+        service.recordMany([
+          {
+            action: AUDIT_ACTIONS.SERVICE_ACCOUNT_CREATED,
+            target: { type: 'service_account', id: randomUUID() },
+            payload: { name: 'gatepass-bot', key_hash: '$argon2id$v=19$m=19456$x$y' },
+          },
+          {
+            action: AUDIT_ACTIONS.SESSION_REVOKED,
+            target: { type: 'session', id: randomUUID() },
+          },
+        ]),
+      );
+
+      const payloads = auditWrites(ambient.queries)[0].parameters?.[3] as string[];
+      expect(JSON.parse(payloads[0])).toEqual({
+        name: 'gatepass-bot',
+        key_hash: REDACTED,
+      });
+      expect(payloads[1]).toBe('{}');
+    });
+
+    it('passes a null target id through, alongside entries that have one', async () => {
+      const id = randomUUID();
+
+      await inTransaction(() =>
+        service.recordMany([
+          { action: AUDIT_ACTIONS.USER_BULK_UPLOADED, target: { type: 'user', id: null } },
+          { action: AUDIT_ACTIONS.USER_UPDATED, target: { type: 'user', id } },
+        ]),
+      );
+
+      expect(auditWrites(ambient.queries)[0].parameters?.[2]).toEqual([null, id]);
+    });
+
+    it('throws outside a transaction rather than falling back to the pool', async () => {
+      await expect(
+        service.recordMany([
+          { action: AUDIT_ACTIONS.LOGOUT, target: { type: 'session', id: randomUUID() } },
+        ]),
+      ).rejects.toThrow(/No transaction in scope/);
+
+      expect(dataSource.pool.queries).toHaveLength(0);
+    });
+
+    it('propagates a write failure, so the change cannot commit without it', async () => {
+      ambient.failing = true;
+
+      await expect(
+        inTransaction(() =>
+          service.recordMany([
+            {
+              action: AUDIT_ACTIONS.LOGOUT,
+              target: { type: 'session', id: randomUUID() },
+            },
+          ]),
         ),
       ).rejects.toThrow('connection lost');
     });

@@ -9,6 +9,7 @@ import {
 } from '@plantops/db';
 import { config as loadDotenv } from 'dotenv';
 import { AppModule } from './app/app.module';
+import { NEST_APP_OPTIONS, hardenExpress } from './app/http-hardening';
 import { KeyConfigurationError, KeysService } from './auth/keys.service';
 
 /**
@@ -55,8 +56,13 @@ async function bootstrap() {
   new KeysService(env).assertKeysUsable();
 
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    ...NEST_APP_OPTIONS,
     logger: logLevelsFor(env.LOG_LEVEL),
   });
+
+  // Body limits, `x-powered-by` and `nosniff`. Shared with the test harness so
+  // the header assertions there are about this process (`app/http-hardening.ts`).
+  hardenExpress(app);
 
   // No global prefix: Doc 06 §1 fixes the paths as `/iam`, `/auth`, `/health`
   // and `/ready`, and controllers declare those themselves. A prefix here

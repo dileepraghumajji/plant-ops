@@ -37,6 +37,36 @@ export const DEFAULT_RATE_LIMIT_MAX_REQUESTS = 120;
 export const DEFAULT_READINESS_TIMEOUT_MS = 2_000;
 
 /**
+ * Request body ceilings (Doc 06 §1).
+ *
+ * Express's own default is 100 kB applied to everything, which is the wrong
+ * number twice over: too generous for `/auth/login`, the one unauthenticated
+ * path that pays for an argon2id hash before it can refuse anything, and too
+ * small for a manifest upload, which carries an application's whole permission
+ * and nav catalogue in one document.
+ *
+ * So the limit is stated rather than inherited, and the manifest route gets its
+ * own. **64 kB** covers every other body on the surface with room to spare — the
+ * largest is `PUT /iam/roles/:id/permissions`, a few hundred uuids.
+ *
+ * **4 MB** is not a guess: `manifest.dto.ts` caps a manifest at 200 permissions
+ * and 200 nav nodes, and every string in it has a maximum length, so the largest
+ * document the schema will *accept* is computable — about 2.1 MB, dominated by
+ * 200 nodes each carrying 50 `requires` keys of 160 characters. The ceiling sits
+ * above that deliberately, which buys the property worth having: a manifest is
+ * never refused for its size before it can be refused for its contents, so an
+ * operator debugging an upload always gets the error that names the field.
+ *
+ * Both are capped: an operator raising a limit is tuning for a real payload,
+ * and a limit large enough to matter as a memory-exhaustion lever should have
+ * to be argued for rather than typed into an environment variable.
+ */
+export const DEFAULT_REQUEST_BODY_LIMIT_BYTES = 65_536;
+export const MAX_REQUEST_BODY_LIMIT_BYTES = 1_048_576;
+export const DEFAULT_MANIFEST_BODY_LIMIT_BYTES = 4_194_304;
+export const MAX_MANIFEST_BODY_LIMIT_BYTES = 16_777_216;
+
+/**
  * Account-lockout and password-reset policy (Doc 03 §7–8).
  *
  * Here rather than in `@plantops/contracts` for the same reason the rate limits
@@ -175,6 +205,14 @@ const millis = (label: string, fallback: number) =>
     .positive(`${label} must be greater than zero`)
     .default(fallback);
 
+const bytes = (label: string, fallback: number, max: number) =>
+  z.coerce
+    .number({ error: `${label} must be a number of bytes` })
+    .int(`${label} must be a whole number of bytes`)
+    .positive(`${label} must be greater than zero`)
+    .max(max, `${label} must be at most ${max} bytes`)
+    .default(fallback);
+
 /**
  * Comma-separated allow-list. Empty means *no* cross-origin browser access,
  * which is the right default for an API whose only browser client is deployed
@@ -235,6 +273,15 @@ export const envSchema = z.object({
   /** Browser origins allowed to call the API; empty disables CORS entirely. */
   CORS_ALLOWED_ORIGINS: originList,
 
+  /**
+   * Serve the generated OpenAPI document at `GET /openapi.json`.
+   *
+   * Off by default in every environment, not merely in production — see
+   * `openapi/openapi.controller.ts` for why a `NODE_ENV`-derived default is the
+   * arrangement that eventually publishes one from production.
+   */
+  OPENAPI_ENABLED: boolish(false),
+
   RATE_LIMIT_ENABLED: boolish(true),
   /** Fixed-window length for the global throttle (Doc 06 §2 — 429). */
   RATE_LIMIT_WINDOW_SECONDS: seconds(
@@ -258,6 +305,19 @@ export const envSchema = z.object({
    * timeout it cannot explain; answering 503 quickly is the useful behaviour.
    */
   READINESS_TIMEOUT_MS: millis('READINESS_TIMEOUT_MS', DEFAULT_READINESS_TIMEOUT_MS),
+
+  /** Ceiling for every JSON body except the manifest upload (Doc 06 §1). */
+  REQUEST_BODY_LIMIT_BYTES: bytes(
+    'REQUEST_BODY_LIMIT_BYTES',
+    DEFAULT_REQUEST_BODY_LIMIT_BYTES,
+    MAX_REQUEST_BODY_LIMIT_BYTES,
+  ),
+  /** Ceiling for `POST /iam/applications/:id/manifest` alone (Doc 02 §2). */
+  MANIFEST_BODY_LIMIT_BYTES: bytes(
+    'MANIFEST_BODY_LIMIT_BYTES',
+    DEFAULT_MANIFEST_BODY_LIMIT_BYTES,
+    MAX_MANIFEST_BODY_LIMIT_BYTES,
+  ),
 
   JWT_ISSUER: z.string().trim().min(1).default(IAM_ISSUER),
   /** `kid` of the key currently signing (Doc 03 §1). */
@@ -335,7 +395,21 @@ export const envSchema = z.object({
       BOOTSTRAP_SECRET_MIN_LENGTH,
       `PLATFORM_BOOTSTRAP_SECRET must be at least ${BOOTSTRAP_SECRET_MIN_LENGTH} characters`,
     ),
-});
+})
+  /**
+   * The manifest exemption has to be an exemption. Configured the other way
+   * round it is not a smaller ceiling for one route — it is a route that
+   * silently rejects bodies every *other* route accepts, which is the least
+   * guessable failure this pair can produce. The defaults already satisfy it;
+   * only an operator who has changed one of them can trip it.
+   */
+  .refine(
+    (env) => env.MANIFEST_BODY_LIMIT_BYTES >= env.REQUEST_BODY_LIMIT_BYTES,
+    {
+      message:
+        'MANIFEST_BODY_LIMIT_BYTES must be at least REQUEST_BODY_LIMIT_BYTES — the manifest route raises the global ceiling, it does not lower it',
+    },
+  );
 
 /** The validated, fully-defaulted environment. */
 export type EnvConfig = z.infer<typeof envSchema>;

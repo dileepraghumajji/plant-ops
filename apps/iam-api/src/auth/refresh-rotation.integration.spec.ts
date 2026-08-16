@@ -59,6 +59,7 @@ import type { AddressInfo } from 'node:net';
 import type { DataSource } from 'typeorm';
 import { AppModule } from '../app/app.module';
 import { ENV } from '../config/config.module';
+import { createTestApplication } from '../testing/app-harness';
 import { RefreshReplayCache, type ReplayStore } from './refresh-replay.cache';
 import { REFRESH_REPLAY_CACHE } from './refresh-replay.provider';
 
@@ -149,7 +150,7 @@ describeWithDb(
         )
         .compile();
 
-      app = moduleRef.createNestApplication();
+      app = createTestApplication(moduleRef);
       await app.init();
       await app.listen(0);
       baseUrl = `http://127.0.0.1:${(app.getHttpServer().address() as AddressInfo).port}`;

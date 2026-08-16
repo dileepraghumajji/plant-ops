@@ -105,6 +105,7 @@ Handlers become `create(@Claims() claims: VerifiedClaims, @Body() body: CreateRo
 
 ## H3 — Make `ZodValidationPipe` fail closed for `@Body()`
 
+**Status:** ✅ done. Decision on the ambiguous case: **`Object` and `undefined` metatypes are failures, not exemptions** — an interface and a `type` alias both erase to `Object`, so exempting it would leave the rule catching nothing. `String`/`Number`/`Boolean` stay allowed on a body (that is `@Body('key')` property extraction, unused today, and a primitive has no fields to mass-assign). Two notes from building it: `@Headers()` has no `Paramtype` of its own — it arrives as `custom`, like every `createParamDecorator` — and `const X = createZodDto(s)` paired with a merged `type X` declaration actually *works*, so the real hazard the file's header warns about is the bare `type` alias, not the `const`.
 **Position:** any time. Do it with H2.
 **Severity:** medium. A fail-open in the one place this codebase otherwise refuses to fail open.
 
@@ -134,6 +135,21 @@ The file already documents the trap. It does not enforce it. Today every `@Body(
 ---
 
 ## H4 — `AuditService.recordMany` for the six per-row audit loops
+
+**Status:** ✅ done — `recordMany(entries)` writes N records through one
+`select iam.write_audit(…) from unnest($1::text[], $2::text[], $3::uuid[], $4::jsonb[])`.
+Four corrections to the review below. The table's six sites were **ten**: the
+manifest's per-row *update* passes (`applyPermissions` → `updatePermission`,
+`applyNav` → `updateNavNode`) are the "every manifest row changed" case and are
+the ones a large application actually pays for, and both are loops over a private
+method rather than over `audit.record` directly — they now build their record and
+return it, so the pass writes one statement. The manifest's nav-deactivation loop
+was a third such site, and `clients/client-applications.service.ts` (`enable`) a
+fourth, outside the review's list. The updates themselves stay one statement each:
+they set different values, and batching *them* is a schema question, not this
+one. And `unnest` over four parallel arrays rather than a generated `values` list
+so the statement text is constant whatever N is — one plan-cache entry, and no
+path by which an array length reaches the SQL.
 
 **Position:** before Session 20 (bindings) — that session multiplies the affected paths.
 **Severity:** medium. Transaction duration and lock hold time, not correctness.
@@ -167,6 +183,13 @@ Each iteration is a separate `select iam.write_audit(...)`. A role bound at 500 
 
 ## H5 — HTTP hardening in `main.ts`
 
+**Status:** ✅ done. Four notes from building it, each a correction to the sketch below.
+
+1. **Body parsing had to move into `AppModule` as Nest middleware, not stay in `main.ts`.** The acceptance criterion "assert it goes through `HttpExceptionFilter`" is not satisfiable with `NestFactory`'s built-in parser: it runs as Express middleware *before* Nest's router, reports failure by calling `next(err)`, and Express answers with its default HTML page — no filter is on the stack. Middleware applied through `MiddlewareConsumer` is wrapped in `RouterProxy`, which awaits it and hands a rejection to the exceptions handler, so the parser lives in `common/body-parser.middleware.ts` and the app boots with `bodyParser: false`. The same change closes a second hole nobody had noticed: **malformed JSON** was escaping the envelope too.
+2. **Oversized bodies are `400 VALIDATION_FAILED`, not 413.** Doc 06 §2's code table is closed and this file's own preamble forbids changing it, so there is no `PAYLOAD_TOO_LARGE` to return. The message carries the byte figure so a caller can still act.
+3. **The manifest ceiling is derived, not chosen.** `manifest.dto.ts` caps a document at 200 permissions and 200 nav nodes with bounded strings, so the largest *schema-valid* manifest is computable — about 2.1 MB. The limit is 4 MB, above it deliberately, so an upload is never refused for size before it can be refused for its fields. Global limit 64 kB; both are configurable and both are in Doc 06 §1.
+4. **Ten integration specs were booting the app differently from `main.ts`** — each hand-rolled `moduleRef.createNestApplication()`, which silently kept Nest's own parser and its 100 kB default. They now share `createTestApplication()` in `testing/app-harness.ts`, so there is one boot path and the header assertions are statements about production.
+
 **Position:** any time before Session 39 (deployment). Small.
 **Severity:** low-medium.
 
@@ -190,6 +213,13 @@ Each iteration is a separate `select iam.write_audit(...)`. A role bound at 500 
 ---
 
 ## H6 — OpenAPI document generated from the zod DTOs
+
+**Status:** ✅ done — built early, at Session 17 rather than before Session 26. **One acceptance criterion could not be met and was not**: "every route in Doc 06 appears in the document" is false today, because Sessions 18–25 have not built the user, binding, resolution and audit-read surfaces. The document covers the 43 operations that exist, and `openapi.spec.ts` asserts it covers *exactly* the routes the application registers — which is the checkable form of the same claim, and which will pull the remaining routes in as those sessions land. Four further notes:
+
+1. **`@nestjs/swagger` was not used.** `SwaggerModule.createDocument` takes an initialized application, so emitting the document would mean booting Nest with a `DataSource`, a Redis client, a signing key and a validated environment — for a documentation build. Reading the decorator metadata off the controller classes instead (`openapi/openapi.ts`, ~80 lines) makes the document a pure function of the code. The scanner's correctness is not assumed: the spec compares it with the real Express router stack, in both directions.
+2. **Responses needed schemas that did not exist.** `@plantops/contracts` is TypeScript interfaces — erased, so nothing can convert them. Rather than hand-write response schemas or decorate the DTOs with a second vocabulary, `openapi/schemas.ts` mirrors each published interface in zod and `schemas.spec.ts` pins all 27 with `Expect<Equal<z.infer<…>, XDTO>>`. A contract change that is not mirrored fails `nx typecheck`. `Expect`/`Equal` are now exported from the contracts barrel.
+3. **Route metadata is a central map, not decorators on handlers** (`openapi/route-responses.ts`), for the reason `validation.pipe.ts` rejected `class-validator`: a parallel description sitting in the controllers drifts silently. Completeness is a *type* — `ControllerResponses<T>` is exhaustive over the controller's method names, so a new route does not compile until it is described.
+4. **Two runtime surprises worth recording.** `tsx` cannot run the generator at all: esbuild does not implement `emitDecoratorMetadata`, and `design:paramtypes` is precisely how a `@Body()` parameter is connected to its DTO — under `tsx` the document builds fine and simply has no request bodies. And `libs/*` are ESM while `apps/iam-api` is not, which webpack and Jest paper over and Node does not. Hence `tools/emit-openapi.cjs`, which registers `@swc-node/register` explicitly.
 
 **Position:** immediately before roadmap Session 26 (`iam-client`). **Not now.**
 **Severity:** low today; becomes medium the moment a second team integrates.
@@ -220,9 +250,9 @@ It stops being ceremony at Doc 00 §9 — the six operational module teams integ
 |---|---|---|---|---|
 | H1 | PermissionGuard connection strategy | ✅ **done** (ADR 0001) | Sessions 21, 23 | 1–2 h (decision + ADR) |
 | H2 | `@Claims()` param decorator | ✅ **done** | — | 2–3 h |
-| H3 | Fail-closed body validation | with H2 | — | 1–2 h |
-| H4 | Batched audit writes | before Session 20 | — | 3–4 h |
-| H5 | Body limits + headers | before Session 39 | Session 29 (manifest UI) | 1–2 h |
-| H6 | OpenAPI from zod | before Session 26 | external module teams | 5–7 h |
+| H3 | Fail-closed body validation | ✅ **done** | — | 1–2 h |
+| H4 | Batched audit writes | ✅ **done** | — | 3–4 h |
+| H5 | Body limits + headers | ✅ **done** | Session 29 (manifest UI) | 1–2 h |
+| H6 | OpenAPI from zod | ✅ **done** (early) | external module teams | 5–7 h |
 
 H1 is the only one that costs more if deferred; the rest are ordinary cleanups whose cost is roughly flat. **H1, H2 and H3 together are under a day** and are the ones worth doing before Session 18 starts.

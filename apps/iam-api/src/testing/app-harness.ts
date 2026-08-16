@@ -19,12 +19,14 @@
  */
 
 import { type INestApplication, Module, type Type } from '@nestjs/common';
-import { Test } from '@nestjs/testing';
+import type { NestExpressApplication } from '@nestjs/platform-express';
+import { Test, type TestingModule } from '@nestjs/testing';
 import { type EnvConfig, parseEnv } from '@plantops/config';
 import { SubjectType } from '@plantops/contracts';
 import { generateKeyPairSync, randomUUID } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import { AppModule } from '../app/app.module';
+import { NEST_APP_OPTIONS, hardenExpress } from '../app/http-hardening';
 import { TokenService } from '../auth/token.service';
 import { ENV } from '../config/config.module';
 import { DatabaseService } from '../database/database.service';
@@ -192,6 +194,30 @@ export class FakeRedisService {
   }
 }
 
+/**
+ * A compiled testing module → an application wired exactly like the deployed
+ * one.
+ *
+ * The live `*.integration.spec.ts` suites assemble their own module (they need
+ * a real `DataSource` and their own seed data, which the fakes below cannot
+ * give them), so they cannot use {@link createHarness}. What they must not do
+ * is boot that module differently from `main.ts` — `NEST_APP_OPTIONS` in
+ * particular is load-bearing, and forgetting it does not fail loudly, it just
+ * puts Nest's own body parser in front of the one `AppModule` registers.
+ *
+ * So the boot lives in one function and every suite calls it, which is the same
+ * argument `app.module.ts` makes for `APP_*` providers over `main.ts` wiring.
+ */
+export function createTestApplication(
+  moduleRef: TestingModule,
+): NestExpressApplication {
+  const app = moduleRef.createNestApplication<NestExpressApplication>(
+    NEST_APP_OPTIONS,
+  );
+  hardenExpress(app);
+  return app;
+}
+
 /** Who a minted test token claims to be. Every field has a usable default. */
 export interface TestSubject {
   subjectId?: string;
@@ -258,7 +284,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
     .useValue(redis)
     .compile();
 
-  const app = moduleRef.createNestApplication();
+  const app = createTestApplication(moduleRef);
   await app.init();
   // Port 0 — the OS assigns a free one, so suites can run without agreeing on
   // a port and without failing when a stray dev server holds 3000.

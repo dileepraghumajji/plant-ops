@@ -169,6 +169,18 @@ describeWithDb(
       }
     }
 
+    /** A row by everything except which target it names. */
+    function comparable(row: AuditRow): Omit<AuditRow, 'target_id'> {
+      return {
+        action: row.action,
+        client_id: row.client_id,
+        actor_type: row.actor_type,
+        actor_id: row.actor_id,
+        target_type: row.target_type,
+        payload: row.payload,
+      };
+    }
+
     async function rowsFor(targetId: string): Promise<AuditRow[]> {
       return (await admin.query(
         `select action, client_id, actor_type, actor_id, target_type, target_id, payload
@@ -215,6 +227,76 @@ describeWithDb(
         target_id: targetId,
       });
       expect(rows[0].payload).toEqual({ full_name: 'Renamed', password: REDACTED });
+    });
+
+    it('writes the same row in a batch as it does one at a time', async () => {
+      // The claim `recordMany` has to earn: it is a round-trip optimisation and
+      // nothing else. Every column `write_audit` derives — tenant, actor type,
+      // actor — plus the redacted payload must come out of the batched form
+      // exactly as they came out of the single one, or the two writers are two
+      // vocabularies again and the boundary this service exists to be is gone.
+      const alone = randomUUID();
+      const batched = randomUUID();
+      const alongside = randomUUID();
+      const payload = { full_name: 'Renamed', password: 'hunter2' };
+
+      await inTransaction(
+        () => service.record(AUDIT_ACTIONS.USER_UPDATED, { type: 'user', id: alone }, payload),
+        'commit',
+      );
+
+      await inTransaction(
+        () =>
+          service.recordMany([
+            {
+              action: AUDIT_ACTIONS.USER_UPDATED,
+              target: { type: 'user', id: batched },
+              payload,
+            },
+            // A second entry with a different action, target type and payload,
+            // so the batch is not proved on a single row.
+            {
+              action: AUDIT_ACTIONS.SESSION_REVOKED,
+              target: { type: 'session', id: alongside },
+            },
+          ]),
+        'commit',
+      );
+
+      const [single] = await rowsFor(alone);
+      const [many] = await rowsFor(batched);
+
+      // Every column but the target the two rows deliberately differ on.
+      expect(comparable(many)).toEqual(comparable(single));
+      expect(many.payload).toEqual({ full_name: 'Renamed', password: REDACTED });
+
+      // The other entry of the same batch, on its own terms.
+      const [second] = await rowsFor(alongside);
+      expect(second).toMatchObject({
+        action: AUDIT_ACTIONS.SESSION_REVOKED,
+        client_id: clientId,
+        actor_type: 'user',
+        actor_id: userId,
+        target_type: 'session',
+      });
+      expect(second.payload).toEqual({});
+    });
+
+    it('leaves no audit rows when a batched write’s transaction rolls back', async () => {
+      const first = randomUUID();
+      const second = randomUUID();
+
+      await inTransaction(
+        () =>
+          service.recordMany([
+            { action: AUDIT_ACTIONS.USER_UPDATED, target: { type: 'user', id: first } },
+            { action: AUDIT_ACTIONS.USER_UPDATED, target: { type: 'user', id: second } },
+          ]),
+        'rollback',
+      );
+
+      expect(await rowsFor(first)).toEqual([]);
+      expect(await rowsFor(second)).toEqual([]);
     });
 
     it('rolls back the change and the record together, not one of them', async () => {

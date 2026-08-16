@@ -176,19 +176,19 @@ export class NavService {
       created.push(row);
     }
 
-    for (const row of created) {
-      await this.audit.record(
-        AUDIT_ACTIONS.NAV_NODE_CREATED,
-        { type: 'nav_node', id: row.id },
-        {
+    await this.audit.recordMany(
+      created.map((row) => ({
+        action: AUDIT_ACTIONS.NAV_NODE_CREATED,
+        target: { type: 'nav_node' as const, id: row.id },
+        payload: {
           application_id: row.application_id,
           key: row.key,
           kind: row.kind,
           label: row.label,
           parent_id: row.parent_id,
         },
-      );
-    }
+      })),
+    );
 
     // Freshly created nodes have no mappings yet, so `requires` is empty for all
     // of them — stated by construction rather than by a second query.
@@ -412,7 +412,8 @@ export class NavService {
    * payload, which is the "salient fields" shape Doc 10 §2 asks for.
    *
    * Pairs that changed nothing are excluded, so re-running a deployment script
-   * writes no records at all.
+   * writes no records at all — and, `recordMany` issuing nothing for an empty
+   * batch, no statement either.
    */
   private async auditMappingChange(
     applicationId: string,
@@ -440,17 +441,17 @@ export class NavService {
       }
     }
 
-    for (const [navNodeId, entry] of byNode) {
-      await this.audit.record(
+    await this.audit.recordMany(
+      [...byNode].map(([navNodeId, entry]) => ({
         action,
-        { type: 'nav_node', id: navNodeId },
-        {
+        target: { type: 'nav_node' as const, id: navNodeId },
+        payload: {
           application_id: applicationId,
           nav_key: entry.navKey,
           permission_keys: entry.permissionKeys,
         },
-      );
-    }
+      })),
+    );
   }
 
   /** 404s when the application does not exist. See `PermissionsService`. */
