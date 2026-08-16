@@ -29,6 +29,7 @@ import type { Type } from '@nestjs/common';
 import type { ZodType } from 'zod';
 import { AuthController } from '../auth/auth.controller';
 import { JwksController } from '../auth/jwks.controller';
+import { AuthzController } from '../authz/authz.controller';
 import { BindingsController } from '../bindings/bindings.controller';
 import { ClientsController } from '../clients/clients.controller';
 import { HealthController } from '../health/health.controller';
@@ -45,6 +46,7 @@ import {
   clientAdminSchema,
   clientApplicationSchema,
   clientSchema,
+  introspectSchema,
   jwksSchema,
   livenessSchema,
   manifestUpsertSchema,
@@ -59,8 +61,10 @@ import {
   paginatedServiceAccountsSchema,
   paginatedUsersByRoleSchema,
   paginatedUsersSchema,
+  permissionCheckSchema,
   permissionSchema,
   readinessSchema,
+  resolvedGrantsSchema,
   roleBindingSchema,
   roleSchema,
   rolePermissionsSchema,
@@ -331,6 +335,20 @@ export const ROUTE_RESPONSES: ReadonlyMap<
     ),
     list: failing(ok(paginatedRoleBindingsSchema), 403),
     remove: failing(noContent('The grant was revoked'), ...DENIED_OR_MISSING),
+  }),
+
+  routes(AuthzController, {
+    // No 403 on any of the three, and the omission is the contract: these
+    // routes answer questions *about the bearer*, so holding a token is the
+    // whole of the authorization (`authz.controller.ts`). A scope node that is
+    // not the caller's own comes back as `allowed: false`, and a token that
+    // fails verification as `active: false` — neither is a denial, and neither
+    // may become one, or the endpoints turn into cross-tenant existence
+    // oracles (Doc 06 §2). The universal 400 covers a malformed
+    // `?applicationId=`, permission or node id.
+    resolve: ok(resolvedGrantsSchema, 'The bearer’s complete grant set'),
+    check: ok(permissionCheckSchema, 'Whether the bearer holds it there'),
+    introspect: ok(introspectSchema, 'The token’s liveness and subject'),
   }),
 
   routes(ServiceAccountsController, {

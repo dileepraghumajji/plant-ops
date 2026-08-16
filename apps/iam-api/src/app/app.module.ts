@@ -64,6 +64,7 @@ import {
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR, APP_PIPE } from '@nestjs/core';
 import { AuthGuard } from '@plantops/auth-kit';
 import { AuthModule } from '../auth/auth.module';
+import { AuthzApiModule } from '../authz/authz-api.module';
 import { BindingsModule } from '../bindings/bindings.module';
 import { ClientsModule } from '../clients/clients.module';
 import {
@@ -105,6 +106,7 @@ import { UsersModule } from '../users/users.module';
     UsersModule,
     ServiceAccountsModule,
     BindingsModule,
+    AuthzApiModule,
     OpenApiModule,
   ],
   providers: [

@@ -606,6 +606,53 @@ export const serviceAccountSecretSchema = named(
   serviceAccountSchema.extend({ account_secret: z.string() }),
 );
 
+// ── resolution (Doc 06 §11) ─────────────────────────────────────────────────
+
+/**
+ * The resolved grant set.
+ *
+ * `scopes` is an open record because its keys *are* the data: permission keys
+ * are created at runtime through the registry and the IAM must never enumerate
+ * them in code (Doc 02 §8, and `PermissionKey`'s own comment). A generated
+ * client therefore gets `Record<string, string[]>`, which is the honest shape.
+ */
+export const resolvedGrantsSchema = named(
+  'ResolvedGrants',
+  z.object({
+    permissions: z.array(z.string()),
+    scopes: z.record(z.string(), z.array(z.string())),
+  }),
+);
+
+export const permissionCheckSchema = named(
+  'PermissionCheckResponse',
+  z.object({ allowed: z.boolean() }),
+);
+
+/**
+ * Introspection's two-branch answer.
+ *
+ * A discriminated union rather than one object with optional fields, mirroring
+ * {@link IntrospectResponse}: an inactive token carries **no** identity, and a
+ * shape in which `sub` were merely absent would let a consumer read it without
+ * checking `active` first. The document publishes it as a `oneOf` with a
+ * discriminator, so a generated client gets the same narrowing.
+ */
+export const introspectSchema = named(
+  'IntrospectResponse',
+  z.discriminatedUnion('active', [
+    z.object({ active: z.literal(false) }),
+    z.object({
+      active: z.literal(true),
+      sub: z.uuid(),
+      // Spelled out for the reason `roleBindingSchema.subject_type` gives.
+      sty: z.enum(['user', 'service']),
+      cid: z.uuid(),
+      sid: z.uuid(),
+    }),
+  ]),
+);
+
 // ── identity & ops (Doc 06 §11, §13) ────────────────────────────────────────
 
 export const whoAmISchema = named(
