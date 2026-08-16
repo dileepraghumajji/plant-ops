@@ -30,8 +30,8 @@
  *
  * Callbacks registered with `afterCommit()` run here, after `COMMIT` returns.
  * That ordering is required wherever a change is published outside Postgres —
- * a revoked `sid` reaching the cache today (Doc 03 §6), the grant invalidation
- * fan-out in Session 22 (Doc 04 §7.1).
+ * a revoked `sid` reaching the cache (Doc 03 §6), and the `perms.invalidated`
+ * fan-out behind every row of Doc 04 §7's table (§7.1 rule 3).
  *
  * ## Isolation, and retrying a lost race
  *

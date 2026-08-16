@@ -69,7 +69,10 @@
  * hook" (Doc 01 §4.5) — so an expired binding is a row that stopped granting and
  * stayed. Both reads below list it and flag it rather than filtering it, because
  * "why did this stop working" is a question only the row can answer. Session 22
- * adds the periodic sweep that invalidates the cache for newly-lapsed grants.
+ * added the periodic sweep (`authz/expiry-sweep.job.ts`) that invalidates the
+ * cache for newly-lapsed grants and audits `role_binding.expired` — the row
+ * stays exactly as it is, and `expiry_swept_at` records only that the system
+ * noticed.
  *
  * ## Invalidation
  *

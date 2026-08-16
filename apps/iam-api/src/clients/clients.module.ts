@@ -8,11 +8,15 @@
  * boundary between them would only split a sequence Doc 02 §3 describes as a
  * single registration.
  *
- * `AuditModule` and `DatabaseModule` are the only imports, for the reason
+ * `AuditModule` and `DatabaseModule` carry the usual pair, for the reason
  * `RegistryModule` gives: nothing here holds a connection of its own, the
  * interim platform check reads the RLS context `TenantContextInterceptor` already
  * applied, and every mutation records itself through the one audit path
  * (Doc 10 §3).
+ *
+ * `AuthzModule` arrives with Session 22 for the `client_application` row of
+ * Doc 04 §7 — the only row whose blast radius is a whole tenant, since toggling
+ * an application moves every permission it owns for everyone bound to anything.
  *
  * The services are exported because later sessions reach for them — Session 17's
  * role–permission mapping has to ask which applications a client has enabled
@@ -21,6 +25,7 @@
 
 import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module';
+import { AuthzModule } from '../authz/authz.module';
 import { DatabaseModule } from '../database/database.module';
 import { ClientAdminService } from './client-admin.service';
 import { ClientApplicationsService } from './client-applications.service';
@@ -28,7 +33,7 @@ import { ClientsController } from './clients.controller';
 import { ClientsService } from './clients.service';
 
 @Module({
-  imports: [AuditModule, DatabaseModule],
+  imports: [AuditModule, AuthzModule, DatabaseModule],
   controllers: [ClientsController],
   providers: [ClientsService, ClientApplicationsService, ClientAdminService],
   exports: [ClientsService, ClientApplicationsService],

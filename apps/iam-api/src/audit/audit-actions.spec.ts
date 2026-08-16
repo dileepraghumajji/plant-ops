@@ -18,6 +18,7 @@ import { join } from 'node:path';
 import {
   ACCOUNT_AUDIT_ACTIONS,
   REFRESH_AUDIT_ACTIONS,
+  ROLE_BINDING_EXPIRED_ACTION,
   SERVICE_ACCOUNT_AUDIT_ACTIONS,
 } from '@plantops/db';
 import { AUDIT_ACTIONS } from './audit-actions';
@@ -41,10 +42,21 @@ describe('the action catalog', () => {
     ['REFRESH_AUDIT_ACTIONS', REFRESH_AUDIT_ACTIONS],
     ['ACCOUNT_AUDIT_ACTIONS', ACCOUNT_AUDIT_ACTIONS],
     ['SERVICE_ACCOUNT_AUDIT_ACTIONS', SERVICE_ACCOUNT_AUDIT_ACTIONS],
+    // A bare string rather than a group: migration 0016 writes exactly one
+    // action, and wrapping it in an object to fit this table would invent a
+    // namespace the migration does not have.
+    ['ROLE_BINDING_EXPIRED_ACTION', { EXPIRED: ROLE_BINDING_EXPIRED_ACTION }],
   ])('contains every action %s exports', (_name, actions) => {
     for (const action of Object.values(actions)) {
       expect(catalog).toContain(action);
     }
+  });
+
+  it('spells the sweep action the same way the catalog does', () => {
+    // The one the regex below cannot see: 0016 interpolates the constant rather
+    // than embedding a literal, which is the *right* way round and therefore
+    // needs its own assertion.
+    expect(ROLE_BINDING_EXPIRED_ACTION).toBe(AUDIT_ACTIONS.ROLE_BINDING_EXPIRED);
   });
 
   it('contains every action a migration passes to write_audit as a literal', () => {

@@ -58,6 +58,17 @@ export class RoleBinding {
   @Column({ name: 'expires_at', type: 'timestamptz', nullable: true })
   expiresAt!: Date | null;
 
+  /**
+   * When the expiry sweep noticed this binding had lapsed (migration 0016).
+   *
+   * Housekeeping, not access: {@link RoleBinding.expiresAt} is what resolution
+   * filters on, and a lapsed binding is inert whether or not this is set. Its
+   * only job is to make "newly expired" a fact about the row rather than about
+   * the sweeper's memory, so the job is idempotent across restarts and replicas.
+   */
+  @Column({ name: 'expiry_swept_at', type: 'timestamptz', nullable: true })
+  expirySweptAt!: Date | null;
+
   @Column({ name: 'created_at', type: 'timestamptz', default: () => 'now()' })
   createdAt!: Date;
 

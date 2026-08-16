@@ -8,8 +8,9 @@
  *
  * `AuthzModule` supplies the grant-invalidation hook a move fires after commit
  * (Doc 04 §7.1). It was a stub provided here while the scope move was its only
- * caller; Session 18's lock/disable transitions made it a second one, so it now
- * lives where Session 22 will replace it.
+ * caller; Session 18's lock/disable transitions made it a second one, and
+ * Session 22 replaced the stub with the real bump-and-publish without any
+ * caller changing — which is what putting it behind a service bought.
  *
  * `ScopesService` is exported: Session 20's bindings API has to resolve a scope
  * node and check it belongs to the caller's client before anchoring a grant to

@@ -57,6 +57,7 @@
 import { Injectable } from '@nestjs/common';
 import {
   ServiceAccountStatus,
+  SubjectType,
   normalizePagination,
   paginated,
   type Paginated,
@@ -66,8 +67,9 @@ import {
 import { IAM_SCHEMA, hashSecret, type VerifiedClaims } from '@plantops/db';
 import { AUDIT_ACTIONS } from '../audit/audit-actions';
 import { AuditService } from '../audit/audit.service';
+import { GrantInvalidationService } from '../authz/invalidation.service';
 import { assertAdministrator } from '../common/administrator';
-import { entityManager } from '../common/transaction-context';
+import { afterCommit, entityManager } from '../common/transaction-context';
 import {
   mintAccountKey,
   mintAccountSecret,
@@ -94,7 +96,10 @@ export interface CreateServiceAccountInput {
 
 @Injectable()
 export class ServiceAccountsService {
-  constructor(private readonly audit: AuditService) {}
+  constructor(
+    private readonly audit: AuditService,
+    private readonly invalidation: GrantInvalidationService,
+  ) {}
 
   /**
    * Creates an account and returns its secret, once (Doc 06 §10).
@@ -243,9 +248,17 @@ export class ServiceAccountsService {
    * Returns `null` when no such account exists in the caller's tenant.
    *
    * Doc 03 §5 also asks that revoking invalidate the account's cached grants
-   * (Doc 04 §7). That cache is Session 21's and does not exist yet; when it
-   * does, the invalidation belongs here, published after commit like every other
+   * (Doc 04 §7) — wired in Session 22, published after commit like every other
    * out-of-Postgres effect (see `SessionService.revoke`).
+   *
+   * Only the revocation direction publishes. Reactivating cannot *grant*
+   * anything from cache: the account's bindings never went away — revocation is
+   * a status on the credential, not a change to the binding graph — so a
+   * reactivated account's cached grants are the same ones it had, and correct.
+   * What stops a revoked account is `/auth/token` refusing the next exchange
+   * (migration 0015) and its ≤5 minute token TTL expiring, which is the model
+   * Doc 03 §5 describes. The bump on revoke is belt to that braces: it makes the
+   * dead credential's remaining token window carry no grants either.
    */
   async setStatus(
     claims: VerifiedClaims,
@@ -275,6 +288,17 @@ export class ServiceAccountsService {
         { type: 'service_account', id: row.id },
         { account_key: row.key },
       );
+
+      if (status === ServiceAccountStatus.REVOKED) {
+        afterCommit(() =>
+          this.invalidation.publish(
+            claims.cid,
+            [{ type: SubjectType.SERVICE, id: row.id }],
+            { cause: 'service_account.revoked', serviceAccountId: row.id },
+          ),
+        );
+      }
+
       return toDto(row);
     }
 

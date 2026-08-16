@@ -35,9 +35,10 @@ import type { ClientApplicationDTO } from '@plantops/contracts';
 import { IAM_SCHEMA, withProvisioningTenant } from '@plantops/db';
 import { AUDIT_ACTIONS } from '../audit/audit-actions';
 import { AuditService, type AuditEntry } from '../audit/audit.service';
+import { GrantInvalidationService } from '../authz/invalidation.service';
 import { IamException } from '../common/iam.exception';
 import { assertPlatformAdmin } from '../common/platform-admin';
-import { entityManager } from '../common/transaction-context';
+import { afterCommit, entityManager } from '../common/transaction-context';
 import { ClientsService } from './clients.service';
 
 const S = `"${IAM_SCHEMA}"`;
@@ -78,7 +79,39 @@ export class ClientApplicationsService {
   constructor(
     private readonly clients: ClientsService,
     private readonly audit: AuditService,
+    private readonly invalidation: GrantInvalidationService,
   ) {}
+
+  /**
+   * Doc 04 §7's `client_application` row, for both writers below.
+   *
+   * "**disabled or re-enabled** → subjects of that client", and the spec spells
+   * both directions out because only one of them is obvious. Disabling makes the
+   * app's permissions inert, which everyone expects to need a flush; *enabling*
+   * changes effective grants just as much, because every `role_permission`
+   * mapping that survived the disable (Doc 02 §7 preserves them all) becomes live
+   * again in the same instant. A cache written while the app was off holds grant
+   * sets with those permissions missing, and without this they would stay missing
+   * for up to a TTL after the toggle that restored them — an operator turning an
+   * application back on and being told the access is not there yet.
+   *
+   * Runs inside `withProvisioningTenant`, so `entityManager()` sees the target
+   * client rather than the platform tenant the caller is authenticated in — which
+   * is what makes `subjectsOfClient` return the tenant's subjects and not none.
+   */
+  private async invalidateTenant(
+    clientId: string,
+    applicationId: string,
+  ): Promise<void> {
+    const subjects = await this.invalidation.subjectsOfClient(clientId);
+
+    afterCommit(() =>
+      this.invalidation.publish(clientId, subjects, {
+        cause: 'client_application.toggled',
+        applicationId,
+      }),
+    );
+  }
 
   /**
    * Enables applications for a client (Doc 02 §3 step 2).
@@ -160,6 +193,13 @@ export class ClientApplicationsService {
             target: { type: 'client_application', id: row.application_id },
             payload: { client_id: clientId, application_key: row.application_key },
           });
+
+          // Gated on the same condition as the audit record, and for the same
+          // reason: re-enabling something already enabled changed nothing, so
+          // there is nothing to invalidate. One publish per application actually
+          // turned on — a batch that enables three apps is three events, each
+          // naming which one, rather than one event naming none.
+          await this.invalidateTenant(clientId, row.application_id);
         }
       }
 
@@ -277,6 +317,12 @@ export class ClientApplicationsService {
           { type: 'client_application', id: row.application_id },
           { client_id: clientId, application_key: row.application_key },
         );
+
+        // The `enabled` flag moved, in either direction. A `config` edit does
+        // not reach here and should not: `client_application.config` is the
+        // tenant's per-app settings blob and nothing in `resolve()` reads it, so
+        // flushing the tenant's grants over one would be work with no effect.
+        await this.invalidateTenant(clientId, row.application_id);
       }
 
       return toDto(row);

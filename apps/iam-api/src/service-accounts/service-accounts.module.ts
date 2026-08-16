@@ -8,21 +8,26 @@
  * credentials feed — `POST /auth/token` — stays in `AuthModule` where the
  * signing keys are.
  *
- * `DatabaseModule` and `AuditModule` are the only imports: every query runs on
+ * `DatabaseModule` and `AuditModule` carry the usual pair: every query runs on
  * the ambient request transaction (`entityManager()`), the interim permission
  * check reads the RLS context that `TenantContextInterceptor` already put
  * there, and every mutation records itself through the one audit path
  * (Doc 10 §3).
+ *
+ * `AuthzModule` is Session 22's — Doc 04 §7's "service_account revoked → that
+ * subject", the narrowest row in the table and the only one whose subject is a
+ * machine.
  */
 
 import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module';
+import { AuthzModule } from '../authz/authz.module';
 import { DatabaseModule } from '../database/database.module';
 import { ServiceAccountsController } from './service-accounts.controller';
 import { ServiceAccountsService } from './service-accounts.service';
 
 @Module({
-  imports: [AuditModule, DatabaseModule],
+  imports: [AuditModule, AuthzModule, DatabaseModule],
   controllers: [ServiceAccountsController],
   providers: [ServiceAccountsService],
   exports: [ServiceAccountsService],

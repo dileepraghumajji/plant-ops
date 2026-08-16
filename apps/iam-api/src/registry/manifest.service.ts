@@ -63,8 +63,9 @@ import type { ApplicationManifest, ManifestUpsertResponse } from '@plantops/cont
 import { IAM_SCHEMA } from '@plantops/db';
 import { AUDIT_ACTIONS } from '../audit/audit-actions';
 import { AuditService, type AuditEntry } from '../audit/audit.service';
+import { GrantInvalidationService } from '../authz/invalidation.service';
 import { IamException } from '../common/iam.exception';
-import { entityManager } from '../common/transaction-context';
+import { afterCommit, entityManager } from '../common/transaction-context';
 import { ApplicationsService, type ApplicationRow } from './applications.service';
 import {
   computeManifestPlan,
@@ -91,6 +92,7 @@ export class ManifestService {
     private readonly applications: ApplicationsService,
     private readonly permissions: PermissionsService,
     private readonly nav: NavService,
+    private readonly invalidation: GrantInvalidationService,
   ) {}
 
   /**
@@ -455,6 +457,35 @@ export class ManifestService {
         target: { type: 'permission' as const, id: row.id },
         payload: { application_id: applicationId, key: row.key },
       })),
+    );
+
+    // The subtlest row of Doc 04 §7: "permission soft-deactivated / removed via
+    // manifest re-upload → all subjects bound to any role mapping that
+    // permission", because "cached grants may still reference a now-inert
+    // permission key".
+    //
+    // Nothing about the binding graph moved — the `role_permission` rows are
+    // deliberately left in place (see this method's header) — so no other row of
+    // the table fires and the only thing that changed is `is_active`, which
+    // `resolve()` filters on. Without this the retired key keeps working for up
+    // to a TTL after the upload that retired it, on every tenant that had it.
+    //
+    // Cross-tenant, and the only cause that is: an application's catalog is
+    // platform-owned and any number of clients may have enabled it (Doc 02 §7),
+    // so the affected subjects span tenants and the publish groups them by
+    // client. The lookup is correct here only because `upsert` asserted platform
+    // admin — under a tenant context RLS would narrow it to one client and
+    // silently under-invalidate the rest.
+    const subjects = await this.invalidation.subjectsBoundToPermissions(
+      rows.map((row) => row.id),
+    );
+
+    afterCommit(() =>
+      this.invalidation.publishAcrossTenants(subjects, {
+        cause: 'permission.deactivated',
+        applicationId,
+        permissionKeys: rows.map((row) => row.key),
+      }),
     );
   }
 

@@ -19,10 +19,10 @@
  *
  * So a cache entry carries the counter value it was written under (`v`, the
  * {@link CachedGrants} field the contract publishes), and a read that finds the
- * authoritative counter ahead of it treats the entry as absent. Session 22 bumps
- * the counter from every row of the §7 table through
- * {@link GrantsCacheService.bump}; nothing calls it yet, which is why this file
- * ships with the counter and Session 22 ships with its callers.
+ * authoritative counter ahead of it treats the entry as absent. Session 22 wired
+ * the callers: `invalidation.service.ts` bumps through
+ * {@link GrantsCacheService.bump} / {@link GrantsCacheService.bumpMany} for every
+ * row of the §7 table, and nothing else in the application names a version key.
  *
  * ## Every failure mode falls back to Postgres
  *
@@ -209,22 +209,55 @@ export class GrantsCacheService {
    * Called by Session 22's `InvalidationService` for every row of the §7 table.
    */
   async bump(subject: SubjectRef): Promise<void> {
-    const key = versionKey(this.keyFor(subject));
+    await this.bumpMany([subject]);
+  }
+
+  /**
+   * {@link GrantsCacheService.bump} for a set of subjects, in one round-trip.
+   *
+   * The batch form exists because half of Doc 04 §7's table is *not* about one
+   * subject: a role's permissions edited, a role deleted, an application toggled
+   * for a tenant and a permission deactivated by a manifest re-upload all affect
+   * however many subjects happen to be bound, and `InvalidationService` resolves
+   * each of those to a subject list before it gets here (see that file for why
+   * the fan-out is enumerated rather than absorbed into a second counter).
+   *
+   * One pipeline rather than a loop of {@link GrantsCacheService.bump} calls, so
+   * the cost of invalidating a role held by four hundred people is one network
+   * round-trip rather than four hundred. The timeout is the same
+   * {@link CACHE_TIMEOUT_MS} for the same reason — but note it now covers the
+   * whole batch, which is the right way round: a partial invalidation is not
+   * better than none, and both fall back to the same TTL.
+   *
+   * Not `multi()`: this needs pipelining, not atomicity. `INCR` is already
+   * atomic per key, the counters are independent, and a `MULTI` over hundreds of
+   * commands would block the server for the duration. A pipeline that fails
+   * halfway leaves some counters bumped and some not, which is exactly what a
+   * failed `MULTI` would leave behind anyway once the caller retried nothing.
+   *
+   * Never throws, like `bump` — every caller is a post-commit callback.
+   */
+  async bumpMany(subjects: readonly SubjectRef[]): Promise<void> {
+    if (subjects.length === 0) return;
+
+    // Distinct keys: two bindings for the same person under one role produce
+    // the same subject twice, and incrementing a counter twice is harmless but
+    // pointless traffic.
+    const keys = [...new Set(subjects.map((subject) => this.keyFor(subject)))];
+    const ttl = this.env.GRANTS_CACHE_TTL_SECONDS;
+
+    const pipeline = this.redis.client.pipeline();
+    for (const key of keys) {
+      pipeline.incr(versionKey(key)).expire(versionKey(key), ttl * 2);
+    }
 
     try {
-      await withTimeout(
-        this.redis.client
-          .multi()
-          .incr(key)
-          .expire(key, this.env.GRANTS_CACHE_TTL_SECONDS * 2)
-          .exec(),
-        CACHE_TIMEOUT_MS,
-        'grants cache invalidation',
-      );
+      await withTimeout(pipeline.exec(), CACHE_TIMEOUT_MS, 'grants cache invalidation');
     } catch (error) {
       this.logger.error(
-        `Grants for ${this.keyFor(subject)} could not be invalidated ` +
-          `(${messageOf(error)}); the entry stays live until its TTL expires`,
+        `Grants for ${keys.length} subject(s) could not be invalidated ` +
+          `(${messageOf(error)}); the entries stay live until their TTL expires ` +
+          `(first: ${keys[0]})`,
       );
     }
   }

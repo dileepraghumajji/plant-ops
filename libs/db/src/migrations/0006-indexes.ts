@@ -43,8 +43,11 @@ const INDEXES: readonly (readonly [name: string, ddl: string])[] = [
   // Backs the `on delete restrict` towards scope_node — without it, every
   // node delete degrades to a sequential scan of all bindings.
   ['role_binding_scope_node_id_idx', `on ${S}."role_binding" (scope_node_id)`],
-  // The expiry sweep (Doc 10 §9, Session 22) reads only dated bindings, which
-  // are the rare case — hence partial.
+  // Dated bindings are the rare case — hence partial. This is the *listing*
+  // index: `bindings.service.ts` computes its `expired` flag from this column
+  // and Doc 06 §9 keeps lapsed grants visible. The sweep of Doc 04 §7 has its
+  // own, narrower one (migration 0016), which additionally excludes the rows it
+  // has already claimed and is therefore empty in steady state.
   [
     'role_binding_expires_at_idx',
     `on ${S}."role_binding" (expires_at) where expires_at is not null`,
