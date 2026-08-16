@@ -64,6 +64,7 @@ import {
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR, APP_PIPE } from '@nestjs/core';
 import { AuthGuard } from '@plantops/auth-kit';
 import { AuthModule } from '../auth/auth.module';
+import { BindingsModule } from '../bindings/bindings.module';
 import { ClientsModule } from '../clients/clients.module';
 import {
   BULK_USER_UPLOAD_ROUTE_PATH,
@@ -103,6 +104,7 @@ import { UsersModule } from '../users/users.module';
     RolesModule,
     UsersModule,
     ServiceAccountsModule,
+    BindingsModule,
     OpenApiModule,
   ],
   providers: [

@@ -64,6 +64,18 @@ export type InvalidationReason =
       cause: 'user.locked' | 'user.disabled';
       /** The account whose state changed; the sole affected subject. */
       userId: string;
+    }
+  | {
+      cause: 'role_binding.created' | 'role_binding.deleted';
+      /**
+       * The grant that was written or removed; the affected subject is its own.
+       *
+       * The id rather than the subject: the subject is already in the
+       * `subjects` argument, and what an operator correlating a cache flush with
+       * the audit trail has in hand is the `role_binding.created` record's
+       * target, which is this.
+       */
+      bindingId: string;
     };
 
 @Injectable()
@@ -102,7 +114,22 @@ export class GrantInvalidationService {
   }
 }
 
-/** The id the reason is about, whichever kind of reason it is. */
+/**
+ * The id the reason is about, whichever kind of reason it is.
+ *
+ * A `switch` over the discriminant rather than a chain of ternaries, so a member
+ * added to {@link InvalidationReason} without a case here fails to compile —
+ * which is the point of making the union discriminated in the first place.
+ */
 function targetOf(reason: InvalidationReason): string {
-  return reason.cause === 'scope_node.moved' ? reason.scopeNodeId : reason.userId;
+  switch (reason.cause) {
+    case 'scope_node.moved':
+      return reason.scopeNodeId;
+    case 'user.locked':
+    case 'user.disabled':
+      return reason.userId;
+    case 'role_binding.created':
+    case 'role_binding.deleted':
+      return reason.bindingId;
+  }
 }

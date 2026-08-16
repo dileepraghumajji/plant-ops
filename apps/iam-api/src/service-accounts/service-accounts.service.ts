@@ -78,7 +78,7 @@ const S = `"${IAM_SCHEMA}"`;
 /** The columns every response is built from — `key_hash` is not among them. */
 const COLUMNS = `id, client_id, name, key, status, created_at, updated_at`;
 
-interface ServiceAccountRow {
+export interface ServiceAccountRow {
   id: string;
   client_id: string | null;
   name: string;
@@ -289,6 +289,42 @@ export class ServiceAccountsService {
     return current[0] === undefined ? null : toDto(current[0]);
   }
 
+  /**
+   * The account, or `null` — confined to the caller's **own** tenant.
+   *
+   * Added for Session 20: binding a machine identity to a role has to establish
+   * that the identity is the caller's own before anchoring a grant to it
+   * (Doc 02 §6), and migration 0004 says in as many words that this arm of the
+   * check is the service layer's — `role_binding.service_account_id` gets a
+   * plain foreign key rather than the composite one the user arm gets, because a
+   * platform account's `client_id` is null and a composite key would make it
+   * unbindable anywhere at all.
+   *
+   * The explicit `client_id = $2` is therefore load-bearing here in a way it is
+   * not in the methods above, which pin nothing and let RLS decide. Two rows it
+   * excludes and RLS would not: a platform-level account (null `client_id`,
+   * Doc 01 §3.7), which Doc 02 §6 keeps out of every client's binding space
+   * entirely; and any account at all when the caller is a platform admin acting
+   * inside a tenant, whose `using` arm spans every client (migration 0007).
+   * Both would otherwise be bindable into a tenant that does not own them.
+   *
+   * Status is deliberately not part of the question. A revoked account can be
+   * reactivated (`setStatus`), and refusing to bind one would mean an operator
+   * had to restore the credential before they could restore its access — two
+   * ordered steps where the tenant meant one act.
+   */
+  async findRow(
+    claims: VerifiedClaims,
+    id: string,
+  ): Promise<ServiceAccountRow | null> {
+    const [row] = (await entityManager().query(
+      `select ${COLUMNS} from ${S}."service_account"
+        where id = $1 and client_id = $2`,
+      [id, claims.cid],
+    )) as ServiceAccountRow[];
+
+    return row ?? null;
+  }
 }
 
 function toDto(row: ServiceAccountRow): ServiceAccountDTO {

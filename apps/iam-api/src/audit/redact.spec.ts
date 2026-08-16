@@ -17,6 +17,7 @@
  * drift from the format it is defending against.
  */
 
+import { scopePathLabel } from '@plantops/db';
 import { randomUUID } from 'node:crypto';
 import {
   CIRCULAR,
@@ -123,6 +124,26 @@ describe('looksLikeSecret', () => {
 
   it('spares a uuid', () => {
     expect(looksLikeSecret(randomUUID())).toBe(false);
+  });
+
+  it('spares a scope path, including a root one', () => {
+    const root = scopePathLabel(randomUUID());
+    const child = `${root}.${scopePathLabel(randomUUID())}`;
+
+    // The root is the case that needs the carve-out: one `n_` label is 34
+    // unbroken characters, which is the shape the blob rule looks for. It is
+    // also the *where* of every grant audit record (Doc 10 §4), and redacting it
+    // protects nothing — the id it is derived from sits beside it in the same
+    // payload.
+    expect(looksLikeSecret(root)).toBe(false);
+    expect(looksLikeSecret(child)).toBe(false);
+  });
+
+  it('does not let the scope-path carve-out spare a hex digest', () => {
+    // The label length is the uuid's, so `n_` followed by an arbitrary hex run
+    // is not a path — otherwise the carve-out would be a hole a SHA-256 digest
+    // could be renamed through.
+    expect(looksLikeSecret(`n_${'a'.repeat(64)}`)).toBe(true);
   });
 
   it('spares a dotted permission key, which denials must record', () => {

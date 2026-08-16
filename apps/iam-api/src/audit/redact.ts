@@ -44,6 +44,16 @@
  *   authorization actions must carry (Doc 10 §4). The JWT rule below is
  *   anchored on `eyJ` precisely so a three-part permission key is not mistaken
  *   for a token.
+ * - **ltree scope paths.** A *nested* path is spared by accident — the dots
+ *   break the unbroken run the blob rule looks for — but a **root** path is one
+ *   label, `n_` plus 32 hex characters, which is 34 unbroken characters and
+ *   therefore matched. That mattered from the moment `scope_node.created` began
+ *   recording a `path` (Session 16) and again for every `role_binding.*` record
+ *   (Session 20), where the path is the *where* of a grant: an audit trail that
+ *   can say who was given a role but not at which node is one an operator cannot
+ *   act on. Nothing is protected by redacting it either — the label is derived
+ *   from the node's own id (Doc 01 §3.5), and that id sits unredacted in the
+ *   same payload beside it.
  */
 
 /** What a redacted value is replaced with. One marker, so it is greppable. */
@@ -105,6 +115,16 @@ const REFRESH_TOKEN =
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
+ * A materialized scope path — `n_<uuid hex>` labels joined by dots (Doc 01 §3.5,
+ * `SCOPE_PATH_LABEL_PREFIX`).
+ *
+ * Exact rather than lenient: the label length is the uuid's, so a pattern that
+ * accepted `n_` followed by any hex run would be a carve-out wide enough for a
+ * hex-encoded digest to walk through.
+ */
+const SCOPE_PATH = /^n_[0-9a-f]{32}(\.n_[0-9a-f]{32})*$/i;
+
+/**
  * A long unbroken base64url/hex run — the shape of every bearer secret in this
  * codebase (32 random bytes is 43 base64url characters) and of a SHA-256 digest
  * in either encoding.
@@ -129,12 +149,13 @@ export function isSecretKey(key: string): boolean {
 /**
  * Does this value look like secret material, whatever it is called?
  *
- * Order matters only for readability; the checks are disjoint apart from the
- * UUID carve-out, which has to run before the blob rule (a uuid with its
- * hyphens is not matched by it, but the carve-out states the intent).
+ * Order matters only for readability, apart from the two carve-outs, which have
+ * to run before the blob rule. A uuid with its hyphens would not be matched by
+ * it in any case, but a single-label scope path genuinely would — so the first
+ * `return false` states an intent the second one enforces.
  */
 export function looksLikeSecret(value: string): boolean {
-  if (UUID.test(value)) return false;
+  if (UUID.test(value) || SCOPE_PATH.test(value)) return false;
   return (
     MODULAR_CRYPT.test(value) ||
     JWT.test(value) ||
