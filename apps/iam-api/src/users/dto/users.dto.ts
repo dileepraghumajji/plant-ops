@@ -19,7 +19,11 @@
  * behind the detail screen's *reset password* button. See `contracts/users.ts`.
  */
 
-import { USER_STATUS_VALUES } from '@plantops/contracts';
+import {
+  BULK_USER_UPLOAD_FORMATS,
+  MAX_BULK_USER_ROWS,
+  USER_STATUS_VALUES,
+} from '@plantops/contracts';
 import { z } from 'zod';
 import { createZodDto } from '../../common/validation.pipe';
 
@@ -140,3 +144,118 @@ export const usersQuerySchema = z.object({
 });
 
 export class UsersQueryDto extends createZodDto(usersQuerySchema) {}
+
+/**
+ * `?page=&limit=` for `GET /iam/users/by-role/:roleId` (Doc 06 §1, §8).
+ *
+ * Page and limit only. The other two filters `usersQuerySchema` carries would
+ * both be answering a different question here: `status` because a role's holders
+ * are being listed to review the grant rather than the account — a locked
+ * supervisor still holds their role, and hiding them is how an offboarding gets
+ * missed — and `q` because this list is already narrowed to the people the role
+ * picker selected, which is the narrowing.
+ *
+ * Spelled out rather than derived from `usersQuerySchema` with `.pick()`, for
+ * the reason that schema gives about `roles/dto/roles.dto.ts`: a shared query
+ * DTO is the coupling that makes one endpoint's pagination change break
+ * another's.
+ */
+export const usersByRoleQuerySchema = z.object({
+  page: z.coerce.number().int().optional(),
+  limit: z.coerce.number().int().optional(),
+});
+
+export class UsersByRoleQueryDto extends createZodDto(usersByRoleQuerySchema) {}
+
+/**
+ * `POST /iam/users/bulk` — Doc 06 §8's "bulk upload (CSV/JSON)".
+ *
+ * ## Why the rows are `unknown`
+ *
+ * This is the one body on the surface that is deliberately **not** validated
+ * element by element, and it is worth being explicit about why, because it reads
+ * as a hole in a codebase that closes them.
+ *
+ * The endpoint's entire product is a per-row verdict: row 4 was created, row 7
+ * duplicates row 2, row 9 has no address (Doc 09 §3.3). A pipe that validated
+ * `users` as `z.array(createUserSchema)` would refuse the *request* on row 9 and
+ * return a `400` naming `users[8].email` — which is the report reduced to its
+ * first line, and useless against a file an operator did not write by hand. So
+ * the array's elements are carried through untouched and `BulkUploadService`
+ * runs `createUserSchema` over each one, which is the same validator by the same
+ * name; what moves is only *where* its failure lands. The `csv` arm reaches the
+ * same validator by a different road, so both formats are adjudicated by one
+ * rule.
+ *
+ * What the pipe still enforces is everything about the *document*: which arm it
+ * is, that the arm's own field is present and of the right type, and that there
+ * are neither zero rows nor more than {@link MAX_BULK_USER_ROWS} of them. Those
+ * are request-level facts, and a request-level `400` is the right answer to each.
+ *
+ * ## `format` is stated, not inferred
+ *
+ * A body carrying neither `content` nor `users`, or carrying both, is a client
+ * bug. Inferring the format from whichever field turned up would answer it by
+ * guessing; requiring a stated `format` answers it with a message that names the
+ * field that is missing, and refuses the body that carries the other arm's field
+ * as well rather than silently ignoring half of what was sent.
+ *
+ * That rule is a `superRefine` over one object rather than a
+ * `z.discriminatedUnion`, and the reason is mechanical: `createZodDto` produces
+ * a *class*, and TypeScript cannot extend a constructor whose return type is a
+ * union — the metatype `emitDecoratorMetadata` records would have nowhere to
+ * live, and the pipe would have no schema to find. One object with two optional
+ * fields and an explicit cross-field rule expresses the same contract, produces
+ * the same messages, and publishes a single named request schema instead of an
+ * `anyOf` that a generated client turns into two types nobody asked for.
+ *
+ * The row count is bounded here on the `json` arm by the array length. It cannot
+ * be on the `csv` arm — the rows do not exist until the document is parsed — so
+ * the length bound stands in as the pre-parse guard and `BulkUploadService`
+ * applies {@link MAX_BULK_USER_ROWS} to what comes out.
+ */
+export const bulkUserUploadSchema = z
+  .object({
+    format: z.enum(BULK_USER_UPLOAD_FORMATS),
+    content: z
+      .string()
+      .min(1, 'content must not be empty')
+      // Wide enough for `MAX_BULK_USER_ROWS` rows at the maximum width every
+      // field is separately bounded to, and comfortably inside
+      // `BULK_UPLOAD_BODY_LIMIT_BYTES`, so a document is refused for its row
+      // count — which names the problem — before it is refused for its length.
+      .max(600_000, 'the CSV document is too large')
+      .optional(),
+    users: z
+      .array(
+        z.unknown().meta({
+          description:
+            'A CreateUserRequest. Typed as unknown so that an invalid row is ' +
+            'reported in the result table rather than refusing the whole upload.',
+        }),
+      )
+      .min(1, 'users must contain at least one row')
+      .max(MAX_BULK_USER_ROWS, `users must contain at most ${MAX_BULK_USER_ROWS} rows`)
+      .optional(),
+  })
+  .superRefine((body, ctx) => {
+    const [required, forbidden] =
+      body.format === 'csv' ? (['content', 'users'] as const) : (['users', 'content'] as const);
+
+    if (body[required] === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: [required],
+        message: `${required} is required when format is "${body.format}"`,
+      });
+    }
+    if (body[forbidden] !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: [forbidden],
+        message: `${forbidden} does not belong to a "${body.format}" upload`,
+      });
+    }
+  });
+
+export class BulkUserUploadDto extends createZodDto(bulkUserUploadSchema) {}

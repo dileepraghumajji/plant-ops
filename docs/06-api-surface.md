@@ -19,11 +19,12 @@
 | Route | Ceiling | Env |
 |---|---|---|
 | `POST /iam/applications/:id/manifest` | 4 MB (4 194 304 bytes) | `MANIFEST_BODY_LIMIT_BYTES` |
+| `POST /iam/users/bulk` | 1 MB (1 048 576 bytes) | `BULK_UPLOAD_BODY_LIMIT_BYTES` |
 | everything else | 64 kB (65 536 bytes) | `REQUEST_BODY_LIMIT_BYTES` |
 
 A body over its ceiling is refused as `400 VALIDATION_FAILED` before the handler runs, with the byte figure in the `message`. It is a 400 rather than a 413 because the code table in §2 is closed — consumers branch on it — and no existing code means "too large"; the status follows the code, as it does everywhere else.
 
-The manifest ceiling is deliberately above the largest document the manifest schema will accept (200 permissions, 200 nav nodes, each node gated by at most 50 permission keys — roughly 2.1 MB at every maximum simultaneously). An upload is therefore never refused for its size before it can be refused for its contents, so a failing manifest always comes back with the field that caused it.
+The two exempt routes are the two that carry a *document* rather than a form, and each ceiling is deliberately above the largest document its schema will accept. For the manifest that is 200 permissions and 200 nav nodes, each node gated by at most 50 permission keys — roughly 2.1 MB at every maximum simultaneously. For the bulk upload it is 500 rows of separately-bounded fields, under 300 kB, or about twice that once a CSV's line breaks are JSON-escaped. Neither is therefore ever refused for its size before it can be refused for its contents, so a failing upload always comes back with the field — or the row count — that caused it.
 
 ### Response headers
 
@@ -134,6 +135,40 @@ Denials (`403`) never reveal whether the target exists across tenants.
 | PATCH | /iam/users/:id | update, lock, unlock, disable |
 | POST | /iam/users/bulk | bulk upload (CSV/JSON) → per-row result report |
 | GET | /iam/users/by-role/:roleId | users holding a role ("Users by Role") |
+
+### Bulk upload
+
+Both formats arrive as `application/json` — the CSV as a string field — so the surface keeps one body parser, one ceiling (§1) and one error shape. `format` is stated rather than inferred; a body carrying the other arm's field as well is refused.
+
+```jsonc
+{ "format": "csv",  "content": "email,full_name,phone,status\ngita@acme.test,Gita Rao,,active" }
+{ "format": "json", "users": [ { "email": "gita@acme.test", "full_name": "Gita Rao" } ] }
+```
+
+CSV columns are matched by header name, case- and whitespace-insensitively, never by position; `email` and `full_name` are required of the header, `phone` and `status` are optional, and unrecognised columns are ignored. At most **500 rows** per upload.
+
+The response is a `200` with a per-row report — not a `201` (there is no single created resource) and not a `207` (whose body shape is not this one, and whose status is not in §2's closed table):
+
+```jsonc
+{
+  "total": 7, "created": 2, "skipped": 2, "errored": 3,
+  "results": [
+    { "row": 1, "email": "gita@acme.test", "status": "created", "user_id": "…" },
+    { "row": 2, "email": "not-an-email",   "status": "errored", "reason": "email: a valid email address is required", "user_id": null },
+    { "row": 3, "email": "gita@acme.test", "status": "skipped", "reason": "Row 1 of this upload already uses this email", "user_id": null }
+  ]
+}
+```
+
+`row` is 1-based over **data** rows, so a CSV header is not row 1 and a blank line is not a row. `skipped` means the row was well-formed and names a user who already exists — earlier in the same file, or already in the tenant — which is what makes re-uploading a roster after adding people the ordinary way this is used. `errored` means the row could not be read as a user at all.
+
+**Partial success.** Valid rows commit even when others do not, because a row that would fail is never attempted: every row is validated and every duplicate resolved before the single insert runs, and that insert skips addresses already present rather than failing on them. The transaction remains all-or-nothing, so an unexpected database failure rolls the whole upload back and answers `500`; `created` therefore always means committed.
+
+A `400` is reserved for faults of the **document** rather than of a row — malformed CSV, a header missing a required or duplicated column, zero rows, more than 500 — since none of those has an honest per-row verdict. One `user.bulk_uploaded` audit record carries the counts and the rows that did not land; each created user still gets its own `user.created` record, so a person's presence is explicable without the upload's response.
+
+### Users by role
+
+`GET /iam/users/by-role/:roleId` returns the standard `?page=&limit=` envelope over **people**: a holder appears once, with every scope they hold the role at gathered into `scopes` (binding id, node id, name, `ltree` path, `expires_at`, `expired`). Expired bindings are listed and flagged rather than dropped, including for a holder all of whose grants have lapsed. A role belonging to another tenant is the same `404` a nonexistent id gets.
 
 ## 9. Client admin — role bindings (`iam.client.binding.*`)
 

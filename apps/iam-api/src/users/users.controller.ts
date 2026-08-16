@@ -7,15 +7,23 @@
  * token's `cid` and from nowhere else (Doc 06 §1, Doc 07 §5). There is no
  * `?clientId=`.
  *
- * ## Four routes now, six by the end of Session 19
+ * ## Six routes, and why two of them are declared where they are
  *
- * Doc 06 §8's table also lists `POST /iam/users/bulk` and
- * `GET /iam/users/by-role/:roleId`, which are Session 19's. When they arrive,
- * `by-role` has to be declared **above** `:id` — Nest matches in declaration
- * order, and a route added below it would be shadowed by the parameterised one.
- * Today `:id` is a `ParseUUIDPipe`, so the shadowing would surface as a 400
- * rather than as a wrong handler, which is a better failure than most but still
- * not the route the caller asked for.
+ * `GET /iam/users/by-role/:roleId` is declared **above** `GET /iam/users/:id`,
+ * and `POST /iam/users/bulk` above `POST /iam/users/:id`-shaped neighbours,
+ * because Nest matches in declaration order and a literal segment placed below a
+ * parameterised one is shadowed by it. `:id` carries a `ParseUUIDPipe`, so the
+ * shadowing would surface as a `400` complaining that `"bulk"` is not a uuid —
+ * a better failure than a wrong handler, and still not the route the caller
+ * asked for. `openapi.spec.ts` scans this class in declaration order, so the
+ * published document would record the mistake too.
+ *
+ * ## The two bulk-shaped routes answer `200`
+ *
+ * `POST /iam/users/bulk` is a `200` rather than the `201` its verb suggests:
+ * the request creates between zero and five hundred users and the response is a
+ * report about all of them, so there is no single `Location` a `201` could
+ * imply. See {@link BulkUserUploadResponse}.
  *
  * ## `PATCH` is one route for two kinds of change
  *
@@ -58,7 +66,9 @@ import {
 } from '@nestjs/common';
 import {
   IAM_ROUTE_PREFIX,
+  type BulkUserUploadResponse,
   type Paginated,
+  type UserByRoleDTO,
   type UserDTO,
   type UserDetailDTO,
 } from '@plantops/contracts';
@@ -66,18 +76,40 @@ import type { VerifiedClaims } from '@plantops/db';
 import { Claims } from '../common/claims.decorator';
 import { IamException } from '../common/iam.exception';
 import { RateLimit } from '../common/rate-limit.decorator';
-import { CreateUserDto, UpdateUserDto, UsersQueryDto } from './dto/users.dto';
+import { BulkUploadService } from './bulk-upload.service';
+import {
+  BulkUserUploadDto,
+  CreateUserDto,
+  UpdateUserDto,
+  UsersByRoleQueryDto,
+  UsersQueryDto,
+} from './dto/users.dto';
 import { UsersService } from './users.service';
 
 /** The ordinary admin-surface bound, matching `/iam/roles` and `/iam/scopes`. */
 const USERS_RATE_LIMIT = { limit: 60, windowSeconds: 60 } as const;
+
+/**
+ * The bulk upload's own, much tighter bound.
+ *
+ * One request here does what up to five hundred of the ordinary ones would, and
+ * it holds a write transaction open while it does — so sharing the sixty-a-minute
+ * budget would let a caller inside it issue thirty thousand row-writes a minute
+ * without ever being throttled. Ten an hour's worth of rosters is far more than
+ * onboarding a plant needs, and a legitimate re-upload after fixing a file is
+ * two or three.
+ */
+const BULK_UPLOAD_RATE_LIMIT = { limit: 10, windowSeconds: 60 } as const;
 
 /** Parses a uuid path segment, refusing anything else before any query runs. */
 const uuidParam = () => new ParseUUIDPipe({ version: '4' });
 
 @Controller(`${IAM_ROUTE_PREFIX}/users`)
 export class UsersController {
-  constructor(private readonly users: UsersService) {}
+  constructor(
+    private readonly users: UsersService,
+    private readonly bulk: BulkUploadService,
+  ) {}
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
@@ -89,6 +121,24 @@ export class UsersController {
     return this.users.create(claims, body);
   }
 
+  /**
+   * The staff-list upload and its per-row report (Doc 06 §8, Doc 09 §3.3).
+   *
+   * Both formats arrive as JSON — the CSV as a string field — under this route's
+   * own larger body ceiling (`common/body-parser.middleware.ts`). The `200` and
+   * the partial-success semantics are argued in the header and in
+   * {@link BulkUserUploadResponse}.
+   */
+  @Post('bulk')
+  @HttpCode(HttpStatus.OK)
+  @RateLimit(BULK_UPLOAD_RATE_LIMIT)
+  bulkUpload(
+    @Claims() claims: VerifiedClaims,
+    @Body() body: BulkUserUploadDto,
+  ): Promise<BulkUserUploadResponse> {
+    return this.bulk.upload(claims, body);
+  }
+
   /** List, search and the `status=locked` filter of Doc 09 §3.3. */
   @Get()
   @RateLimit(USERS_RATE_LIMIT)
@@ -97,6 +147,24 @@ export class UsersController {
     @Query() query: UsersQueryDto,
   ): Promise<Paginated<UserDTO>> {
     return this.users.list(claims, query);
+  }
+
+  /**
+   * "Users by Role" — who holds a role, and where (Doc 06 §8, Doc 09 §3.3).
+   *
+   * Declared above `:id`; see the header. A role belonging to another tenant is
+   * invisible under RLS, so it is the same 404 a nonexistent id gets.
+   */
+  @Get('by-role/:roleId')
+  @RateLimit(USERS_RATE_LIMIT)
+  async byRole(
+    @Claims() claims: VerifiedClaims,
+    @Param('roleId', uuidParam()) roleId: string,
+    @Query() query: UsersByRoleQueryDto,
+  ): Promise<Paginated<UserByRoleDTO>> {
+    const holders = await this.users.byRole(claims, roleId, query);
+    if (holders === null) throw IamException.notFound('The role');
+    return holders;
   }
 
   /**

@@ -31,13 +31,21 @@
  * handler saw it. The message carries the actual byte ceiling, so a caller can
  * act on it without a new code to branch on.
  *
- * ## Two ceilings
+ * ## Three ceilings
  *
- * The manifest upload carries an application's entire permission and nav
- * catalogue (Doc 02 §2) and is the only route on the surface that is a bulk
- * document rather than a form. It gets its own, larger limit; everything else
- * gets the tight one. Both come from the environment (`REQUEST_BODY_LIMIT_BYTES`
- * / `MANIFEST_BODY_LIMIT_BYTES`) and both are published in Doc 06 §1.
+ * Two routes carry a *document* rather than a form, and each gets its own,
+ * larger limit; everything else gets the tight one.
+ *
+ * - The manifest upload carries an application's entire permission and nav
+ *   catalogue (Doc 02 §2).
+ * - The bulk user upload carries a tenant's staff list (Doc 06 §8) — up to
+ *   `MAX_BULK_USER_ROWS` rows, as CSV text or as a JSON array.
+ *
+ * All three come from the environment (`REQUEST_BODY_LIMIT_BYTES`,
+ * `MANIFEST_BODY_LIMIT_BYTES`, `BULK_UPLOAD_BODY_LIMIT_BYTES`) and all three are
+ * published in Doc 06 §1. Each exemption is validated in `env.schema.ts` to be
+ * at least the global one: a route that silently refuses bodies every other
+ * route accepts is the least guessable failure this arrangement can produce.
  */
 
 import { Inject, Injectable, type NestMiddleware } from '@nestjs/common';
@@ -57,6 +65,17 @@ import { IamException } from './iam.exception';
  * describe the same route.
  */
 export const MANIFEST_ROUTE_PATH = `${IAM_ROUTE_PREFIX}/applications/:id/manifest`;
+
+/**
+ * The bulk user upload's route, for the same reason (Doc 06 §8).
+ *
+ * A literal path rather than a parameterised one, and it has to stay above
+ * `/iam/users/:id` in the *controller* for Nest's router to reach it — but this
+ * table is the middleware's, and `MiddlewareConsumer` matches the string it is
+ * given rather than the router's ordering. `http-hardening.spec.ts` asserts the
+ * two still describe the same route.
+ */
+export const BULK_USER_UPLOAD_ROUTE_PATH = `${IAM_ROUTE_PREFIX}/users/bulk`;
 
 /**
  * `body-parser`'s error taxonomy, as far as this file cares.
@@ -174,5 +193,13 @@ export class JsonBodyMiddleware extends JsonBodyParser {
 export class ManifestBodyMiddleware extends JsonBodyParser {
   constructor(@Inject(ENV) env: EnvConfig) {
     super(env.MANIFEST_BODY_LIMIT_BYTES);
+  }
+}
+
+/** The bulk user upload's larger ceiling — see the header. */
+@Injectable()
+export class BulkUploadBodyMiddleware extends JsonBodyParser {
+  constructor(@Inject(ENV) env: EnvConfig) {
+    super(env.BULK_UPLOAD_BODY_LIMIT_BYTES);
   }
 }

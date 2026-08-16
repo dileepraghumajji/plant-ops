@@ -10,8 +10,9 @@
  *
  * 1. `RequestIdMiddleware` — first, so everything after it has an id to log
  *    and to put in an error envelope.
- * 2. `JsonBodyMiddleware` / `ManifestBodyMiddleware` — parse the body under a
- *    stated ceiling. Middleware rather than `NestFactory`'s built-in parser so
+ * 2. `JsonBodyMiddleware` / `ManifestBodyMiddleware` / `BulkUploadBodyMiddleware`
+ *    — parse the body under a stated ceiling, one of three depending on the
+ *    route. Middleware rather than `NestFactory`'s built-in parser so
  *    that an oversized or malformed body reaches the filter instead of
  *    Express's HTML error page; see `common/body-parser.middleware.ts`.
  * 3. `AuthGuard` — verifies the bearer token and checks the session against the
@@ -65,6 +66,8 @@ import { AuthGuard } from '@plantops/auth-kit';
 import { AuthModule } from '../auth/auth.module';
 import { ClientsModule } from '../clients/clients.module';
 import {
+  BULK_USER_UPLOAD_ROUTE_PATH,
+  BulkUploadBodyMiddleware,
   JsonBodyMiddleware,
   MANIFEST_ROUTE_PATH,
   ManifestBodyMiddleware,
@@ -115,19 +118,25 @@ export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {
     consumer.apply(RequestIdMiddleware).forRoutes('*');
 
-    // Two ceilings, one parser each, and the manifest route excluded from the
-    // global one rather than parsed twice. `body-parser` would skip the second
-    // pass anyway, but "excluded" is a statement about which limit applies and
-    // "skipped" is an accident of another library's guard clause.
+    // Three ceilings, one parser each, and the two exempt routes excluded from
+    // the global one rather than parsed twice. `body-parser` would skip the
+    // second pass anyway, but "excluded" is a statement about which limit
+    // applies and "skipped" is an accident of another library's guard clause.
     const manifestRoute = {
       path: MANIFEST_ROUTE_PATH,
+      method: RequestMethod.POST,
+    };
+    const bulkUploadRoute = {
+      path: BULK_USER_UPLOAD_ROUTE_PATH,
       method: RequestMethod.POST,
     };
     consumer
       .apply(ManifestBodyMiddleware)
       .forRoutes(manifestRoute)
+      .apply(BulkUploadBodyMiddleware)
+      .forRoutes(bulkUploadRoute)
       .apply(JsonBodyMiddleware)
-      .exclude(manifestRoute)
+      .exclude(manifestRoute, bulkUploadRoute)
       .forRoutes('*');
   }
 }
