@@ -65,6 +65,7 @@ import {
 } from '@plantops/auth-kit';
 import type { EnvConfig } from '@plantops/config';
 import { AuditModule } from '../audit/audit.module';
+import { AuthzModule } from '../authz/authz.module';
 import { ENV } from '../config/config.module';
 import { DatabaseModule } from '../database/database.module';
 import { RedisModule } from '../redis/redis.module';
@@ -112,7 +113,7 @@ const passwordResetDeliveryProvider: Provider = {
 };
 
 @Module({
-  imports: [AuditModule, DatabaseModule, RedisModule],
+  imports: [AuditModule, AuthzModule, DatabaseModule, RedisModule],
   controllers: [AuthController, JwksController],
   providers: [
     KeysService,
@@ -137,7 +138,7 @@ const passwordResetDeliveryProvider: Provider = {
     KeysService,
     TokenService,
     SessionService,
-    // Session 16's user-admin surface calls these transitions from its own
+    // Session 18's user-admin surface calls these transitions from its own
     // controller; the state machine itself stays here, beside the login path
     // that enforces it.
     AccountStateService,

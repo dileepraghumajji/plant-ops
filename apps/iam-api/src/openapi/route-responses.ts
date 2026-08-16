@@ -36,6 +36,7 @@ import { ApplicationsController } from '../registry/applications.controller';
 import { RolesController } from '../roles/roles.controller';
 import { ScopesController } from '../scopes/scopes.controller';
 import { ServiceAccountsController } from '../service-accounts/service-accounts.controller';
+import { UsersController } from '../users/users.controller';
 import {
   accessTokenSchema,
   applicationSchema,
@@ -53,6 +54,7 @@ import {
   paginatedPermissionsSchema,
   paginatedRolesSchema,
   paginatedServiceAccountsSchema,
+  paginatedUsersSchema,
   permissionSchema,
   readinessSchema,
   roleSchema,
@@ -63,6 +65,8 @@ import {
   serviceAccountSecretSchema,
   sessionSchema,
   tokenPairSchema,
+  userDetailSchema,
+  userSchema,
   whoAmISchema,
 } from './schemas';
 
@@ -275,6 +279,22 @@ export const ROUTE_RESPONSES: ReadonlyMap<
     permissions: failing(ok(rolePermissionsSchema), ...DENIED_OR_MISSING),
     setPermissions: failing(
       ok(rolePermissionsSchema, 'The role’s new permission set'),
+      ...DENIED_MISSING_OR_DUPLICATE,
+    ),
+  }),
+
+  routes(UsersController, {
+    create: failing(created(userSchema), ...DENIED_MISSING_OR_DUPLICATE),
+    list: failing(ok(paginatedUsersSchema), 403),
+    detail: failing(
+      ok(userDetailSchema, 'The user, with the grants they hold'),
+      ...DENIED_OR_MISSING,
+    ),
+    // 409 covers three refusals here, not just the duplicate address: a
+    // `disabled → active` reactivation and a caller changing their own status
+    // are both conflicts with the state the rows are in (Doc 03 §8).
+    update: failing(
+      ok(userDetailSchema, 'The updated user, with the grants they hold'),
       ...DENIED_MISSING_OR_DUPLICATE,
     ),
   }),

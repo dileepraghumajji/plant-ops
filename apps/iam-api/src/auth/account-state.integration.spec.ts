@@ -711,7 +711,9 @@ describeWithDb(
         await failLoginTimes(MAX_FAILED_ATTEMPTS);
         expect((await login(PASSWORD)).status).toBe(423);
 
-        await asAdministrator(() => accountState.unlock(fixture.userId));
+        await asAdministrator(() =>
+          accountState.unlock(fixture.clientId, fixture.userId),
+        );
 
         expect((await userRow()).status).toBe('active');
         expect((await login(PASSWORD)).status).toBe(200);
@@ -719,10 +721,12 @@ describeWithDb(
       });
 
       it('refuses to unlock a disabled account', async () => {
-        await asAdministrator(() => accountState.disable(fixture.userId));
+        await asAdministrator(() =>
+          accountState.disable(fixture.clientId, fixture.userId),
+        );
 
         await asAdministrator(async () => {
-          const result = await accountState.unlock(fixture.userId);
+          const result = await accountState.unlock(fixture.clientId, fixture.userId);
           expect(result.changed).toBe(false);
         });
 
@@ -731,7 +735,9 @@ describeWithDb(
       });
 
       it('locks manually, with the same action the policy writes', async () => {
-        await asAdministrator(() => accountState.lock(fixture.userId, 'under review'));
+        await asAdministrator(() =>
+          accountState.lock(fixture.clientId, fixture.userId, 'under review'),
+        );
 
         expect((await userRow()).status).toBe('locked');
         expect((await login(PASSWORD)).status).toBe(423);
@@ -745,7 +751,7 @@ describeWithDb(
         const second = await loginAs();
 
         await asAdministrator(async () => {
-          const result = await accountState.disable(fixture.userId);
+          const result = await accountState.disable(fixture.clientId, fixture.userId);
           expect(result.revokedSessions).toHaveLength(2);
         });
 
@@ -757,9 +763,11 @@ describeWithDb(
       });
 
       it('is idempotent — re-applying a state changes and audits nothing', async () => {
-        await asAdministrator(() => accountState.lock(fixture.userId));
+        await asAdministrator(() =>
+          accountState.lock(fixture.clientId, fixture.userId),
+        );
         await asAdministrator(async () => {
-          const result = await accountState.lock(fixture.userId);
+          const result = await accountState.lock(fixture.clientId, fixture.userId);
           expect(result.changed).toBe(false);
         });
 
@@ -772,10 +780,16 @@ describeWithDb(
         ).toHaveLength(1);
       });
 
-      it('does not touch a user in another tenant', async () => {
+      it('does not touch a user in another tenant, or one that does not exist', async () => {
         await asAdministrator(async () => {
-          const result = await accountState.disable(randomUUID());
-          expect(result.changed).toBe(false);
+          // The real account, named under somebody else's tenant. RLS would
+          // hide it anyway; the explicit `client_id` predicate is what makes
+          // that true without depending on the context being right.
+          const foreign = await accountState.disable(randomUUID(), fixture.userId);
+          expect(foreign.changed).toBe(false);
+
+          const missing = await accountState.disable(fixture.clientId, randomUUID());
+          expect(missing.changed).toBe(false);
         });
 
         expect((await userRow()).status).toBe('active');
@@ -783,8 +797,12 @@ describeWithDb(
 
       it('leaves revoked sessions revoked after an unlock', async () => {
         const session = await loginAs();
-        await asAdministrator(() => accountState.lock(fixture.userId));
-        await asAdministrator(() => accountState.unlock(fixture.userId));
+        await asAdministrator(() =>
+          accountState.lock(fixture.clientId, fixture.userId),
+        );
+        await asAdministrator(() =>
+          accountState.unlock(fixture.clientId, fixture.userId),
+        );
 
         // A revocation is a fact about a moment. Unlock restores the account,
         // not the sessions it had.
@@ -800,10 +818,14 @@ describeWithDb(
       const arrange = async (state: UserStatus): Promise<TokenPairResponse> => {
         const tokens = await loginAs();
         if (state === 'locked') {
-          await asAdministrator(() => accountState.lock(fixture.userId));
+          await asAdministrator(() =>
+          accountState.lock(fixture.clientId, fixture.userId),
+        );
         }
         if (state === 'disabled') {
-          await asAdministrator(() => accountState.disable(fixture.userId));
+          await asAdministrator(() =>
+          accountState.disable(fixture.clientId, fixture.userId),
+        );
         }
         return tokens;
       };
@@ -910,7 +932,9 @@ describeWithDb(
 
       it('does not elevate the connection that served a lockout', async () => {
         await failLoginTimes(MAX_FAILED_ATTEMPTS);
-        await asAdministrator(() => accountState.unlock(fixture.userId));
+        await asAdministrator(() =>
+          accountState.unlock(fixture.clientId, fixture.userId),
+        );
 
         const tokens = await loginAs();
         const body = (await (await whoami(tokens.access_token)).json()) as {

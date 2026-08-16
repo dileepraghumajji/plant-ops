@@ -30,7 +30,7 @@
  *
  * - **Rate limiting is off.** These cases make dozens of calls, and `PATCH` is
  *   deliberately capped at ten a minute in production.
- * - **`ScopeInvalidationService.publish` is spied on** in the ordering test, and
+ * - **`GrantInvalidationService.publish` is spied on** in the ordering test, and
  *   the spy reads the database *on another connection* to see whether the move
  *   had committed by the time it ran. That is the assertion; the stub's own body
  *   is a log line and has nothing to prove.
@@ -62,9 +62,9 @@ import type { AddressInfo } from 'node:net';
 import type { DataSource } from 'typeorm';
 import { AppModule } from '../app/app.module';
 import { AUDIT_ACTIONS } from '../audit/audit-actions';
+import { GrantInvalidationService } from '../authz/invalidation.service';
 import { ENV } from '../config/config.module';
 import { createTestApplication } from '../testing/app-harness';
-import { ScopeInvalidationService } from './scope-invalidation.service';
 
 const S = `"${IAM_SCHEMA}"`;
 
@@ -118,7 +118,7 @@ describeWithDb(
     let baseUrl: string;
     let admin: DataSource;
     let fixture: Fixture;
-    let invalidation: ScopeInvalidationService;
+    let invalidation: GrantInvalidationService;
 
     jest.setTimeout(180_000);
 
@@ -145,7 +145,7 @@ describeWithDb(
       await app.init();
       await app.listen(0);
       baseUrl = `http://127.0.0.1:${(app.getHttpServer().address() as AddressInfo).port}`;
-      invalidation = app.get(ScopeInvalidationService);
+      invalidation = app.get(GrantInvalidationService);
     });
 
     afterAll(async () => {

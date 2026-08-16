@@ -42,6 +42,8 @@ import type {
   ServiceAccountSecretDTO,
   SessionDTO,
   TokenPairResponse,
+  UserDTO,
+  UserDetailDTO,
 } from '@plantops/contracts';
 import type { z } from 'zod';
 import type { ReadinessReport } from '../health/health.service';
@@ -67,6 +69,7 @@ import {
   paginatedPermissionsSchema,
   paginatedRolesSchema,
   paginatedServiceAccountsSchema,
+  paginatedUsersSchema,
   permissionSchema,
   readinessSchema,
   refFor,
@@ -77,6 +80,8 @@ import {
   serviceAccountSecretSchema,
   sessionSchema,
   tokenPairSchema,
+  userDetailSchema,
+  userSchema,
   whoAmISchema,
 } from './schemas';
 
@@ -117,10 +122,12 @@ export type _ResponseSchemasMirrorTheContracts = [
   Expect<Mirrors<typeof clientApplicationSchema, ClientApplicationDTO>>,
   Expect<Mirrors<typeof clientAdminSchema, ClientAdminDTO>>,
 
-  // scopes, roles, service accounts
+  // scopes, roles, users, service accounts
   Expect<Mirrors<typeof scopeTreeSchema, ScopeTreeResponse>>,
   Expect<Mirrors<typeof roleSchema, RoleDTO>>,
   Expect<Mirrors<typeof rolePermissionsSchema, RolePermissionsResponse>>,
+  Expect<Mirrors<typeof userSchema, UserDTO>>,
+  Expect<Mirrors<typeof userDetailSchema, UserDetailDTO>>,
   Expect<Mirrors<typeof serviceAccountSchema, ServiceAccountDTO>>,
   Expect<Mirrors<typeof serviceAccountSecretSchema, ServiceAccountSecretDTO>>,
 
@@ -134,6 +141,7 @@ export type _ResponseSchemasMirrorTheContracts = [
   Expect<Mirrors<typeof paginatedPermissionsSchema, Paginated<PermissionDTO>>>,
   Expect<Mirrors<typeof paginatedClientsSchema, Paginated<ClientDTO>>>,
   Expect<Mirrors<typeof paginatedRolesSchema, Paginated<RoleDTO>>>,
+  Expect<Mirrors<typeof paginatedUsersSchema, Paginated<UserDTO>>>,
   Expect<Mirrors<typeof paginatedServiceAccountsSchema, Paginated<ServiceAccountDTO>>>,
 ];
 

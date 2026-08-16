@@ -67,6 +67,10 @@ import { IAM_SCHEMA, type VerifiedClaims } from '@plantops/db';
 import { randomUUID } from 'node:crypto';
 import { AUDIT_ACTIONS } from '../audit/audit-actions';
 import { AuditService } from '../audit/audit.service';
+import {
+  GrantInvalidationService,
+  type AffectedSubject,
+} from '../authz/invalidation.service';
 import { assertAdministrator } from '../common/administrator';
 import { IamException } from '../common/iam.exception';
 import { afterCommit, entityManager } from '../common/transaction-context';
@@ -77,10 +81,6 @@ import {
   pathDepth,
   rootPath,
 } from './path.util';
-import {
-  ScopeInvalidationService,
-  type AffectedSubject,
-} from './scope-invalidation.service';
 
 const S = `"${IAM_SCHEMA}"`;
 
@@ -116,7 +116,7 @@ export interface UpdateScopeNodeInput {
 export class ScopesService {
   constructor(
     private readonly audit: AuditService,
-    private readonly invalidation: ScopeInvalidationService,
+    private readonly invalidation: GrantInvalidationService,
   ) {}
 
   /**
