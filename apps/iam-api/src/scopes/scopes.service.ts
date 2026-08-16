@@ -88,7 +88,7 @@ const S = `"${IAM_SCHEMA}"`;
 const COLUMNS = `id, client_id, parent_id, kind, name, path::text as path,
                  metadata, created_at, updated_at`;
 
-interface ScopeNodeRow {
+export interface ScopeNodeRow {
   id: string;
   client_id: string;
   parent_id: string | null;
@@ -275,11 +275,17 @@ export class ScopesService {
     return true;
   }
 
-  /** The node, or `null`. RLS confines the lookup to the caller's tenant. */
-  private async findRow(
-    claims: VerifiedClaims,
-    id: string,
-  ): Promise<ScopeNodeRow | null> {
+  /**
+   * The node, or `null`. RLS and the explicit `client_id` both confine it to the
+   * caller's tenant.
+   *
+   * Public since Session 20: anchoring a grant to a node has to establish that
+   * the node is the caller's own before the binding is written (Doc 02 §6), and
+   * "is this scope node mine" should have exactly one implementation — a second
+   * copy in `BindingsService` is how the two would eventually disagree about
+   * what a visible node is.
+   */
+  async findRow(claims: VerifiedClaims, id: string): Promise<ScopeNodeRow | null> {
     const [row] = (await entityManager().query(
       `select ${COLUMNS} from ${S}."scope_node" where client_id = $1 and id = $2`,
       [claims.cid, id],

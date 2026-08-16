@@ -29,6 +29,7 @@ import type { Type } from '@nestjs/common';
 import type { ZodType } from 'zod';
 import { AuthController } from '../auth/auth.controller';
 import { JwksController } from '../auth/jwks.controller';
+import { BindingsController } from '../bindings/bindings.controller';
 import { ClientsController } from '../clients/clients.controller';
 import { HealthController } from '../health/health.controller';
 import { WhoAmIController } from '../iam/whoami.controller';
@@ -53,12 +54,14 @@ import {
   paginatedApplicationsSchema,
   paginatedClientsSchema,
   paginatedPermissionsSchema,
+  paginatedRoleBindingsSchema,
   paginatedRolesSchema,
   paginatedServiceAccountsSchema,
   paginatedUsersByRoleSchema,
   paginatedUsersSchema,
   permissionSchema,
   readinessSchema,
+  roleBindingSchema,
   roleSchema,
   rolePermissionsSchema,
   scopeNodeSchema,
@@ -313,6 +316,21 @@ export const ROUTE_RESPONSES: ReadonlyMap<
       ok(userDetailSchema, 'The updated user, with the grants they hold'),
       ...DENIED_MISSING_OR_DUPLICATE,
     ),
+  }),
+
+  routes(BindingsController, {
+    // 409 covers every Doc 02 §6 refusal as well as the duplicate grant: a role,
+    // node or subject from another tenant is a cross-tenant violation, which
+    // §2's table files next to the duplicate key rather than as a 404 — the
+    // response must not distinguish "not yours" from "not real". The 400 the
+    // universal list already carries is the subject XOR and a past `expires_at`.
+    create: failing(
+      created(roleBindingSchema, 'The grant, with the names behind its ids'),
+      403,
+      409,
+    ),
+    list: failing(ok(paginatedRoleBindingsSchema), 403),
+    remove: failing(noContent('The grant was revoked'), ...DENIED_OR_MISSING),
   }),
 
   routes(ServiceAccountsController, {

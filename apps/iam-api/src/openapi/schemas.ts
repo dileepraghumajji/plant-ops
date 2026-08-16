@@ -555,6 +555,31 @@ export const userByRoleSchema = named(
   userSchema.extend({ scopes: z.array(roleScopeGrantSchema) }),
 );
 
+// ── role bindings (Doc 06 §9) ───────────────────────────────────────────────
+
+export const roleBindingSchema = named(
+  'RoleBindingDTO',
+  z.object({
+    id: z.uuid(),
+    client_id: z.uuid(),
+    // Spelled out rather than imported, like `whoAmISchema`'s `subjectType`
+    // below: `SubjectType` has no `*_VALUES` companion in the contracts, and the
+    // `Equal` pin in `schemas.spec.ts` is what stops this drifting from it.
+    subject_type: z.enum(['user', 'service']),
+    subject_id: z.uuid(),
+    subject_name: z.string(),
+    subject_email: z.string().nullable(),
+    role_id: z.uuid(),
+    role_name: z.string(),
+    scope_node_id: z.uuid(),
+    scope_node_name: z.string(),
+    scope_node_path: z.string(),
+    expires_at: timestamp.nullable(),
+    expired: z.boolean(),
+    created_at: timestamp,
+  }),
+);
+
 // ── service accounts (Doc 06 §10) ───────────────────────────────────────────
 
 export const serviceAccountSchema = named(
@@ -627,6 +652,10 @@ export const paginatedUsersSchema = paginated('PaginatedUserDTO', userSchema);
 export const paginatedUsersByRoleSchema = paginated(
   'PaginatedUserByRoleDTO',
   userByRoleSchema,
+);
+export const paginatedRoleBindingsSchema = paginated(
+  'PaginatedRoleBindingDTO',
+  roleBindingSchema,
 );
 export const paginatedServiceAccountsSchema = paginated(
   'PaginatedServiceAccountDTO',

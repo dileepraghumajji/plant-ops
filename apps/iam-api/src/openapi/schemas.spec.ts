@@ -36,6 +36,7 @@ import type {
   NavPermissionsResult,
   Paginated,
   PermissionDTO,
+  RoleBindingDTO,
   RoleDTO,
   RolePermissionsResponse,
   ScopeTreeResponse,
@@ -70,6 +71,7 @@ import {
   paginatedApplicationsSchema,
   paginatedClientsSchema,
   paginatedPermissionsSchema,
+  paginatedRoleBindingsSchema,
   paginatedRolesSchema,
   paginatedServiceAccountsSchema,
   paginatedUsersByRoleSchema,
@@ -77,6 +79,7 @@ import {
   permissionSchema,
   readinessSchema,
   refFor,
+  roleBindingSchema,
   roleSchema,
   rolePermissionsSchema,
   scopeTreeSchema,
@@ -127,7 +130,7 @@ export type _ResponseSchemasMirrorTheContracts = [
   Expect<Mirrors<typeof clientApplicationSchema, ClientApplicationDTO>>,
   Expect<Mirrors<typeof clientAdminSchema, ClientAdminDTO>>,
 
-  // scopes, roles, users, service accounts
+  // scopes, roles, users, bindings, service accounts
   Expect<Mirrors<typeof scopeTreeSchema, ScopeTreeResponse>>,
   Expect<Mirrors<typeof roleSchema, RoleDTO>>,
   Expect<Mirrors<typeof rolePermissionsSchema, RolePermissionsResponse>>,
@@ -135,6 +138,7 @@ export type _ResponseSchemasMirrorTheContracts = [
   Expect<Mirrors<typeof userDetailSchema, UserDetailDTO>>,
   Expect<Mirrors<typeof userByRoleSchema, UserByRoleDTO>>,
   Expect<Mirrors<typeof bulkUserUploadSchema, BulkUserUploadResponse>>,
+  Expect<Mirrors<typeof roleBindingSchema, RoleBindingDTO>>,
   Expect<Mirrors<typeof serviceAccountSchema, ServiceAccountDTO>>,
   Expect<Mirrors<typeof serviceAccountSecretSchema, ServiceAccountSecretDTO>>,
 
@@ -150,6 +154,7 @@ export type _ResponseSchemasMirrorTheContracts = [
   Expect<Mirrors<typeof paginatedRolesSchema, Paginated<RoleDTO>>>,
   Expect<Mirrors<typeof paginatedUsersSchema, Paginated<UserDTO>>>,
   Expect<Mirrors<typeof paginatedUsersByRoleSchema, Paginated<UserByRoleDTO>>>,
+  Expect<Mirrors<typeof paginatedRoleBindingsSchema, Paginated<RoleBindingDTO>>>,
   Expect<Mirrors<typeof paginatedServiceAccountsSchema, Paginated<ServiceAccountDTO>>>,
 ];
 
