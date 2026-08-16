@@ -37,13 +37,14 @@
  *
  * - **Rate limiting is off.** These cases make dozens of calls.
  * - **The grants cache is cleared between cases**, through the same
- *   `GrantsCacheService.bump()` that Session 22 will call from every mutation in
- *   Doc 04 §7's table. Until that wiring exists, a binding written here would
- *   otherwise be invisible behind an entry cached by the previous case — which
- *   is precisely the gap Session 22 closes, stated here as a `beforeEach`
- *   rather than left as a flake. Where Redis is not running, every read is a
- *   miss and the bump is a no-op; the matrix is identical either way, which is
- *   the point of resolving from Postgres on a miss.
+ *   `GrantsCacheService.bump()` that Session 22 now calls from every mutation in
+ *   Doc 04 §7's table. Still needed after that wiring, and for a reason peculiar
+ *   to this suite rather than a gap in it: the bindings here are written to the
+ *   database *directly* (see above), so no service runs and no invalidation
+ *   fires. `invalidation.integration.spec.ts` is where the wiring itself is
+ *   proven, over HTTP. Where Redis is not running, every read is a miss and the
+ *   bump is a no-op; the matrix is identical either way, which is the point of
+ *   resolving from Postgres on a miss.
  * - **Nothing else.** The validation pipe, the RLS context, the auth guard and
  *   the error envelope are the shipped ones.
  */
@@ -684,7 +685,11 @@ function subjectsOf(tenant: Tenant): SubjectRef[] {
   ];
 }
 
-/** What Session 22 will do from the mutation itself — see the header. */
+/**
+ * What Session 22 does from the mutation itself — but this suite writes its
+ * bindings straight to the database, so nothing fires and it does it by hand.
+ * See the header.
+ */
 async function bumpAll(cache: GrantsCacheService, tenant: Tenant): Promise<void> {
   for (const subject of subjectsOf(tenant)) await cache.bump(subject);
 }

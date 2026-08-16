@@ -19,10 +19,28 @@ import { markClaimsVerified, type VerifiedClaims } from '@plantops/db';
 import { randomUUID } from 'node:crypto';
 import type { EntityManager } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
+import type { GrantInvalidationService } from '../authz/invalidation.service';
 import { runInTransactionContext } from '../common/transaction-context';
 import type { DatabaseService } from '../database/database.service';
 import { FakeDatabaseService, type RecordedQuery } from '../testing/app-harness';
 import { RolesService } from './roles.service';
+
+/**
+ * A stub, because `remove` must never call it during the transaction.
+ *
+ * Its publish is registered with `afterCommit()`, and `runInTransactionContext`
+ * collects those callbacks without running them — so a stub that throws would
+ * still pass. `subjectsBoundToRole` is the one that would show up here, and it
+ * is the method `remove` deliberately does *not* use: the cascade's subjects are
+ * derived from the binding rows it already read, which is what keeps the query
+ * count flat in the assertion below.
+ */
+const invalidation = {
+  subjectsBoundToRole: () => {
+    throw new Error('remove() must derive its subjects from the bindings it read');
+  },
+  publish: async () => undefined,
+} as unknown as GrantInvalidationService;
 
 const claims: VerifiedClaims = markClaimsVerified({
   cid: randomUUID(),
@@ -39,12 +57,12 @@ const claims: VerifiedClaims = markClaimsVerified({
  * administrator check, the role, its bindings, and the count of mappings the
  * cascade will take.
  */
-async function auditStatementsForDelete(
+async function deleteRole(
   bindingCount: number,
-): Promise<RecordedQuery[]> {
+): Promise<{ audits: RecordedQuery[]; statements: number }> {
   const database = new FakeDatabaseService();
   const audit = new AuditService(database as unknown as DatabaseService);
-  const service = new RolesService(audit);
+  const service = new RolesService(audit, invalidation);
   const roleId = randomUUID();
 
   database.rows.push(
@@ -78,13 +96,26 @@ async function auditStatementsForDelete(
   );
   expect(removed).toBe(true);
 
-  return database.queries.filter((query) => query.sql.includes('write_audit'));
+  return {
+    audits: database.queries.filter((query) => query.sql.includes('write_audit')),
+    statements: database.queries.length,
+  };
 }
 
 describe('RolesService.remove — the cascade’s audit cost', () => {
   it('issues one statement for the bindings however many there are', async () => {
-    const [smallBatch, smallSummary, ...smallExtra] = await auditStatementsForDelete(2);
-    const [wideBatch, wideSummary, ...wideExtra] = await auditStatementsForDelete(500);
+    const small = await deleteRole(2);
+    const wide = await deleteRole(500);
+    const [smallBatch, smallSummary, ...smallExtra] = small.audits;
+    const [wideBatch, wideSummary, ...wideExtra] = wide.audits;
+
+    // The whole property, stated as invariance rather than as a magic number:
+    // deleting a role bound at 500 subjects costs exactly what deleting one
+    // bound at two costs. Session 22 hung an invalidation off this path
+    // (Doc 04 §7, "role deleted → all subjects bound to that role") and it had
+    // to come for free — the affected subjects are the binding rows already
+    // read, not a query of their own.
+    expect(wide.statements).toBe(small.statements);
 
     // Two statements either way: the batch of `role_binding.deleted` records,
     // and the single `role.deleted` summary that follows the delete.
@@ -100,7 +131,7 @@ describe('RolesService.remove — the cascade’s audit cost', () => {
   });
 
   it('issues no batch at all when the role had no bindings', async () => {
-    const statements = await auditStatementsForDelete(0);
+    const { audits: statements } = await deleteRole(0);
 
     // An empty batch is a no-op that writes no statement, so what is left is the
     // summary alone — the shape `roles.integration.spec.ts` asserts from the

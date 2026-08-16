@@ -25,6 +25,7 @@ import { AuthFunctions1786406400012 } from './0012-auth-functions.js';
 import { RefreshRotation1786406400013 } from './0013-refresh-rotation.js';
 import { PasswordResetAccountState1786406400014 } from './0014-password-reset-account-state.js';
 import { ServiceAccountAuth1786406400015 } from './0015-service-account-auth.js';
+import { BindingExpirySweep1786406400016 } from './0016-binding-expiry-sweep.js';
 
 export { ENUM_VALUES, Extensions1786406400001 } from './0001-extensions-enums.js';
 export { RegistryTables1786406400002 } from './0002-registry-tables.js';
@@ -83,6 +84,13 @@ export {
   SERVICE_TOKEN_FAILURE_REASONS,
   type ServiceTokenFailureReason,
 } from './0015-service-account-auth.js';
+export {
+  BindingExpirySweep1786406400016,
+  EXPIRY_SWEEP_INDEX,
+  EXPIRY_SWEPT_AT_COLUMN,
+  ROLE_BINDING_EXPIRED_ACTION,
+  SWEEP_EXPIRED_BINDINGS_SIGNATURE,
+} from './0016-binding-expiry-sweep.js';
 
 export const migrations = [
   Extensions1786406400001,
@@ -100,4 +108,5 @@ export const migrations = [
   RefreshRotation1786406400013,
   PasswordResetAccountState1786406400014,
   ServiceAccountAuth1786406400015,
+  BindingExpirySweep1786406400016,
 ] as const;

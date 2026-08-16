@@ -46,6 +46,9 @@ describe('migration chain', () => {
       'RefreshRotation1786406400013',
       'PasswordResetAccountState1786406400014',
       'ServiceAccountAuth1786406400015',
+      // Session 22's sweep column and its definer function. Last because it
+      // calls `write_audit` (0010) and adds a column to `role_binding` (0004).
+      'BindingExpirySweep1786406400016',
     ]);
   });
 

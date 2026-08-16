@@ -56,17 +56,27 @@
  * tenant's role is invisible rather than forbidden and comes back as the same 404
  * a nonexistent id gets (Doc 06 §2).
  *
- * ## What is not here yet
+ * ## Invalidation
  *
- * Cache invalidation. Changing a role's permissions changes the effective grants
- * of every subject bound to it, which is a row in Doc 04 §7's table — Session 22
- * wires it here, once Session 21 has a cache to invalidate.
+ * Two of Doc 04 §7's rows are this service's, and both are *role-level*: editing
+ * a role's permissions and deleting a role each change the effective grants of
+ * every subject bound to it. That is the widest fan-out in the table, and the
+ * only place in the application where the affected set has to be enumerated
+ * rather than named — see `authz/invalidation.service.ts` for why enumeration
+ * beat a second version counter.
+ *
+ * The two capture their subjects at different moments, deliberately.
+ * `setPermissions` reads them after its write, because nothing it does changes
+ * who is bound; `remove` derives them from the binding rows it already read
+ * *before* the delete, because `role_binding` cascades and a lookup afterwards
+ * would find nobody. Both publish from `afterCommit()`.
  */
 
 import { Injectable } from '@nestjs/common';
 import {
   normalizePagination,
   paginated,
+  SubjectType,
   type Paginated,
   type RoleDTO,
   type RolePermissionDTO,
@@ -75,9 +85,13 @@ import {
 import { IAM_SCHEMA, type VerifiedClaims } from '@plantops/db';
 import { AUDIT_ACTIONS } from '../audit/audit-actions';
 import { AuditService } from '../audit/audit.service';
+import {
+  GrantInvalidationService,
+  type AffectedSubject,
+} from '../authz/invalidation.service';
 import { assertAdministrator } from '../common/administrator';
 import { IamException } from '../common/iam.exception';
-import { entityManager } from '../common/transaction-context';
+import { afterCommit, entityManager } from '../common/transaction-context';
 import { rethrowAsConflict } from '../registry/conflict';
 
 const S = `"${IAM_SCHEMA}"`;
@@ -183,7 +197,10 @@ export interface UpdateRoleInput {
 
 @Injectable()
 export class RolesService {
-  constructor(private readonly audit: AuditService) {}
+  constructor(
+    private readonly audit: AuditService,
+    private readonly invalidation: GrantInvalidationService,
+  ) {}
 
   /**
    * Creates a role for the caller's own tenant (Doc 06 §7).
@@ -392,6 +409,18 @@ export class RolesService {
       [id],
     )) as { mapped: number }[];
 
+    // Doc 04 §7, "role deleted → all subjects bound to that role". Captured
+    // here, before the `DELETE` below, and this is the ordering that matters:
+    // `role_binding` cascades on the role's foreign key (migration 0004), so a
+    // lookup afterwards would find an empty set and invalidate nobody — every
+    // one of these people would keep the deleted role's permissions until their
+    // cache entry expired.
+    //
+    // Derived from `bindings` rather than queried again: those rows are the
+    // cascade, they were read in the same transaction, and asking twice would
+    // let the audit trail and the invalidation disagree about who was affected.
+    const subjects = affectedSubjects(bindings);
+
     // One statement for the whole cascade, however wide it is: the role row is
     // still present and lockable until the delete below, so the interval this
     // holds it for should not scale with the number of subjects bound to it.
@@ -429,6 +458,13 @@ export class RolesService {
         /** Grants revoked, each with its own record above. */
         bindings_deleted: bindings.length,
       },
+    );
+
+    afterCommit(() =>
+      this.invalidation.publish(claims.cid, subjects, {
+        cause: 'role.deleted',
+        roleId: role.id,
+      }),
     );
 
     return true;
@@ -539,6 +575,25 @@ export class RolesService {
           removed: removedKeys,
           total: mapped.length,
         },
+      );
+
+      // Doc 04 §7, "role_permission changed → all subjects bound to that role".
+      // Inside the `if`, so an idempotent re-submission of the current set
+      // invalidates nothing — the same condition that governs whether this is an
+      // audited event at all. A no-op edit that flushed every holder's cache
+      // would make the Doc 09 §3.2 permission picker's save button a
+      // denial-of-service on the tenant's own hot path.
+      //
+      // Enumerated after the write rather than before it, unlike `remove`:
+      // nothing here cascades, so the set of bound subjects is the same on both
+      // sides of the statement, and reading it later keeps it next to the
+      // publish it feeds.
+      const subjects = await this.invalidation.subjectsBoundToRole(claims.cid, role.id);
+      afterCommit(() =>
+        this.invalidation.publish(claims.cid, subjects, {
+          cause: 'role_permission.changed',
+          roleId: role.id,
+        }),
       );
     }
 
@@ -719,6 +774,30 @@ function toDto(
     created_at: row.created_at.toISOString(),
     updated_at: row.updated_at.toISOString(),
   };
+}
+
+/**
+ * The distinct subjects behind a set of cascaded bindings (Doc 04 §7).
+ *
+ * Deduplicated, because one person bound to the same role at three plants is
+ * three rows and one cache entry. `AffectedSubject`'s two fields are the whole
+ * key, so a `Map` over the pair is the identity — and the XOR that migration
+ * 0004 enforces is what makes reading whichever column is populated total.
+ */
+function affectedSubjects(
+  bindings: readonly { user_id: string | null; service_account_id: string | null }[],
+): AffectedSubject[] {
+  const distinct = new Map<string, AffectedSubject>();
+
+  for (const binding of bindings) {
+    const subject: AffectedSubject =
+      binding.user_id === null
+        ? { type: SubjectType.SERVICE, id: binding.service_account_id as string }
+        : { type: SubjectType.USER, id: binding.user_id };
+    distinct.set(`${subject.type}:${subject.id}`, subject);
+  }
+
+  return [...distinct.values()];
 }
 
 function toPermissionDto(row: RolePermissionRow): RolePermissionDTO {

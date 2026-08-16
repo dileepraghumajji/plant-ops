@@ -41,8 +41,8 @@ export function runInTransactionContext<T>(
  * Defers `callback` until this request's transaction commits.
  *
  * For anything that publishes a change to the world outside Postgres — a
- * revoked `sid` reaching the cache (Doc 03 §6), and from Session 22 the
- * `perms.invalidated` fan-out after a scope move (Doc 04 §7.1). Running such a
+ * revoked `sid` reaching the cache (Doc 03 §6), and the `perms.invalidated`
+ * fan-out behind every row of Doc 04 §7's table (§7.1). Running such a
  * publish inline is a correctness bug in both directions: a rollback leaves the
  * outside world believing a change that never happened, and a reader racing the
  * commit repopulates its cache from pre-change state.

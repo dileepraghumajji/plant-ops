@@ -44,6 +44,13 @@ class FakeRedis {
       return keys.map((key) => this.values.get(key) ?? null);
     },
 
+    // `pipeline` and `multi` differ in atomicity, not in effect, and nothing
+    // this service does depends on the difference — `bumpMany` chose the
+    // pipeline precisely because independent `INCR`s need no transaction. One
+    // implementation for both keeps the fake from claiming a distinction it does
+    // not model.
+    pipeline: () => this.client.multi(),
+
     multi: () => {
       const queued: Array<() => void> = [];
       const chain = {
@@ -197,6 +204,53 @@ describe('grants cache', () => {
     // already landed.
     await expect(cache.write(SUBJECT, GRANTS, 0)).resolves.toBeUndefined();
     await expect(cache.bump(SUBJECT)).resolves.toBeUndefined();
+  });
+
+  it('invalidates a whole role’s worth of subjects in one round-trip', async () => {
+    const { cache, redis } = createCache();
+
+    // The fan-out shape of Doc 04 §7's role-level rows: `InvalidationService`
+    // resolves "everyone bound to this role" to a subject list and hands it over
+    // whole, rather than looping `bump` per person.
+    const subjects: SubjectRef[] = Array.from({ length: 4 }, (_, index) => ({
+      ...SUBJECT,
+      id: `00000000-0000-4000-8000-00000000000${index}`,
+    }));
+
+    await cache.bumpMany(subjects);
+
+    for (const subject of subjects) {
+      const key = grantsCacheKey(subject.clientId, subject.type, subject.id);
+      expect(redis.values.get(`${key}:v`)).toBe('1');
+    }
+  });
+
+  it('bumps a subject named twice in a batch only once', async () => {
+    const { cache, redis } = createCache();
+
+    // One person bound to the same role at three plants is three binding rows
+    // and one cache entry. Incrementing three times would be harmless but would
+    // mean the batch size tracked bindings rather than subjects.
+    await cache.bumpMany([SUBJECT, SUBJECT, SUBJECT]);
+
+    expect(redis.values.get(VERSION_KEY)).toBe('1');
+  });
+
+  it('does nothing at all for an empty batch', async () => {
+    const { cache, redis } = createCache();
+
+    // A role nobody is bound to still gets its permissions edited. The publish
+    // path short-circuits on this too, so an empty fan-out costs no round-trip.
+    await cache.bumpMany([]);
+
+    expect(redis.values.size).toBe(0);
+  });
+
+  it('never throws out of a batched invalidation either', async () => {
+    const { cache, redis } = createCache();
+    redis.failing = true;
+
+    await expect(cache.bumpMany([SUBJECT])).resolves.toBeUndefined();
   });
 
   it('keeps subjects and tenants in separate entries', async () => {

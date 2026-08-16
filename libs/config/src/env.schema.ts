@@ -102,6 +102,37 @@ export const MAX_LOGIN_MAX_FAILED_ATTEMPTS = 100;
 export const DEFAULT_PASSWORD_RESET_TTL_SECONDS = 3_600;
 export const MAX_PASSWORD_RESET_TTL_SECONDS = 86_400;
 
+/**
+ * The binding-expiry sweep (Doc 04 §7 last row, Doc 01 §4.5).
+ *
+ * **Sixty seconds.** The sweep is not what makes an expired binding stop
+ * working — `resolve()` filters on `expires_at` directly, so the database stops
+ * honouring it on the second it lapses. The sweep exists to evict the *cache*
+ * entries that were written while it was still valid, and the worst case it has
+ * to beat is `GRANTS_CACHE_TTL_SECONDS`, which would evict them anyway. So the
+ * interval is chosen to make the sweep the fast path rather than the safety net:
+ * a minute turns a ten-minute staleness bound into a one-minute one, at the cost
+ * of one index scan over an index that is empty in steady state (migration 0016).
+ *
+ * **Zero disables it**, which is the one place in this file a falsy value is
+ * allowed to mean "off" — unlike `LOGIN_MAX_FAILED_ATTEMPTS`, whose comment
+ * argues the opposite. The difference is what an accidental disable costs. A
+ * disabled lockout removes a control with no backstop behind it; a disabled
+ * sweep falls back to the grants TTL, which is the bound Doc 04 §7 already
+ * accepts by design. Tests need the off switch precisely because it is safe:
+ * a timer firing inside an integration run makes cache assertions
+ * non-deterministic.
+ *
+ * **Five hundred rows per tenant per pass.** A cap so one tenant expiring a
+ * mass-provisioned batch cannot hold the transaction — and the sweep's Redis
+ * fan-out — open behind every other tenant's handful of rows. The remainder is
+ * not lost: it stays `expiry_swept_at is null` and the next pass claims it.
+ */
+export const DEFAULT_EXPIRY_SWEEP_INTERVAL_SECONDS = 60;
+export const MAX_EXPIRY_SWEEP_INTERVAL_SECONDS = 3_600;
+export const DEFAULT_EXPIRY_SWEEP_BATCH_SIZE = 500;
+export const MAX_EXPIRY_SWEEP_BATCH_SIZE = 5_000;
+
 const NODE_ENVS = ['development', 'test', 'production'] as const;
 export type NodeEnv = (typeof NODE_ENVS)[number];
 
@@ -402,6 +433,34 @@ export const envSchema = z.object({
     GRANTS_CACHE_TTL_SECONDS,
     GRANTS_CACHE_MAX_TTL_SECONDS,
   ),
+
+  /**
+   * How often the binding-expiry sweep runs; **0 disables it** (Doc 04 §7).
+   *
+   * Not `seconds()`, which rejects zero — see the constants above for why this
+   * one variable is allowed an off switch when `LOGIN_MAX_FAILED_ATTEMPTS` is
+   * not.
+   */
+  EXPIRY_SWEEP_INTERVAL_SECONDS: z.coerce
+    .number({ error: 'EXPIRY_SWEEP_INTERVAL_SECONDS must be a number of seconds' })
+    .int('EXPIRY_SWEEP_INTERVAL_SECONDS must be a whole number of seconds')
+    .min(0, 'EXPIRY_SWEEP_INTERVAL_SECONDS must not be negative')
+    .max(
+      MAX_EXPIRY_SWEEP_INTERVAL_SECONDS,
+      `EXPIRY_SWEEP_INTERVAL_SECONDS must be at most ${MAX_EXPIRY_SWEEP_INTERVAL_SECONDS} seconds`,
+    )
+    .default(DEFAULT_EXPIRY_SWEEP_INTERVAL_SECONDS),
+
+  /** Rows one sweep pass claims per tenant (migration 0016). */
+  EXPIRY_SWEEP_BATCH_SIZE: z.coerce
+    .number({ error: 'EXPIRY_SWEEP_BATCH_SIZE must be a number' })
+    .int('EXPIRY_SWEEP_BATCH_SIZE must be a whole number')
+    .positive('EXPIRY_SWEEP_BATCH_SIZE must be greater than zero')
+    .max(
+      MAX_EXPIRY_SWEEP_BATCH_SIZE,
+      `EXPIRY_SWEEP_BATCH_SIZE must be at most ${MAX_EXPIRY_SWEEP_BATCH_SIZE}`,
+    )
+    .default(DEFAULT_EXPIRY_SWEEP_BATCH_SIZE),
 
   /**
    * Secret for the very first platform identity (Doc 07 §8). Supplied
