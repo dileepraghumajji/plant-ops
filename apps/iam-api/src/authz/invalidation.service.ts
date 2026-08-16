@@ -12,11 +12,28 @@
  * belong to scope moves, only its worst instance does. That ordering is asserted
  * by the tests of the sessions that call this.
  *
- * Not real: the publish itself. There is no grants cache to invalidate yet —
- * `perms:{clientId}:{sty}:{subjectId}` and its version counter arrive with the
- * resolution engine in Session 21 — so a Redis `publish` to
- * {@link PERMS_INVALIDATED_CHANNEL} today would be a message with no subscriber
- * and no cache behind it. This logs instead.
+ * Not real: the publish itself. This logs.
+ *
+ * Session 21 changed what that costs. The cache now exists —
+ * `perms:{clientId}:{sty}:{subjectId}` and its version counter, in
+ * {@link GrantsCacheService} — so a bind, an unbind, a lock or a scope move
+ * that reaches this method today leaves a live cache entry behind it, and the
+ * subject keeps their pre-change grants until the entry's TTL expires. That is
+ * a real gap and it is bounded rather than open-ended: Doc 04 §6 caps the TTL
+ * at ten minutes for exactly this reason, and §7.1 point 5 states the direction
+ * the residual staleness must fall in.
+ *
+ * Session 22 closes it, and the whole of the closing is inside this file: every
+ * arm of {@link InvalidationReason} becomes a `GrantsCacheService.bump()` over
+ * the subjects it names, plus the Redis `publish` to
+ * {@link PERMS_INVALIDATED_CHANNEL} that tells cache holders in other processes
+ * to do the same. The callers do not change — which is what the argument below
+ * about "a service rather than a callback parameter" bought.
+ *
+ * It is deliberately **not** done here. Doc 04 §7's table has eight rows and
+ * three of them have writers today; wiring those three would make the mechanism
+ * look finished while a role's permissions being edited still went unnoticed,
+ * which is a worse failure than a stub that nobody mistakes for the real thing.
  *
  * ## Why it lives in `authz/` and not beside its callers
  *
