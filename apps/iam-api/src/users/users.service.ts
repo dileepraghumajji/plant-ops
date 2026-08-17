@@ -34,10 +34,12 @@
  *   (`POST /iam/clients/:id/admins`). The rail costs nothing: a second
  *   administrator can always do it, which is also the review the action deserves.
  * - **`is_client_admin` is not writable.** Promoting somebody is an access
- *   grant, and access grants are role bindings (Session 20). Until Session 23
- *   turns tenant administration into an `iam.client.*` binding, this flag *is*
- *   the authorization `assertAdministrator` reads — so a profile form that could
- *   set it would be a privilege-escalation surface disguised as a checkbox.
+ *   grant, and access grants are role bindings (Session 20) — which is now
+ *   literally true: since Session 23 tenant administration *is* a set of
+ *   `iam.client.*` permissions on the "Client Admin" role, and the flag is a
+ *   display shortcut (Doc 01 §3.6) rather than an authorization input. A profile
+ *   form that could set it would still be a privilege-escalation surface
+ *   disguised as a checkbox, so it stays unwritable.
  *
  * ## What creation deliberately does not do
  *
@@ -49,10 +51,10 @@
  * `POST /iam/clients/:id/admins`, where there is nobody yet who could invite the
  * tenant's first administrator.
  *
- * ## Interim authorization, and where tenant isolation actually comes from
+ * ## Authorization, and where tenant isolation actually comes from
  *
- * `assertAdministrator()` in front of every method, replaced in Session 23 by
- * `@RequirePermission('iam.client.user.*')` (`common/administrator.ts`).
+ * `@RequirePermission('iam.client.user.…')` on the routes, checked by
+ * `PermissionGuard` before this service runs (Session 23).
  * Isolation does not depend on it: every statement below runs under the
  * request's RLS context and additionally pins `client_id` to the token's `cid`,
  * so another tenant's user is invisible rather than forbidden and comes back as
@@ -76,7 +78,6 @@ import { IAM_SCHEMA, type VerifiedClaims } from '@plantops/db';
 import { AccountStateService } from '../auth/account-state.service';
 import { AUDIT_ACTIONS } from '../audit/audit-actions';
 import { AuditService } from '../audit/audit.service';
-import { assertAdministrator } from '../common/administrator';
 import { IamException } from '../common/iam.exception';
 import { entityManager } from '../common/transaction-context';
 import { rethrowAsConflict } from '../registry/conflict';
@@ -209,8 +210,6 @@ export class UsersService {
    * neither learns of the other (Doc 01 §3.6).
    */
   async create(claims: VerifiedClaims, input: CreateUserInput): Promise<UserDTO> {
-    await assertAdministrator(claims);
-
     const status = input.status ?? UserStatus.ACTIVE;
 
     let rows: UserRow[];
@@ -259,8 +258,6 @@ export class UsersService {
     claims: VerifiedClaims,
     query: ListUsersQuery = {},
   ): Promise<Paginated<UserDTO>> {
-    await assertAdministrator(claims);
-
     const { page, limit } = normalizePagination(query);
     const { where, parameters } = this.filters(claims, query);
 
@@ -287,8 +284,6 @@ export class UsersService {
    * Returns `null` when no such user is visible to this caller.
    */
   async detail(claims: VerifiedClaims, id: string): Promise<UserDetailDTO | null> {
-    await assertAdministrator(claims);
-
     const row = await this.findRow(claims, id);
     if (row === null) return null;
 
@@ -319,8 +314,6 @@ export class UsersService {
     id: string,
     input: UpdateUserInput,
   ): Promise<UserDetailDTO | null> {
-    await assertAdministrator(claims);
-
     const current = await this.findRow(claims, id);
     if (current === null) return null;
 
@@ -369,8 +362,6 @@ export class UsersService {
     roleId: string,
     query: PaginationQuery = {},
   ): Promise<Paginated<UserByRoleDTO> | null> {
-    await assertAdministrator(claims);
-
     const [role] = (await entityManager().query(
       `select id from ${S}."role" where client_id = $1 and id = $2`,
       [claims.cid, roleId],

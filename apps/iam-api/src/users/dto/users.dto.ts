@@ -7,9 +7,10 @@
  * The stripping matters more here than anywhere else on the client surface,
  * because of what a `user` row carries. `client_id` in a create body would place
  * a person in another tenant; `is_client_admin` would let any administrator mint
- * a second administrator through a profile form — the interim authorization flag
- * of Doc 01 §3.6 is precisely what `assertAdministrator` reads, so a tolerated
- * key there is a privilege-escalation hole rather than an untidy payload. Both
+ * a second administrator through a profile form — Doc 01 §3.6's shortcut flag is
+ * what the console reads to decide whether to show the client tier at all, so a
+ * tolerated key there is a privilege-escalation hole rather than an untidy
+ * payload. Both
  * are absent below and `users.dto.spec.ts` asserts that they are dropped rather
  * than merely ignored.
  *

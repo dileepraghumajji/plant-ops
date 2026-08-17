@@ -18,9 +18,14 @@
  *   Doc 01 §3.7. Its secret comes from the environment and is never written to
  *   the database, the audit payload, or the log.
  * - **A system `role` and a `role_binding`** tying the account to the platform
- *   root. The role carries no permissions yet: `iam.platform.*` arrives when the
- *   IAM seeds its own manifest through the real endpoint in Session 23. That is
- *   deliberate dogfooding, not an omission.
+ *   root. The role carries no permissions *here*: `iam.platform.*` is mapped
+ *   onto it by migration 0017, which registers the IAM as an application in its
+ *   own registry — and only because the upload that would otherwise create those
+ *   permissions is itself gated on one of them. Everything past that minimum,
+ *   the admin console's navigation included, arrives through the real manifest
+ *   endpoint (`tools/seed-iam-manifest.ts`). That split is deliberate
+ *   dogfooding, not an omission; 0017's header sets out where the line falls
+ *   and why.
  *
  * **Idempotent.** Every insert is `on conflict do nothing` / guarded, so a
  * re-run is a no-op rather than a duplicate-key failure — the migration may be

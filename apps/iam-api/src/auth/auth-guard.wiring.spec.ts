@@ -14,11 +14,15 @@
  */
 
 import { Controller, Get } from '@nestjs/common';
+import { NoPermissionRequired } from '@plantops/auth-kit';
 import { revokedSessionKey } from '@plantops/contracts';
 import { IamErrorCode, type IamErrorResponse } from '@plantops/contracts';
 import { type Harness, createHarness } from '../testing/app-harness';
 
 /** No `@Public()`, and no decorators at all — the default posture. */
+// A fixture controller for a spec about something else. The pipeline it
+// runs through is the real one, so an ungated route still has to say so.
+@NoPermissionRequired('test fixture')
 @Controller('__guarded')
 class UndecoratedController {
   @Get()

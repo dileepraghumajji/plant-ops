@@ -35,6 +35,7 @@
  * `grants.util.spec.ts` is where it is discharged.
  */
 
+import { coversPath } from '@plantops/auth-kit';
 import type { PermissionKey, ResolvedGrants, ScopePath } from '@plantops/contracts';
 import { isWithin } from '../scopes/path.util';
 
@@ -109,23 +110,15 @@ export function assembleGrants(rows: readonly GrantRow[]): ResolvedGrants {
  * Two questions in the order the spec asks them, and the order carries the
  * deny-by-default asymmetry of §9: the permission dimension is tested by exact
  * membership (holding `dc.approve` says nothing about `dc.create`), and only the
- * scope dimension inherits (an ancestor covers its subtree). Reversing them, or
- * merging them into one pass over `scopes`, would still return the right
- * booleans — but the asymmetry would stop being visible in the code that
- * implements it, which is how it gets "simplified" away later.
+ * scope dimension inherits (an ancestor covers its subtree).
  *
- * O(covering paths for that permission), which minimization keeps small.
+ * Session 23 moved the implementation to `@plantops/auth-kit`'s `coversPath`,
+ * where `PermissionGuard` and every future module reach it (Doc 08 §4, §7). The
+ * name stays because `POST /iam/permissions/check` reads better with it, and
+ * because the alternative — two point checks, one per process — is the way the
+ * IAM and a module end up disagreeing about what a subject may do.
  */
-export function grantsCover(
-  grants: ResolvedGrants,
-  permission: PermissionKey,
-  targetPath: ScopePath,
-): boolean {
-  if (!grants.permissions.includes(permission)) return false;
-
-  const covering = grants.scopes[permission];
-  return covering !== undefined && covering.some((path) => isWithin(targetPath, path));
-}
+export const grantsCover = coversPath;
 
 /**
  * The subset of `grants` whose permission keys are in `keys` — the

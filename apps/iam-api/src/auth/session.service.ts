@@ -224,9 +224,9 @@ export class SessionService implements RevocationFallback {
    *
    * Scoped to the caller's subject as well as to their tenant. RLS already
    * confines the query to the tenant; the subject predicate is this service's
-   * job, and until Session 23's `PermissionGuard` lands there is no path by
-   * which one user lists another's — which is the correct deny-by-default
-   * posture for a screen that exists to *kill* sessions.
+   * job, and there is no path by which one user lists another's — which is the
+   * correct deny-by-default posture for a screen that exists to *kill* sessions,
+   * and the reason the route can carry `@NoPermissionRequired()` honestly.
    */
   async listForSubject(claims: VerifiedClaims): Promise<SessionDTO[]> {
     const column = claims.sty === SubjectType.USER ? 'user_id' : 'service_account_id';

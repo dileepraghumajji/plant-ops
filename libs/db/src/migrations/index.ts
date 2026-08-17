@@ -26,6 +26,7 @@ import { RefreshRotation1786406400013 } from './0013-refresh-rotation.js';
 import { PasswordResetAccountState1786406400014 } from './0014-password-reset-account-state.js';
 import { ServiceAccountAuth1786406400015 } from './0015-service-account-auth.js';
 import { BindingExpirySweep1786406400016 } from './0016-binding-expiry-sweep.js';
+import { IamPermissionSeed1786406400017 } from './0017-iam-permission-seed.js';
 
 export { ENUM_VALUES, Extensions1786406400001 } from './0001-extensions-enums.js';
 export { RegistryTables1786406400002 } from './0002-registry-tables.js';
@@ -91,6 +92,15 @@ export {
   ROLE_BINDING_EXPIRED_ACTION,
   SWEEP_EXPIRED_BINDINGS_SIGNATURE,
 } from './0016-binding-expiry-sweep.js';
+export {
+  IamPermissionSeed1786406400017,
+  CLIENT_ADMIN_ROLE_NAME,
+  IAM_APPLICATION_DESCRIPTION,
+  IAM_APPLICATION_KEY,
+  IAM_APPLICATION_NAME,
+  IAM_CLIENT_PERMISSION_SEED,
+  IAM_PLATFORM_PERMISSION_SEED,
+} from './0017-iam-permission-seed.js';
 
 export const migrations = [
   Extensions1786406400001,
@@ -109,4 +119,5 @@ export const migrations = [
   PasswordResetAccountState1786406400014,
   ServiceAccountAuth1786406400015,
   BindingExpirySweep1786406400016,
+  IamPermissionSeed1786406400017,
 ] as const;

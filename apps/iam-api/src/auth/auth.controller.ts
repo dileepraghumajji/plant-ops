@@ -42,7 +42,7 @@ import {
   ParseUUIDPipe,
   Post,
 } from '@nestjs/common';
-import { Public } from '@plantops/auth-kit';
+import { NoPermissionRequired, Public } from '@plantops/auth-kit';
 import {
   AUTH_ROUTE_PREFIX,
   type AccessTokenResponse,
@@ -248,12 +248,19 @@ export class AuthController {
   @Post('logout')
   @HttpCode(HttpStatus.NO_CONTENT)
   @RateLimit(SESSION_RATE_LIMIT)
+  @NoPermissionRequired(
+    'Ends the caller\'s own session. Gating it on a permission would mean a ' +
+      'subject whose grants were revoked could no longer log out.',
+  )
   async logout(@Claims() claims: VerifiedClaims): Promise<void> {
     await this.auth.logout(claims);
   }
 
   @Get('sessions')
   @RateLimit(SESSION_RATE_LIMIT)
+  @NoPermissionRequired(
+    "Lists the caller's own sessions and nobody else's (Doc 03 §6).",
+  )
   sessionList(@Claims() claims: VerifiedClaims): Promise<SessionDTO[]> {
     return this.sessions.listForSubject(claims);
   }
@@ -261,10 +268,11 @@ export class AuthController {
   /**
    * Force-logout (Doc 03 §6) — the shift-end kill for a shared terminal.
    *
-   * Restricted to the caller's own sessions today. Revoking *another* user's
-   * session is an administrative act that needs `iam.client.user.*` and a scope
-   * check, which is Session 23's `PermissionGuard`; until it exists the honest
-   * position is that nobody has that power, rather than that everybody does.
+   * Restricted to the caller's own sessions. Revoking *another* user's session
+   * is an administrative act, and the place it belongs is the user surface,
+   * which is gated on `iam.client.user.update` and can be scoped. Adding it here
+   * would mean a self-service route that is sometimes administrative, and the
+   * `@NoPermissionRequired()` below would stop being true.
    *
    * A session id that is not the caller's — including one from another tenant,
    * which RLS makes invisible rather than forbidden — answers 404, so the
@@ -273,6 +281,11 @@ export class AuthController {
   @Post('sessions/:id/revoke')
   @HttpCode(HttpStatus.NO_CONTENT)
   @RateLimit(SESSION_RATE_LIMIT)
+  @NoPermissionRequired(
+    "Revokes one of the caller's own sessions; another subject's is a 404. " +
+      'Revoking somebody else\'s is an administrative act that belongs on the ' +
+      'user surface, which is gated.',
+  )
   async revokeSession(
     @Claims() claims: VerifiedClaims,
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,

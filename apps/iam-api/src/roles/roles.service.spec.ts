@@ -54,8 +54,9 @@ const claims: VerifiedClaims = markClaimsVerified({
  * statements it issued.
  *
  * The queued rows are what `remove` reads, in the order it reads them: the
- * administrator check, the role, its bindings, and the count of mappings the
- * cascade will take.
+ * role, its bindings, and the count of mappings the cascade will take. There is
+ * no authorization read among them — since Session 23 that happens in
+ * `PermissionGuard`, before the request transaction this service runs in.
  */
 async function deleteRole(
   bindingCount: number,
@@ -66,7 +67,6 @@ async function deleteRole(
   const roleId = randomUUID();
 
   database.rows.push(
-    [{ platform: true, client_admin: false }],
     [
       {
         id: roleId,

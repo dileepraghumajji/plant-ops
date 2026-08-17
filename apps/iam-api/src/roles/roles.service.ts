@@ -44,13 +44,15 @@
  * grants it administration (`client-admin.service.ts`), and the flag is not
  * settable through this API.
  *
- * ## Interim authorization, and where tenant isolation actually comes from
+ * ## Authorization, and where tenant isolation actually comes from
  *
- * `assertAdministrator()` in front of every method, replaced in Session 23 by
- * `@RequirePermission('iam.client.role.*')` (`common/administrator.ts`) — a
- * guard that resolves grants on its own connection, because at guard time the
- * request transaction that carries the RLS context does not exist yet
- * (`docs/adr/0001-permission-guard-connection-strategy.md`).
+ * `@RequirePermission('iam.client.role.…')` on the routes, checked by
+ * `PermissionGuard` — which resolves grants on its own connection, because at
+ * guard time the request transaction that carries the RLS context does not exist
+ * yet (`docs/adr/0001-permission-guard-connection-strategy.md`). Renaming and
+ * setting a role's permissions carry *different* keys, because they are
+ * different powers: one is cosmetic, the other changes what every subject bound
+ * to the role may do (`authz/iam-permissions.ts`).
  * Isolation does not depend on it: every statement below runs under the request's
  * RLS context and additionally pins `client_id` to the token's `cid`, so another
  * tenant's role is invisible rather than forbidden and comes back as the same 404
@@ -89,7 +91,6 @@ import {
   GrantInvalidationService,
   type AffectedSubject,
 } from '../authz/invalidation.service';
-import { assertAdministrator } from '../common/administrator';
 import { IamException } from '../common/iam.exception';
 import { afterCommit, entityManager } from '../common/transaction-context';
 import { rethrowAsConflict } from '../registry/conflict';
@@ -215,8 +216,6 @@ export class RolesService {
    * just tried to create.
    */
   async create(claims: VerifiedClaims, input: CreateRoleInput): Promise<RoleDTO> {
-    await assertAdministrator(claims);
-
     let rows: RoleRow[];
     try {
       rows = (await entityManager().query(
@@ -252,8 +251,6 @@ export class RolesService {
     claims: VerifiedClaims,
     query: { page?: number; limit?: number } = {},
   ): Promise<Paginated<RoleDTO>> {
-    await assertAdministrator(claims);
-
     const { page, limit } = normalizePagination(query);
 
     const rows = (await entityManager().query(
@@ -295,8 +292,6 @@ export class RolesService {
     id: string,
     input: UpdateRoleInput,
   ): Promise<RoleDTO | null> {
-    await assertAdministrator(claims);
-
     const current = await this.findRow(claims, id);
     if (current === null) return null;
 
@@ -380,8 +375,6 @@ export class RolesService {
    * @throws {IamException} 409 when the role is a system role.
    */
   async remove(claims: VerifiedClaims, id: string): Promise<boolean> {
-    await assertAdministrator(claims);
-
     const role = await this.findRow(claims, id);
     if (role === null) return false;
 
@@ -481,8 +474,6 @@ export class RolesService {
     claims: VerifiedClaims,
     id: string,
   ): Promise<RolePermissionsResponse | null> {
-    await assertAdministrator(claims);
-
     const role = await this.findRow(claims, id);
     if (role === null) return null;
 
@@ -514,8 +505,6 @@ export class RolesService {
     id: string,
     permissionIds: readonly string[],
   ): Promise<RolePermissionsResponse | null> {
-    await assertAdministrator(claims);
-
     const role = await this.findRow(claims, id);
     if (role === null) return null;
 
@@ -734,9 +723,9 @@ export class RolesService {
    * A 409 rather than a 403, because the caller *is* permitted to administer
    * roles — this one simply is not theirs to restructure (Doc 06 §2's conflict:
    * the request contradicts existing data). Mapping permissions is the deliberate
-   * exception and does not come through here: `client-admin.service.ts` seeds the
-   * `Client Admin` role with none, and Session 23 gives it its `iam.client.*` set
-   * through the same `PUT` every other role uses.
+   * exception and does not come through here: `client-admin.service.ts` maps the
+   * `Client Admin` role to the IAM's own `iam.client.*` catalog when it creates
+   * it, through ordinary `role_permission` rows.
    */
   private refuseSystemRole(role: RoleRow, attempted: string): void {
     if (role.is_system) {

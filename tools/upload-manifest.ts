@@ -37,34 +37,33 @@
  * an argument: a secret in `argv` is a secret in the shell history and in every
  * process listing on the box.
  *
- * Once Session 23 gates these routes on `iam.platform.*`, any service account
- * holding those permissions works — hence `--account-key`.
+ * Since Session 23 these routes are gated on `iam.platform.*`, so any service
+ * account holding those permissions works — hence `--account-key`. The
+ * bootstrap account holds them from migration 0017.
+ *
+ * The HTTP half — the error shape, the token exchange, the application lookup —
+ * lives in `tools/iam-api-client.ts`, shared with `seed-iam-manifest.ts`, which
+ * is this tool with its arguments already known.
  */
 
 import type {
   ApplicationDTO,
   ApplicationManifest,
-  IamErrorResponse,
   ManifestDiff,
   ManifestUpsertResponse,
-  Paginated,
 } from '@plantops/contracts';
 import { config as loadDotenv } from 'dotenv';
 import { readFileSync } from 'node:fs';
-
-/**
- * The bootstrap service account of migration 0011.
- *
- * Written out rather than imported from `@plantops/db`, which is the one import
- * that would contradict this file's header: that package is the TypeORM entity
- * graph and the migration chain, and pulling all of it into an HTTP client to
- * read one string would give the tool a database dependency it does not have and
- * a decorator-aware runtime it should not need. The value is a seeded account
- * key — changing it would break every existing deployment's credentials, so it
- * is as frozen as the migration that writes it — and `--account-key` overrides
- * it for any environment where it is not the caller.
- */
-const PLATFORM_SERVICE_ACCOUNT_KEY = 'platform-bootstrap';
+import {
+  type ApiTarget,
+  accountSecretFromEnv,
+  authenticate,
+  call,
+  defaultApiUrl,
+  findApplication,
+  PLATFORM_SERVICE_ACCOUNT_KEY,
+  stripTrailingSlash,
+} from './iam-api-client.js';
 
 const USAGE = `Usage:
   upload-manifest <file.json> [options]
@@ -80,36 +79,9 @@ IAM_ACCOUNT_SECRET), never from an argument.`;
 
 type Flags = Record<string, string | true>;
 
-interface Options {
+interface Options extends ApiTarget {
   file: string;
-  apiUrl: string;
-  accountKey: string;
-  accountSecret: string;
   create: boolean;
-}
-
-/** An API call that came back with the error envelope of Doc 06 §2. */
-class ApiError extends Error {
-  constructor(
-    readonly status: number,
-    readonly body: IamErrorResponse | string,
-  ) {
-    super(ApiError.describe(status, body));
-    this.name = 'ApiError';
-  }
-
-  private static describe(status: number, body: IamErrorResponse | string): string {
-    if (typeof body === 'string') return `HTTP ${status}: ${body}`;
-
-    const { code, message, requestId, details } = body.error;
-    const lines = [`HTTP ${status} ${code}: ${message}`, `request id: ${requestId}`];
-    // The validation details are the whole value of a failed manifest upload —
-    // they name the path in the document, which is what the author has to fix.
-    for (const detail of details ?? []) {
-      lines.push(`  ${detail.field}: ${detail.message}`);
-    }
-    return lines.join('\n');
-  }
 }
 
 // ── arguments and environment ────────────────────────────────────────────────
@@ -133,33 +105,19 @@ function parseArgs(argv: readonly string[]): Options {
     }
   }
 
-  const accountSecret =
-    process.env['IAM_ACCOUNT_SECRET'] ?? process.env['PLATFORM_BOOTSTRAP_SECRET'];
-  if (accountSecret === undefined || accountSecret.trim() === '') {
-    throw new Error(
-      'No account secret. Export PLATFORM_BOOTSTRAP_SECRET (or ' +
-        'IAM_ACCOUNT_SECRET) for the environment you are uploading to.',
-    );
-  }
-
   return {
     file,
     apiUrl: stripTrailingSlash(
-      typeof flags['api-url'] === 'string'
-        ? flags['api-url']
-        : (process.env['IAM_API_URL'] ??
-          `http://localhost:${process.env['PORT'] ?? '3000'}`),
+      typeof flags['api-url'] === 'string' ? flags['api-url'] : defaultApiUrl(),
     ),
     accountKey:
       typeof flags['account-key'] === 'string'
         ? flags['account-key']
         : PLATFORM_SERVICE_ACCOUNT_KEY,
-    accountSecret,
+    accountSecret: accountSecretFromEnv(),
     create: flags['create'] === true,
   };
 }
-
-const stripTrailingSlash = (url: string) => url.replace(/\/+$/, '');
 
 /**
  * Reads the manifest and checks only what this tool itself needs.
@@ -191,77 +149,6 @@ function readManifest(path: string): ApplicationManifest {
   }
 
   return manifest as ApplicationManifest;
-}
-
-// ── the API ──────────────────────────────────────────────────────────────────
-
-async function call<T>(
-  options: Options,
-  token: string | null,
-  method: string,
-  path: string,
-  body?: unknown,
-): Promise<T> {
-  const response = await fetch(`${options.apiUrl}${path}`, {
-    method,
-    headers: {
-      ...(token === null ? {} : { authorization: `Bearer ${token}` }),
-      ...(body === undefined ? {} : { 'content-type': 'application/json' }),
-    },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-  });
-
-  const text = await response.text();
-  if (!response.ok) {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      throw new ApiError(response.status, text.slice(0, 500));
-    }
-    throw new ApiError(response.status, parsed as IamErrorResponse);
-  }
-
-  return JSON.parse(text) as T;
-}
-
-async function authenticate(options: Options): Promise<string> {
-  const { access_token } = await call<{ access_token: string }>(
-    options,
-    null,
-    'POST',
-    '/auth/token',
-    { account_key: options.accountKey, account_secret: options.accountSecret },
-  );
-  return access_token;
-}
-
-/**
- * The application with this manifest's key, or `null`.
- *
- * Paged rather than filtered, because Doc 06 §4's list takes no `key` query
- * parameter and inventing one for a tool would be the wrong way round — the
- * catalog is small enough that walking it is cheap, and the API stays the one
- * the console uses.
- */
-async function findApplication(
-  options: Options,
-  token: string,
-  key: string,
-): Promise<ApplicationDTO | null> {
-  const limit = 100;
-  for (let page = 1; ; page += 1) {
-    const result = await call<Paginated<ApplicationDTO>>(
-      options,
-      token,
-      'GET',
-      `/iam/applications?page=${page}&limit=${limit}`,
-    );
-
-    const found = result.data.find((application) => application.key === key);
-    if (found !== undefined) return found;
-    if (page * limit >= result.total || result.data.length === 0) return null;
-  }
 }
 
 // ── output ───────────────────────────────────────────────────────────────────

@@ -22,11 +22,13 @@
  * ## Everything here runs on the request transaction, under catalog RLS
  *
  * Reads are unconditional for any authenticated subject and writes require
- * `app.is_platform_admin` — the policies of migration 0008. The service-level
- * `assertPlatformAdmin()` in front of each method is the interim gate that turns
- * a would-be policy violation into the 403 Doc 06 §2 asks for; see
- * `common/platform-admin.ts` for what replaces it in Session 23 and why it is not a
- * guard.
+ * `app.is_platform_admin` — the policies of migration 0008. The route-level
+ * `@RequirePermission('iam.platform.…')` in front of each method is what turns a
+ * would-be policy violation into the 403 Doc 06 §2 asks for: without it a
+ * non-platform caller's insert would still fail, but as a `with check` violation
+ * — a 500 with a generic message, since the filter declines to quote a policy
+ * name. Removing the gate would not open a hole; it would make an ordinary
+ * denial look like an outage.
  *
  * Audit goes through `AuditService`, so every record is written in the same
  * transaction as the change it describes (Doc 10 §3).
@@ -44,7 +46,6 @@ import { AUDIT_ACTIONS } from '../audit/audit-actions';
 import { AuditService } from '../audit/audit.service';
 import { entityManager } from '../common/transaction-context';
 import { rethrowAsConflict } from './conflict';
-import { assertPlatformAdmin } from '../common/platform-admin';
 
 const S = `"${IAM_SCHEMA}"`;
 
@@ -81,8 +82,6 @@ export class ApplicationsService {
 
   /** Registers an application (Doc 02 §2 step 1). */
   async create(input: CreateApplicationInput): Promise<ApplicationDTO> {
-    await assertPlatformAdmin();
-
     let rows: ApplicationRow[];
     try {
       rows = (await entityManager().query(
@@ -124,8 +123,6 @@ export class ApplicationsService {
    * reactivate it through the API.
    */
   async list(query: { page?: number; limit?: number } = {}): Promise<Paginated<ApplicationDTO>> {
-    await assertPlatformAdmin();
-
     const { page, limit } = normalizePagination(query);
 
     const rows = (await entityManager().query(
@@ -163,8 +160,6 @@ export class ApplicationsService {
     id: string,
     input: UpdateApplicationInput,
   ): Promise<ApplicationDTO | null> {
-    await assertPlatformAdmin();
-
     const [current] = (await entityManager().query(
       `select ${COLUMNS} from ${S}."application" where id = $1`,
       [id],
@@ -254,9 +249,9 @@ export class ApplicationsService {
    * id that does not exist must be a 404 naming the application rather than a
    * foreign-key violation reported as a 500.
    *
-   * Deliberately **not** gated: the callers are already past
-   * `assertPlatformAdmin()`, and a second check here would be one more place for
-   * the two to disagree once Session 23 replaces the first.
+   * Deliberately **not** gated: every caller is already past the route's own
+   * `@RequirePermission`, and a second check here would be one more place for
+   * the two to disagree.
    */
   async findRow(id: string): Promise<ApplicationRow | null> {
     const [row] = (await entityManager().query(

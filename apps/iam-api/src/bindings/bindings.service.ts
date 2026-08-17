@@ -83,11 +83,16 @@
  * failure Doc 04 §7.1 describes at its worst and which applies here in its
  * ordinary form.
  *
- * ## Interim authorization, and where tenant isolation actually comes from
+ * ## Authorization, and where tenant isolation actually comes from
  *
- * `assertAdministrator()` in front of every method, replaced in Session 23 by
- * `@RequirePermission('iam.client.binding.*')` (`common/administrator.ts`).
- * Isolation does not depend on it: every statement below runs under the
+ * `@RequirePermission('iam.client.binding.…')` on the routes, checked by
+ * `PermissionGuard` before this service runs (Session 23). `POST` additionally
+ * names its target node with `scopeFrom: 'body.scope_node_id'`, so an admin may
+ * only grant *where they themselves hold the permission* — a plant coordinator
+ * bound at Plant B cannot bind anybody at Plant A, which is the whole point of
+ * the WHERE dimension applied to the surface that creates it.
+ *
+ * Isolation does not depend on any of that: every statement below runs under the
  * request's RLS context and additionally pins `client_id` to the token's `cid`.
  */
 
@@ -107,7 +112,6 @@ import {
   GrantInvalidationService,
   type AffectedSubject,
 } from '../authz/invalidation.service';
-import { assertAdministrator } from '../common/administrator';
 import { IamException } from '../common/iam.exception';
 import { afterCommit, entityManager } from '../common/transaction-context';
 import { rethrowAsConflict } from '../registry/conflict';
@@ -233,8 +237,6 @@ export class BindingsService {
     claims: VerifiedClaims,
     input: CreateBindingInput,
   ): Promise<RoleBindingDTO> {
-    await assertAdministrator(claims);
-
     const subject = await this.resolveSubject(claims, input);
 
     const role = await this.roles.findRow(claims, input.role_id);
@@ -320,8 +322,6 @@ export class BindingsService {
     claims: VerifiedClaims,
     query: RoleBindingsQuery = {},
   ): Promise<Paginated<RoleBindingDTO>> {
-    await assertAdministrator(claims);
-
     const { page, limit } = normalizePagination(query);
     const { where, parameters } = filters(claims, query);
 
@@ -358,8 +358,6 @@ export class BindingsService {
    * which is the argument `RolesService.remove` makes for the cascade it audits.
    */
   async remove(claims: VerifiedClaims, id: string): Promise<boolean> {
-    await assertAdministrator(claims);
-
     const binding = await this.findDto(claims, id);
     if (binding === null) return false;
 

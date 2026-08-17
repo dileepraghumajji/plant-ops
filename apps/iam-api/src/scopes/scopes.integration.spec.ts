@@ -65,6 +65,10 @@ import { AUDIT_ACTIONS } from '../audit/audit-actions';
 import { GrantInvalidationService } from '../authz/invalidation.service';
 import { ENV } from '../config/config.module';
 import { createTestApplication } from '../testing/app-harness';
+import {
+  grantIamClientAdmin,
+  seedRootScopeNode,
+} from '../testing/authorization.fixture';
 
 const S = `"${IAM_SCHEMA}"`;
 
@@ -95,6 +99,18 @@ interface Tenant {
   memberEmail: string;
   /** A role, so bindings have something to bind. */
   roleId: string;
+  /**
+   * The tenant's root node, re-seeded before every case.
+   *
+   * Since Session 23 a client route is gated on an `iam.client.*` permission,
+   * which is held through a binding — and a binding needs a node. A tenant with
+   * an empty tree therefore has nowhere to authorize its own administrator from,
+   * which is not a gap: `POST /iam/clients/:id/admins` creates the root *and*
+   * the binding together, precisely so that this state never occurs in
+   * production. The fixture seeds the same pair, and the cases below build the
+   * rest of the tree beneath it over HTTP, as they always did.
+   */
+  rootId: string;
 }
 
 interface Fixture {
@@ -213,8 +229,17 @@ describeWithDb(
      * The names are deliberately hostile: every one of them would be illegal or
      * mangled as an ltree label (Doc 01 §3.5).
      */
+    /** The tenant's seeded root, as the API reports it. */
+    const rootOf = async (token: string): Promise<ScopeNodeDTO> => {
+      const response = await call(token, 'GET', '/iam/scopes');
+      expect(response.status).toBe(200);
+      const [root] = ((await response.json()) as ScopeTreeResponse).tree;
+      expect(root).toBeDefined();
+      return root as ScopeNodeDTO;
+    };
+
     const buildTree = async (token: string) => {
-      const group = await created(token, { kind: 'group', name: 'Acme Group' });
+      const group = await rootOf(token);
       const otherGroup = await created(token, {
         parent_id: group.id,
         kind: 'group',
@@ -385,7 +410,7 @@ describeWithDb(
         // same 409 an id that exists nowhere would get, so the response cannot
         // be used to discover what another client's tree contains (Doc 06 §2).
         const otherToken = await asAdmin(fixture.other);
-        const foreign = await created(otherToken, { kind: 'group', name: 'Other' });
+        const foreign = await rootOf(otherToken);
 
         const across = await call(token, 'POST', '/iam/scopes', {
           parent_id: foreign.id,
@@ -410,7 +435,7 @@ describeWithDb(
 
       it('stops at the documented maximum depth', async () => {
         const token = await asAdmin();
-        let parent = await created(token, { kind: 'group', name: 'Root' });
+        let parent = await rootOf(token);
 
         for (let depth = 2; depth <= MAX_SCOPE_TREE_DEPTH; depth++) {
           parent = await created(token, {
@@ -531,7 +556,9 @@ describeWithDb(
         // the old one. This is the whole meaning of "access follows the tree".
         expect(await bindingsUnder(fixture.acme, moved.path)).toBe(2);
         expect(await bindingsUnder(fixture.acme, tree.otherGroup.path)).toBe(2);
-        expect(await bindingsUnder(fixture.acme, tree.group.path)).toBe(2);
+        // Three at the root: the same two, plus the administrator's own grant
+        // there — the binding that authorized this move (Session 23).
+        expect(await bindingsUnder(fixture.acme, tree.group.path)).toBe(3);
       });
 
       it('publishes the invalidation only after the move has committed', async () => {
@@ -598,10 +625,7 @@ describeWithDb(
       it('refuses a new parent belonging to another tenant', async () => {
         const token = await asAdmin();
         const tree = await buildTree(token);
-        const foreign = await created(await asAdmin(fixture.other), {
-          kind: 'group',
-          name: 'Other',
-        });
+        const foreign = await rootOf(await asAdmin(fixture.other));
 
         const response = await call(token, 'PATCH', `/iam/scopes/${tree.plant.id}`, {
           parent_id: foreign.id,
@@ -724,7 +748,7 @@ describeWithDb(
         const acmeToken = await asAdmin();
         const otherToken = await asAdmin(fixture.other);
         const mine = await buildTree(acmeToken);
-        const theirs = await created(otherToken, { kind: 'group', name: 'Other Group' });
+        const theirs = await rootOf(otherToken);
 
         const response = await call(otherToken, 'GET', '/iam/scopes');
         const body = (await response.json()) as ScopeTreeResponse;
@@ -780,6 +804,8 @@ async function seedTenant(
     adminUserId: randomUUID(),
     memberEmail: `member-${label}-${suffix}@example.test`,
     roleId: randomUUID(),
+    // Replaced by `authorizeAdmin` below, and again before every case.
+    rootId: '',
   };
 
   await elevate(admin, tenant.clientId);
@@ -810,7 +836,23 @@ async function seedTenant(
     [tenant.roleId, tenant.clientId],
   );
 
+  await authorizeAdmin(admin, tenant);
   return tenant;
+}
+
+/**
+ * Re-seeds the tenant's root node and the administrator's grant over it.
+ *
+ * Called from `seedTenant` and again from `clearTrees`, because clearing the
+ * tree necessarily clears the binding that the next case's very first request
+ * is authorized by.
+ */
+async function authorizeAdmin(admin: DataSource, tenant: Tenant): Promise<void> {
+  const root = await seedRootScopeNode(admin, tenant.clientId, 'Fixture Root');
+  tenant.rootId = root.id;
+  await grantIamClientAdmin(admin, tenant.clientId, root.id, {
+    userId: tenant.adminUserId,
+  });
 }
 
 /**
@@ -896,6 +938,9 @@ async function clearTrees(admin: DataSource, tenants: readonly Tenant[]): Promis
     await admin.query(`delete from ${S}."audit_trail" where client_id = $1`, [
       tenant.clientId,
     ]);
+    // The tree is what the admin's own authorization hangs off, so putting one
+    // back is part of clearing it.
+    await authorizeAdmin(admin, tenant);
   }
 }
 
@@ -916,6 +961,10 @@ async function purge(admin: DataSource): Promise<void> {
       `delete from ${S}."user_identity" where client_id = $1`,
       `delete from ${S}."user" where client_id = $1`,
       `delete from ${S}."role" where client_id = $1`,
+      // Session 23: the fixture enables the `iam` application for every
+      // tenant it authorizes, and `client` is referenced with `on delete
+      // restrict` (migration 0003).
+      `delete from ${S}."client_application" where client_id = $1`,
     ]) {
       await admin.query(statement, [id]);
     }

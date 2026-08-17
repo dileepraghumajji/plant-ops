@@ -22,6 +22,7 @@
  */
 
 import { Controller, Get } from '@nestjs/common';
+import { NoPermissionRequired } from '@plantops/auth-kit';
 import { IAM_ROUTE_PREFIX } from '@plantops/contracts';
 import { RLS_SETTINGS, type VerifiedClaims } from '@plantops/db';
 import { Claims } from '../common/claims.decorator';
@@ -41,6 +42,12 @@ export interface WhoAmIResponse {
 }
 
 @Controller(IAM_ROUTE_PREFIX)
+@NoPermissionRequired(
+  'Reports the RLS context the caller\'s own token established. It reveals ' +
+    'nothing a subject does not already know about themselves, and gating it ' +
+    'would make the diagnostic unavailable to precisely the subject whose ' +
+    'context is wrong.',
+)
 export class WhoAmIController {
   @Get('whoami')
   async whoami(@Claims() claims: VerifiedClaims): Promise<WhoAmIResponse> {

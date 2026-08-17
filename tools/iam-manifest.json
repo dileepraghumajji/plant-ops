@@ -1,0 +1,166 @@
+{
+  "key": "iam",
+  "name": "PlantOps IAM",
+  "description": "Identity, access and the registry every other PlantOps application is described in.",
+  "permissions": [
+    { "key": "iam.platform.app.create", "name": "Register application", "description": "Add an application to the registry." },
+    { "key": "iam.platform.app.read", "name": "View applications", "description": "List registered applications." },
+    { "key": "iam.platform.app.update", "name": "Edit application", "description": "Rename an application or activate and deactivate it." },
+    { "key": "iam.platform.app.manifest", "name": "Upload manifest", "description": "Upsert an application's permission and navigation catalog from its manifest." },
+    { "key": "iam.platform.permission.create", "name": "Add permissions", "description": "Add atomic permissions to an application's catalog." },
+    { "key": "iam.platform.permission.read", "name": "View permissions", "description": "List an application's permissions." },
+    { "key": "iam.platform.nav.create", "name": "Add navigation nodes", "description": "Add modules, menus and sub-menus to an application's navigation catalog." },
+    { "key": "iam.platform.nav.read", "name": "View navigation", "description": "List an application's navigation tree." },
+    { "key": "iam.platform.nav.map", "name": "Map menu permissions", "description": "Decide which permissions make a navigation node visible." },
+    { "key": "iam.platform.client.create", "name": "Create client", "description": "Provision a new tenant." },
+    { "key": "iam.platform.client.read", "name": "View clients", "description": "List tenants." },
+    { "key": "iam.platform.client.update", "name": "Edit client", "description": "Rename a tenant, or suspend and reactivate it." },
+    { "key": "iam.platform.client.app.enable", "name": "Enable applications", "description": "Give a tenant access to an application." },
+    { "key": "iam.platform.client.app.read", "name": "View enabled applications", "description": "List the applications enabled for a tenant." },
+    { "key": "iam.platform.client.app.update", "name": "Toggle enabled application", "description": "Turn one of a tenant's applications on or off." },
+    { "key": "iam.platform.client.admin.create", "name": "Create client admin", "description": "Create a tenant's initial administrator." },
+    { "key": "iam.platform.audit.read", "name": "Read all audit", "description": "Read the audit trail across every tenant." },
+
+    { "key": "iam.client.scope.create", "name": "Add scope node", "description": "Add a node to the organisation tree." },
+    { "key": "iam.client.scope.read", "name": "View scope tree", "description": "View the tenant's organisation tree." },
+    { "key": "iam.client.scope.update", "name": "Rename or move scope node", "description": "Rename a node, or move it and its subtree." },
+    { "key": "iam.client.scope.delete", "name": "Delete scope node", "description": "Remove a node that has nothing anchored to it." },
+    { "key": "iam.client.role.create", "name": "Create role", "description": "Create a role." },
+    { "key": "iam.client.role.read", "name": "View roles", "description": "List the tenant's roles." },
+    { "key": "iam.client.role.update", "name": "Rename role", "description": "Rename a role." },
+    { "key": "iam.client.role.delete", "name": "Delete role", "description": "Delete a role and the grants that depend on it." },
+    { "key": "iam.client.role.permission.read", "name": "View role permissions", "description": "List a role's permissions." },
+    { "key": "iam.client.role.permission.set", "name": "Set role permissions", "description": "Change what a role grants, everywhere it is bound." },
+    { "key": "iam.client.user.create", "name": "Create user", "description": "Add a person to the tenant." },
+    { "key": "iam.client.user.read", "name": "View users", "description": "List and search users, and see their grants." },
+    { "key": "iam.client.user.update", "name": "Edit user", "description": "Edit a profile, or lock, unlock and disable an account." },
+    { "key": "iam.client.user.bulk_upload", "name": "Bulk upload users", "description": "Create many users at once from a CSV or JSON roster." },
+    { "key": "iam.client.binding.create", "name": "Assign access", "description": "Bind a subject to a role at a scope node." },
+    { "key": "iam.client.binding.read", "name": "View access", "description": "List who holds which role, and where." },
+    { "key": "iam.client.binding.delete", "name": "Revoke access", "description": "Remove a grant." },
+    { "key": "iam.client.svc.create", "name": "Create service account", "description": "Create a machine identity." },
+    { "key": "iam.client.svc.read", "name": "View service accounts", "description": "List machine identities." },
+    { "key": "iam.client.svc.rotate", "name": "Rotate service account secret", "description": "Issue a new secret and invalidate the old one." },
+    { "key": "iam.client.svc.update", "name": "Revoke service account", "description": "Revoke or reactivate a machine identity." },
+    { "key": "iam.client.audit.read", "name": "Read audit", "description": "Read the tenant's own audit trail." }
+  ],
+  "nav": [
+    {
+      "kind": "module",
+      "key": "platform",
+      "label": "Platform",
+      "icon": "building",
+      "children": [
+        {
+          "kind": "menu",
+          "key": "platform.applications",
+          "label": "Applications",
+          "route": "/platform/applications",
+          "icon": "grid",
+          "requires": ["iam.platform.app.read"]
+        },
+        {
+          "kind": "menu",
+          "key": "platform.clients",
+          "label": "Clients",
+          "route": "/platform/clients",
+          "icon": "briefcase",
+          "requires": ["iam.platform.client.read"]
+        },
+        {
+          "kind": "menu",
+          "key": "platform.service-accounts",
+          "label": "Service Accounts",
+          "route": "/platform/service-accounts",
+          "icon": "key",
+          "requires": ["iam.client.svc.read"]
+        },
+        {
+          "kind": "menu",
+          "key": "platform.audit",
+          "label": "Audit",
+          "route": "/platform/audit",
+          "icon": "scroll",
+          "requires": ["iam.platform.audit.read"]
+        }
+      ]
+    },
+    {
+      "kind": "module",
+      "key": "administration",
+      "label": "Administration",
+      "icon": "shield",
+      "children": [
+        {
+          "kind": "menu",
+          "key": "administration.scopes",
+          "label": "Org Structure",
+          "route": "/admin/scopes",
+          "icon": "sitemap",
+          "requires": ["iam.client.scope.read"]
+        },
+        {
+          "kind": "menu",
+          "key": "administration.roles",
+          "label": "Roles",
+          "route": "/admin/roles",
+          "icon": "badge",
+          "requires": ["iam.client.role.read"]
+        },
+        {
+          "kind": "menu",
+          "key": "administration.users",
+          "label": "Users",
+          "icon": "users",
+          "children": [
+            {
+              "kind": "sub_menu",
+              "key": "administration.users.list",
+              "label": "All Users",
+              "route": "/admin/users",
+              "requires": ["iam.client.user.read"]
+            },
+            {
+              "kind": "sub_menu",
+              "key": "administration.users.by-role",
+              "label": "Users by Role",
+              "route": "/admin/users/by-role",
+              "requires": ["iam.client.user.read"]
+            },
+            {
+              "kind": "sub_menu",
+              "key": "administration.users.bulk",
+              "label": "Bulk Upload",
+              "route": "/admin/users/bulk",
+              "requires": ["iam.client.user.bulk_upload"]
+            }
+          ]
+        },
+        {
+          "kind": "menu",
+          "key": "administration.bindings",
+          "label": "Access Assignment",
+          "route": "/admin/access",
+          "icon": "link",
+          "requires": ["iam.client.binding.read"]
+        },
+        {
+          "kind": "menu",
+          "key": "administration.service-accounts",
+          "label": "Service Accounts",
+          "route": "/admin/service-accounts",
+          "icon": "key",
+          "requires": ["iam.client.svc.read"]
+        },
+        {
+          "kind": "menu",
+          "key": "administration.audit",
+          "label": "Audit",
+          "route": "/admin/audit",
+          "icon": "scroll",
+          "requires": ["iam.client.audit.read"]
+        }
+      ]
+    }
+  ]
+}

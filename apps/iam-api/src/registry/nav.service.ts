@@ -56,7 +56,6 @@ import { entityManager } from '../common/transaction-context';
 import { ApplicationsService } from './applications.service';
 import { rethrowAsConflict } from './conflict';
 import { PermissionsService } from './permissions.service';
-import { assertPlatformAdmin } from '../common/platform-admin';
 
 const S = `"${IAM_SCHEMA}"`;
 
@@ -125,7 +124,6 @@ export class NavService {
     applicationId: string,
     inputs: readonly CreateNavNodeInput[],
   ): Promise<NavNodeCatalogDTO[]> {
-    await assertPlatformAdmin();
     await this.requireApplication(applicationId);
 
     // Every node already in this application, so a `parent_key` can name one of
@@ -208,7 +206,6 @@ export class NavService {
    * type for exactly this reason.
    */
   async tree(applicationId: string): Promise<NavCatalogResponse> {
-    await assertPlatformAdmin();
     await this.requireApplication(applicationId);
 
     const rows = (await entityManager().query(
@@ -362,7 +359,6 @@ export class NavService {
     applicationId: string,
     mappings: readonly NavPermissionMapping[],
   ): Promise<ResolvedPair[]> {
-    await assertPlatformAdmin();
     await this.requireApplication(applicationId);
 
     const navRows = (await entityManager().query(

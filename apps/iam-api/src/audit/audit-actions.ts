@@ -153,7 +153,7 @@ export const AUDIT_ACTIONS = {
 
   // ── Authorization (Doc 10 §4) ──────────────────────────────────────────
   //
-  // Written by the `PermissionGuard` denial hook (Session 23), through
+  // Written by `PermissionGuard`, through `authz/denial-auditor.ts` and
   // {@link AuditService.recordDenial} rather than `record` — see there.
   PERMISSION_DENIED: 'authz.permission_denied',
   SCOPE_DENIED: 'authz.scope_denied',

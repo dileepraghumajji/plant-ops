@@ -7,11 +7,12 @@
  * route would return everything the list already does and would be the obvious
  * place for somebody to later "just add" the secret back.
  *
- * Every route is authenticated (the app-wide `AuthGuard`) and additionally
- * checked inside the service, which is where the interim
- * platform-admin-or-client-admin rule lives and why it is not a guard: a guard
- * runs before `TenantContextInterceptor` opens the transaction, so it has no RLS
- * context to check anything against. See `service-accounts.service.ts`.
+ * Every route is authenticated (the app-wide `AuthGuard`) and gated on
+ * `iam.client.svc.…`, which is the key Doc 06 §10 names for this surface. The
+ * platform role holds those four keys too — a platform account managing
+ * platform-level machine identities (Doc 09 §2.4) is administering the platform
+ * *tenant*, which migration 0011 makes a tenant like any other. See
+ * `authz/iam-permissions.ts`.
  *
  * ## Deletion is not here, and that is the spec
  *
@@ -33,6 +34,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import { RequirePermission } from '@plantops/auth-kit';
 import {
   IAM_ROUTE_PREFIX,
   type Paginated,
@@ -40,6 +42,7 @@ import {
   type ServiceAccountSecretDTO,
 } from '@plantops/contracts';
 import type { VerifiedClaims } from '@plantops/db';
+import { IAM_CLIENT_PERMISSIONS as P } from '../authz/iam-permissions';
 import { Claims } from '../common/claims.decorator';
 import { IamException } from '../common/iam.exception';
 import { RateLimit } from '../common/rate-limit.decorator';
@@ -70,6 +73,7 @@ export class ServiceAccountsController {
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @RateLimit(MINTING_RATE_LIMIT)
+  @RequirePermission(P.SVC_CREATE)
   create(
     @Claims() claims: VerifiedClaims,
     @Body() body: CreateServiceAccountDto,
@@ -79,6 +83,7 @@ export class ServiceAccountsController {
 
   @Get()
   @RateLimit(ADMIN_RATE_LIMIT)
+  @RequirePermission(P.SVC_READ)
   list(
     @Claims() claims: VerifiedClaims,
     @Query() query: PaginationDto,
@@ -96,6 +101,7 @@ export class ServiceAccountsController {
   @Post(':id/rotate')
   @HttpCode(HttpStatus.OK)
   @RateLimit(MINTING_RATE_LIMIT)
+  @RequirePermission(P.SVC_ROTATE)
   async rotate(
     @Claims() claims: VerifiedClaims,
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
@@ -108,6 +114,7 @@ export class ServiceAccountsController {
   /** Revokes or reactivates. Idempotent — the same status twice is one event. */
   @Patch(':id')
   @RateLimit(ADMIN_RATE_LIMIT)
+  @RequirePermission(P.SVC_UPDATE)
   async update(
     @Claims() claims: VerifiedClaims,
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,

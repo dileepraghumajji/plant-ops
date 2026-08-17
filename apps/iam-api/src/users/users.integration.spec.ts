@@ -73,6 +73,7 @@ import {
 } from '../auth/password-reset.delivery';
 import { ENV } from '../config/config.module';
 import { createTestApplication } from '../testing/app-harness';
+import { grantIamClientAdmin } from '../testing/authorization.fixture';
 
 const S = `"${IAM_SCHEMA}"`;
 
@@ -1024,6 +1025,13 @@ async function resetTenant(admin: DataSource, tenant: Tenant): Promise<void> {
   await admin.query(`delete from ${S}."audit_trail" where client_id = $1`, [
     tenant.clientId,
   ]);
+  // The administrator's own authorization, last, because the wipes above take
+  // it with them: since Session 23 every route on this surface is gated on an
+  // `iam.client.*` permission, held through a role bound at the tenant root
+  // (`testing/authorization.fixture.ts`).
+  await grantIamClientAdmin(admin, tenant.clientId, tenant.scopeNodeId, {
+    userId: tenant.adminUserId,
+  });
 }
 
 /** Every `s18-` tenant, and everything hanging off it. */

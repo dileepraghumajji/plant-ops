@@ -60,6 +60,10 @@ import { AppModule } from '../app/app.module';
 import { ENV } from '../config/config.module';
 import { SERVICE_ACCOUNT_KEY_PREFIX } from '../auth/service-credentials.util';
 import { createTestApplication } from '../testing/app-harness';
+import {
+  grantIamClientAdmin,
+  seedRootScopeNode,
+} from '../testing/authorization.fixture';
 
 const S = `"${IAM_SCHEMA}"`;
 
@@ -785,6 +789,16 @@ async function seed(admin: DataSource, secretHash: string): Promise<Fixture> {
     );
   }
 
+  // Since Session 23 the surface is gated on `iam.client.svc.*` (Doc 06 §10),
+  // which is held through a role bound at a scope node — so the tenant needs a
+  // root and the administrator needs a grant over it, exactly as
+  // `POST /iam/clients/:id/admins` provides in production. The member gets
+  // nothing, which is what makes the refusal cases below refuse.
+  const root = await seedRootScopeNode(admin, fixture.clientId, 'Session 11 Root');
+  await grantIamClientAdmin(admin, fixture.clientId, root.id, {
+    userId: fixture.adminId,
+  });
+
   return fixture;
 }
 
@@ -792,6 +806,9 @@ async function teardown(admin: DataSource, fixture: Fixture): Promise<void> {
   if (fixture === undefined) return;
 
   await elevate(admin, fixture.clientId);
+  await admin.query(`delete from ${S}."role_binding" where client_id = $1`, [
+    fixture.clientId,
+  ]);
   await admin.query(`delete from ${S}."service_account" where client_id = $1`, [
     fixture.clientId,
   ]);
@@ -802,6 +819,13 @@ async function teardown(admin: DataSource, fixture: Fixture): Promise<void> {
     fixture.clientId,
   ]);
   await admin.query(`delete from ${S}."user" where client_id = $1`, [fixture.clientId]);
+  await admin.query(`delete from ${S}."role" where client_id = $1`, [fixture.clientId]);
+  await admin.query(`delete from ${S}."scope_node" where client_id = $1`, [
+    fixture.clientId,
+  ]);
+  await admin.query(`delete from ${S}."client_application" where client_id = $1`, [
+    fixture.clientId,
+  ]);
   await admin.query(`delete from ${S}."audit_trail" where client_id = $1`, [
     fixture.clientId,
   ]);

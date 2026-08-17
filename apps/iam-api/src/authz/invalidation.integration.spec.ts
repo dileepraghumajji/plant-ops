@@ -93,6 +93,7 @@ import { AppModule } from '../app/app.module';
 import { AUDIT_ACTIONS } from '../audit/audit-actions';
 import { ENV } from '../config/config.module';
 import { createTestApplication } from '../testing/app-harness';
+import { grantIamClientAdmin } from '../testing/authorization.fixture';
 import { ExpirySweepJob } from './expiry-sweep.job';
 import {
   GrantInvalidationService,
@@ -602,9 +603,16 @@ describeWithDb(
           cause: 'client_application.toggled',
           applicationId: fixture.catalog.applicationId,
         });
-        expect(announced[0].subjects).toEqual([
-          { type: SubjectType.USER, id: fixture.acme.memberUserId },
-        ]);
+        // Doc 04 §7's row here is "subjects of that client" — the whole tenant,
+        // not the holders of one role — so the administrator is announced beside
+        // the member: since Session 23 they hold a binding of their own, and a
+        // toggle they are personally unaffected by is still one their cache
+        // entry has to be re-derived after.
+        expect(announced[0].subjects).toEqual(
+          expect.arrayContaining([
+            { type: SubjectType.USER, id: fixture.acme.memberUserId },
+          ]),
+        );
 
         // Doc 04 §4: a disabled app's permissions are simply absent, with no
         // `role_permission` row touched.
@@ -994,6 +1002,13 @@ async function resetTenant(
       [tenant.clientId, current.id, parentId, current.path, name],
     );
   }
+
+  // Last, because the binding wipe above took it: since Session 23 every route
+  // this suite drives is gated on an `iam.client.*` permission, held through a
+  // role bound at the tenant root (`testing/authorization.fixture.ts`).
+  await grantIamClientAdmin(admin, tenant.clientId, tenant.root.id, {
+    userId: tenant.adminUserId,
+  });
 }
 
 /** Undoes a manifest deactivation from the previous case. */

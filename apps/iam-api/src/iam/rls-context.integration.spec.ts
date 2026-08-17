@@ -38,7 +38,7 @@
 
 import { Controller, Get, type INestApplication, Module } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { Public } from '@plantops/auth-kit';
+import { NoPermissionRequired, Public } from '@plantops/auth-kit';
 import { loadEnv } from '@plantops/config';
 import { SubjectType, type IamErrorResponse } from '@plantops/contracts';
 import {
@@ -75,6 +75,9 @@ const describeWithDb = configured ? describe : describe.skip;
  * an unauthenticated request has to be able to look at the settings it should
  * not have inherited.
  */
+// A fixture controller for a spec about something else. The pipeline it
+// runs through is the real one, so an ungated route still has to say so.
+@NoPermissionRequired('test fixture')
 @Controller('__ctx')
 @Public()
 class ContextProbeController {

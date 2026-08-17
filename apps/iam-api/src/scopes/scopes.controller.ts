@@ -30,10 +30,17 @@
  *
  * ## Authorization
  *
- * Authenticated by the app-wide `AuthGuard`, then checked inside the service —
- * not as a guard, because a guard runs before the transaction that carries the
- * RLS context exists (`common/administrator.ts`). Interim until Session 23
- * replaces it with `@RequirePermission('iam.client.scope.*')`.
+ * Authenticated by the app-wide `AuthGuard`, then authorized by
+ * `PermissionGuard` from the `@RequirePermission('iam.client.scope.…')` on each
+ * route below (Doc 04 §8). The guard carries its own connection and RLS context
+ * rather than the request's, because it runs before the interceptor opens one
+ * (`docs/adr/0001-permission-guard-connection-strategy.md`).
+ *
+ * `PATCH` and `DELETE` name the node itself with `scopeFrom: 'params.id'`, so an
+ * admin restructures only the part of the tree they hold over. `POST` names the
+ * parent and tolerates its absence: a tenant's first root is created with its
+ * first administrator (`clients/client-admin.service.ts`), because a tenant with
+ * no tree has nowhere to bind one.
  */
 
 import {
@@ -48,12 +55,14 @@ import {
   Patch,
   Post,
 } from '@nestjs/common';
+import { RequirePermission } from '@plantops/auth-kit';
 import {
   IAM_ROUTE_PREFIX,
   type ScopeNodeDTO,
   type ScopeTreeResponse,
 } from '@plantops/contracts';
 import type { VerifiedClaims } from '@plantops/db';
+import { IAM_CLIENT_PERMISSIONS as P } from '../authz/iam-permissions';
 import { Claims } from '../common/claims.decorator';
 import { IamException } from '../common/iam.exception';
 import { RateLimit } from '../common/rate-limit.decorator';
@@ -82,6 +91,10 @@ export class ScopesController {
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @RateLimit(SCOPES_RATE_LIMIT)
+  @RequirePermission(P.SCOPE_CREATE, {
+    scopeFrom: 'body.parent_id',
+    scopeOptional: true,
+  })
   create(
     @Claims() claims: VerifiedClaims,
     @Body() body: CreateScopeNodeDto,
@@ -91,6 +104,7 @@ export class ScopesController {
 
   @Get()
   @RateLimit(SCOPES_RATE_LIMIT)
+  @RequirePermission(P.SCOPE_READ)
   tree(@Claims() claims: VerifiedClaims): Promise<ScopeTreeResponse> {
     return this.scopes.tree(claims);
   }
@@ -98,6 +112,7 @@ export class ScopesController {
   /** Rename and/or move. See the header for why the isolation lives here. */
   @Patch(':id')
   @RateLimit(MOVE_RATE_LIMIT)
+  @RequirePermission(P.SCOPE_UPDATE, { scopeFrom: 'params.id' })
   @Transactional({ isolation: 'REPEATABLE READ', retries: 2 })
   async update(
     @Claims() claims: VerifiedClaims,
@@ -120,6 +135,7 @@ export class ScopesController {
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @RateLimit(SCOPES_RATE_LIMIT)
+  @RequirePermission(P.SCOPE_DELETE, { scopeFrom: 'params.id' })
   async remove(
     @Claims() claims: VerifiedClaims,
     @Param('id', uuidParam()) id: string,

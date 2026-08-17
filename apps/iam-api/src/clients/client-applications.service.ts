@@ -37,7 +37,6 @@ import { AUDIT_ACTIONS } from '../audit/audit-actions';
 import { AuditService, type AuditEntry } from '../audit/audit.service';
 import { GrantInvalidationService } from '../authz/invalidation.service';
 import { IamException } from '../common/iam.exception';
-import { assertPlatformAdmin } from '../common/platform-admin';
 import { afterCommit, entityManager } from '../common/transaction-context';
 import { ClientsService } from './clients.service';
 
@@ -133,8 +132,6 @@ export class ClientApplicationsService {
     clientId: string,
     inputs: readonly EnableApplicationInput[],
   ): Promise<ClientApplicationDTO[]> {
-    await assertPlatformAdmin();
-
     const client = await this.clients.findRow(clientId);
     if (client === null) throw IamException.notFound('The client');
 
@@ -222,8 +219,6 @@ export class ClientApplicationsService {
    * is rendering all of them at once.
    */
   async list(clientId: string): Promise<ClientApplicationDTO[]> {
-    await assertPlatformAdmin();
-
     const client = await this.clients.findRow(clientId);
     if (client === null) throw IamException.notFound('The client');
 
@@ -259,8 +254,6 @@ export class ClientApplicationsService {
     applicationId: string,
     input: UpdateClientApplicationInput,
   ): Promise<ClientApplicationDTO | null> {
-    await assertPlatformAdmin();
-
     const client = await this.clients.findRow(clientId);
     if (client === null) throw IamException.notFound('The client');
 

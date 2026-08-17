@@ -19,7 +19,7 @@
 
 import { Body, Controller, HttpCode, Post } from '@nestjs/common';
 import type { ArgumentMetadata } from '@nestjs/common';
-import { Public } from '@plantops/auth-kit';
+import { NoPermissionRequired, Public } from '@plantops/auth-kit';
 import { IamErrorCode, type IamErrorResponse } from '@plantops/contracts';
 import { z } from 'zod';
 import { type Harness, createHarness } from '../testing/app-harness';
@@ -43,6 +43,9 @@ interface PlainWidget {
 /** The same erasure by a different route — a `type` alias over the schema. */
 type AliasedWidget = z.infer<typeof widgetSchema>;
 
+// A fixture controller for a spec about something else. The pipeline it
+// runs through is the real one, so an ungated route still has to say so.
+@NoPermissionRequired('test fixture')
 @Controller('__validation')
 @Public()
 @SkipTransaction()

@@ -43,13 +43,16 @@
  *
  * ## Authorization
  *
- * Authenticated by the app-wide `AuthGuard`, then checked inside the service —
- * not as a guard, because a guard runs before the transaction that carries the
- * RLS context exists (`common/administrator.ts`). Interim until Session 23
- * replaces it with `@RequirePermission('iam.client.binding.*')`, whose guard
- * carries its own connection and RLS context rather than the request's
- * (`docs/adr/0001-permission-guard-connection-strategy.md`) — the routes, status
- * codes and envelopes below are unaffected by the swap.
+ * Authenticated by the app-wide `AuthGuard`, then authorized by
+ * `PermissionGuard` from the `@RequirePermission('iam.client.binding.…')` on each
+ * route below (Doc 04 §8). The guard carries its own connection and RLS context
+ * rather than the request's, because it runs before the interceptor opens one
+ * (`docs/adr/0001-permission-guard-connection-strategy.md`).
+ *
+ * `POST` additionally names its target with `scopeFrom: 'body.scope_node_id'`,
+ * so an admin may only grant **where they themselves hold the permission** — a
+ * coordinator bound at Plant B cannot bind anybody at Plant A. Without that, the
+ * WHERE dimension would be advisory on the one surface that creates it.
  */
 
 import {
@@ -64,12 +67,14 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import { RequirePermission } from '@plantops/auth-kit';
 import {
   IAM_ROUTE_PREFIX,
   type Paginated,
   type RoleBindingDTO,
 } from '@plantops/contracts';
 import type { VerifiedClaims } from '@plantops/db';
+import { IAM_CLIENT_PERMISSIONS as P } from '../authz/iam-permissions';
 import { Claims } from '../common/claims.decorator';
 import { IamException } from '../common/iam.exception';
 import { RateLimit } from '../common/rate-limit.decorator';
@@ -91,6 +96,7 @@ export class BindingsController {
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @RateLimit(BINDINGS_RATE_LIMIT)
+  @RequirePermission(P.BINDING_CREATE, { scopeFrom: 'body.scope_node_id' })
   @Transactional({ isolation: 'REPEATABLE READ', retries: 2 })
   create(
     @Claims() claims: VerifiedClaims,
@@ -102,6 +108,7 @@ export class BindingsController {
   /** The bindings list, filterable by user, role and scope (Doc 06 §9). */
   @Get()
   @RateLimit(BINDINGS_RATE_LIMIT)
+  @RequirePermission(P.BINDING_READ)
   list(
     @Claims() claims: VerifiedClaims,
     @Query() query: RoleBindingsQueryDto,
@@ -119,6 +126,7 @@ export class BindingsController {
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @RateLimit(BINDINGS_RATE_LIMIT)
+  @RequirePermission(P.BINDING_DELETE)
   async remove(
     @Claims() claims: VerifiedClaims,
     @Param('id', uuidParam()) id: string,
