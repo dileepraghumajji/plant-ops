@@ -139,6 +139,18 @@ export class ManifestService {
     await this.applyMappings(applicationId, plan);
     await this.deactivate(applicationId, plan, navIdByKey);
 
+    // Doc 05 §6's `app_nav_version`, for the nav edits this file makes itself.
+    // `applyMappings` delegates to `NavService.map`/`unmap`, which bump on their
+    // own account, so only the three statements with no imperative counterpart
+    // are counted here: a created node, an updated one, a deactivated one. A
+    // double bump on an upload that did both is two `INCR`s and no difference to
+    // any reader, which is a better trade than a condition trying to predict
+    // what the delegated calls did.
+    this.nav.invalidateCatalog(
+      applicationId,
+      plan.nav.created.length + plan.nav.updated.length + plan.nav.deactivated.length,
+    );
+
     // The whole diff, not a count of it. This one record is where an operator
     // looks to answer "what did that upload do", and Doc 09 §2.1 shows the
     // operator the same value before they confirm it — the record should be what

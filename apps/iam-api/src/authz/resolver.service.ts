@@ -74,7 +74,7 @@ import {
   type ResolvedGrants,
   type ScopePath,
 } from '@plantops/contracts';
-import { IAM_SCHEMA } from '@plantops/db';
+import { IAM_SCHEMA, type VerifiedClaims } from '@plantops/db';
 import type { EntityManager } from 'typeorm';
 import { assembleGrants, grantsCover, type GrantRow } from './grants.util';
 import { GrantsCacheService } from './grants-cache.service';
@@ -93,6 +93,29 @@ export interface SubjectRef {
 export interface ResolveOptions {
   /** Narrows the answer to one application's permissions (Doc 06 §11). */
   applicationId?: string;
+}
+
+/**
+ * Verified claims → the subject the resolution engine is keyed on.
+ *
+ * One definition, because there are now three callers — the resolution
+ * endpoints, `GET /iam/navigation`, and `IamGrantsSource` on the guard's own
+ * connection — and "who is the bearer" is the question every authorization
+ * answer in this system starts from. Three copies of it would be three places
+ * for a tenant to be read from the wrong field.
+ *
+ * Every field comes from the token: the tenant from `cid`, which Doc 07 §5 makes
+ * the only trustworthy source of one, and the subject from `sub` interpreted
+ * through `sty`. There is no parameter here that a request body, a query string
+ * or a path could contribute to — which is the same guarantee `applyRlsContext`
+ * makes about the context these queries run under.
+ *
+ * `VerifiedClaims` rather than a plain claims shape, so the argument can only
+ * come from `RequestClaimsSink` — the sole caller of `markClaimsVerified` in the
+ * application.
+ */
+export function subjectRefOf(claims: VerifiedClaims): SubjectRef {
+  return { clientId: claims.cid, type: claims.sty, id: claims.sub };
 }
 
 /**

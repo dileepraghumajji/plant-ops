@@ -30,14 +30,14 @@
  * the contract is the documentation, and this file is a machine-checked copy of
  * its shape.
  *
- * ## The two recursive schemas
+ * ## The three recursive schemas
  *
- * `navNodeCatalogSchema` and `scopeNodeSchema` describe trees, so they need
- * `z.lazy` and an explicit `z.ZodType<…>` annotation — `z.lazy` cannot infer a
- * type that refers to itself. That annotation makes their `Equal` assertion
- * weaker than the rest (it asserts what the annotation already declared), so
- * for those two the real check is the annotation itself: it fails to compile if
- * the object literal cannot produce the interface.
+ * `navNodeCatalogSchema`, `navNodeSchema` and `scopeNodeSchema` describe trees,
+ * so they need `z.lazy` and an explicit `z.ZodType<…>` annotation — `z.lazy`
+ * cannot infer a type that refers to itself. That annotation makes their `Equal`
+ * assertion weaker than the rest (it asserts what the annotation already
+ * declared), so for those three the real check is the annotation itself: it fails
+ * to compile if the object literal cannot produce the interface.
  */
 
 import {
@@ -48,6 +48,7 @@ import {
   SERVICE_ACCOUNT_STATUS_VALUES,
   USER_STATUS_VALUES,
   type NavNodeCatalogDTO,
+  type NavNodeDTO,
   type ScopeNodeDTO,
 } from '@plantops/contracts';
 import { type ZodType, z } from 'zod';
@@ -651,6 +652,58 @@ export const introspectSchema = named(
       sid: z.uuid(),
     }),
   ]),
+);
+
+// ── navigation (Doc 05 §4, Doc 06 §11) ──────────────────────────────────────
+
+/**
+ * A node of the *pruned* tree — the third recursive schema here, and the only
+ * one whose recursion carries no gates.
+ *
+ * `route` and `icon` are `.nullable().optional()` because {@link NavNodeDTO}
+ * declares them `route?: string | null`: a pure container has no route, and the
+ * contract lets a producer either omit the field or send `null`. `NavigationService`
+ * always sends `null`, and the schema still publishes both because a consumer
+ * reading the document must handle what the type permits, not what today's
+ * implementation happens to emit.
+ *
+ * Nothing here reports `requires`, `is_public` or `is_active`. That is deliberate
+ * and is stated in `navigation/prune.ts`: this is the answer to "what may I see",
+ * and shipping the gates would let a client enumerate the permissions it does not
+ * hold from the items it cannot see.
+ */
+export const navNodeSchema: ZodType<NavNodeDTO> = named(
+  'NavNodeDTO',
+  z.lazy(() =>
+    z.object({
+      id: z.uuid(),
+      kind: z.enum(NAV_NODE_KIND_VALUES),
+      key: z.string(),
+      label: z.string(),
+      route: z.string().nullable().optional(),
+      icon: z.string().nullable().optional(),
+      children: z.array(navNodeSchema),
+    }),
+  ),
+);
+
+export const applicationSummarySchema = named(
+  'ApplicationSummaryDTO',
+  z.object({ id: z.uuid(), key: z.string(), name: z.string() }),
+);
+
+/**
+ * `application` is nullable because `null` is a real answer twice over: it is the
+ * cross-application shell, whose top level *is* the applications (Doc 05 §4), and
+ * it is an `?applicationId=` the caller may not see — collapsed into an empty
+ * answer rather than a 404 (`navigation.service.ts`).
+ */
+export const navigationSchema = named(
+  'NavigationResponse',
+  z.object({
+    application: applicationSummarySchema.nullable(),
+    tree: z.array(navNodeSchema),
+  }),
 );
 
 // ── identity & ops (Doc 06 §11, §13) ────────────────────────────────────────

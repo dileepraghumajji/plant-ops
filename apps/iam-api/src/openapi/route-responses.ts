@@ -34,6 +34,7 @@ import { BindingsController } from '../bindings/bindings.controller';
 import { ClientsController } from '../clients/clients.controller';
 import { HealthController } from '../health/health.controller';
 import { WhoAmIController } from '../iam/whoami.controller';
+import { NavigationController } from '../navigation/navigation.controller';
 import { ApplicationsController } from '../registry/applications.controller';
 import { RolesController } from '../roles/roles.controller';
 import { ScopesController } from '../scopes/scopes.controller';
@@ -53,6 +54,7 @@ import {
   navCatalogSchema,
   navNodeCatalogSchema,
   navPermissionsResultSchema,
+  navigationSchema,
   paginatedApplicationsSchema,
   paginatedClientsSchema,
   paginatedPermissionsSchema,
@@ -350,6 +352,16 @@ export const ROUTE_RESPONSES: ReadonlyMap<
     resolve: ok(resolvedGrantsSchema, 'The bearer’s complete grant set'),
     check: ok(permissionCheckSchema, 'Whether the bearer holds it there'),
     introspect: ok(introspectSchema, 'The token’s liveness and subject'),
+  }),
+
+  routes(NavigationController, {
+    // No 403 and no 404, for the same reason `AuthzController` has neither: the
+    // menu is a projection of the bearer's own grants (Doc 05 §3), so there is
+    // nothing to be refused for, and an `?applicationId=` the caller may not see
+    // comes back as an empty tree rather than a miss — a 404 there would make an
+    // ungated route an existence oracle over the platform catalog (Doc 06 §2).
+    // The universal 400 covers a malformed `?applicationId=`.
+    tree: ok(navigationSchema, 'The bearer’s pruned menu'),
   }),
 
   routes(ServiceAccountsController, {
