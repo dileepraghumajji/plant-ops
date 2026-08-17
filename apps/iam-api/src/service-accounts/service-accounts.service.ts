@@ -27,31 +27,29 @@
  * couples them to that transaction structurally and redacts their payloads
  * (Doc 10 §3, §8).
  *
- * ## Interim authorization, and why it is not nothing
+ * ## Authorization
  *
- * Doc 06 §10 gates this surface on `iam.client.svc.*`, which needs the
- * `PermissionGuard` that arrives in Session 23. Until then `assertAdministrator`
- * (`common/administrator.ts`) admits two subjects: a platform admin (derived
- * from a binding at the platform scope root, Doc 04 §10 — never asserted by a
- * caller), and a user carrying `user.is_client_admin`, which Doc 01 §3.6
- * describes as exactly this shortcut, "still enforced via permissions" once
- * permissions exist. Both are rows the database confirms under the caller's own
- * RLS context.
+ * `@RequirePermission('iam.client.svc.…')`, which is the key Doc 06 §10 names
+ * for this surface — and the reason its heading reads "`iam.client.svc.*` /
+ * platform" is that a platform account managing platform-level machine
+ * identities (Doc 09 §2.4) is administering the *platform tenant*, which
+ * migration 0011 makes a tenant like any other. So the platform role holds these
+ * four keys too, rather than the surface growing a parallel `iam.platform.svc.*`
+ * set that would have to be kept in step with them
+ * (`authz/iam-permissions.ts`).
  *
- * It lived here as a private method until Session 16 needed the identical rule
- * for the scope tree (Doc 06 §6) and moved it to `common/`, beside the
- * platform-tier check — the reason `platform-admin.ts` gives for being shared:
- * two copies of "what an administrator is" end with the two disagreeing.
+ * `user.is_client_admin` no longer decides anything here. It is Doc 01 §3.6's
+ * "shortcut flag; still enforced via permissions", and since Session 23 the
+ * permissions exist.
  *
- * The alternative — shipping the surface ungated because the real check is two
- * sessions away — would let any authenticated user in a tenant mint a machine
- * identity for that tenant, which is a credential with no expiry and no session
- * to revoke. Session 23 replaces the call with a decorator; the endpoints do not
- * move.
+ * Gating it matters more here than on most surfaces: an ungated one would let
+ * any authenticated user in a tenant mint a machine identity for that tenant,
+ * which is a credential with no expiry and no session to revoke.
  *
- * A **service** subject is refused unless it is a platform admin. A machine
+ * A **service** subject holds nothing here unless somebody bound it: a machine
  * identity that can mint machine identities turns one leaked secret into a
- * supply of them, and no module-to-module call has a reason to.
+ * supply of them, and no module-to-module call has a reason to. Deny-by-default
+ * is what makes that true rather than a rule this service enforces.
  */
 
 import { Injectable } from '@nestjs/common';
@@ -68,7 +66,6 @@ import { IAM_SCHEMA, hashSecret, type VerifiedClaims } from '@plantops/db';
 import { AUDIT_ACTIONS } from '../audit/audit-actions';
 import { AuditService } from '../audit/audit.service';
 import { GrantInvalidationService } from '../authz/invalidation.service';
-import { assertAdministrator } from '../common/administrator';
 import { afterCommit, entityManager } from '../common/transaction-context';
 import {
   mintAccountKey,
@@ -116,8 +113,6 @@ export class ServiceAccountsService {
     claims: VerifiedClaims,
     input: CreateServiceAccountInput,
   ): Promise<ServiceAccountSecretDTO> {
-    await assertAdministrator(claims);
-
     const accountKey = mintAccountKey();
     const accountSecret = mintAccountSecret();
 
@@ -160,8 +155,6 @@ export class ServiceAccountsService {
     claims: VerifiedClaims,
     query: { page?: number; limit?: number } = {},
   ): Promise<Paginated<ServiceAccountDTO>> {
-    await assertAdministrator(claims);
-
     const { page, limit } = normalizePagination(query);
 
     const rows = (await entityManager().query(
@@ -198,8 +191,6 @@ export class ServiceAccountsService {
     claims: VerifiedClaims,
     id: string,
   ): Promise<ServiceAccountSecretDTO | null> {
-    await assertAdministrator(claims);
-
     const accountSecret = mintAccountSecret();
 
     // Wrapped in a CTE so the statement's command is SELECT. A bare
@@ -265,8 +256,6 @@ export class ServiceAccountsService {
     id: string,
     status: ServiceAccountStatus,
   ): Promise<ServiceAccountDTO | null> {
-    await assertAdministrator(claims);
-
     const changed = (await entityManager().query(
       `with changed as (
          update ${S}."service_account" sa

@@ -9,7 +9,7 @@
  */
 
 import { Controller, Get } from '@nestjs/common';
-import { Public } from '@plantops/auth-kit';
+import { NoPermissionRequired, Public } from '@plantops/auth-kit';
 import { QueryFailedError } from 'typeorm';
 import { IamException } from './iam.exception';
 import { PG_SERIALIZATION_FAILURE } from './pg-errors';
@@ -27,6 +27,9 @@ import { type Harness, createHarness } from '../testing/app-harness';
  * because "an authenticated request applies the RLS context" is a different
  * claim from "a transaction is opened".
  */
+// A fixture controller for a spec about something else. The pipeline it
+// runs through is the real one, so an ungated route still has to say so.
+@NoPermissionRequired('test fixture')
 @Controller('__txn')
 @Public()
 class TxnController {
@@ -65,6 +68,9 @@ class TxnController {
 const published: string[] = [];
 
 /** Authenticated, so the interceptor has claims to build an RLS context from. */
+// A fixture controller for a spec about something else. The pipeline it
+// runs through is the real one, so an ungated route still has to say so.
+@NoPermissionRequired('test fixture')
 @Controller('__ctx-txn')
 class AuthenticatedTxnController {
   @Get()
@@ -95,6 +101,9 @@ const serializationFailure = () =>
  * The scope-move shape of Doc 04 §7.1, without the scope move: a handler that
  * declares its isolation and loses a race the first time it runs.
  */
+// A fixture controller for a spec about something else. The pipeline it
+// runs through is the real one, so an ungated route still has to say so.
+@NoPermissionRequired('test fixture')
 @Controller('__isolated')
 @Public()
 class IsolatedController {

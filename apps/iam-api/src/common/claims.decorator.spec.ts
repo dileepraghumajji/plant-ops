@@ -16,7 +16,7 @@
  */
 
 import { Controller, Get } from '@nestjs/common';
-import { Public } from '@plantops/auth-kit';
+import { NoPermissionRequired, Public } from '@plantops/auth-kit';
 import { IamErrorCode, type IamErrorResponse } from '@plantops/contracts';
 import type { VerifiedClaims } from '@plantops/db';
 import { type Harness, createHarness } from '../testing/app-harness';
@@ -24,6 +24,9 @@ import { SkipTransaction } from './transaction-context';
 import { Claims } from './claims.decorator';
 
 /** Reports what the decorator handed it, so a test can compare against the token. */
+// A fixture controller for a spec about something else. The pipeline it
+// runs through is the real one, so an ungated route still has to say so.
+@NoPermissionRequired('test fixture')
 @Controller('__claims')
 @SkipTransaction()
 class ClaimsController {
@@ -38,6 +41,9 @@ class ClaimsController {
  * No real route looks like this, and the point is that if one ever did it would
  * fail closed instead of running with nothing.
  */
+// A fixture controller for a spec about something else. The pipeline it
+// runs through is the real one, so an ungated route still has to say so.
+@NoPermissionRequired('test fixture')
 @Controller('__claims-unguarded')
 @Public()
 @SkipTransaction()

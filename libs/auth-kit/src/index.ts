@@ -16,12 +16,28 @@
  * - {@link AuthGuard} as a global guard, with {@link Public} on the routes that
  *   cannot carry a token.
  *
- * Session 23 adds `PermissionGuard` and `ScopeResolver` here, on top of the
- * same identity this guard establishes.
+ * On top of the identity `AuthGuard` establishes, Session 23 added the
+ * authorization half:
+ *
+ * - {@link PermissionGuard} as a second global guard, with
+ *   {@link RequirePermission} on every gated route and
+ *   {@link NoPermissionRequired} on the few that answer questions about the
+ *   bearer themselves;
+ * - a {@link GrantsSource} — the IAM binds its own resolution engine, a module
+ *   binds a cached `/iam/permissions/resolve` call;
+ * - a {@link VerifiedClaimsSource}, the read side of the sink above;
+ * - optionally a {@link DenialAuditor}.
+ *
+ * {@link ScopeResolver} is injectable for a module's own services too: Doc 04
+ * §5's `allowedPaths` is what turns authorization into a `WHERE … <@ ANY(...)`
+ * predicate on a list query.
  */
 
 export * from './auth.guard';
 export * from './claims';
 export * from './jwks-verifier';
 export * from './jws';
+export * from './permission.guard';
+export * from './require-permission.decorator';
 export * from './revocation-cache';
+export * from './scope-resolver';

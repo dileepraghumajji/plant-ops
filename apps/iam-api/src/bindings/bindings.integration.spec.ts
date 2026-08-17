@@ -70,6 +70,10 @@ import { AUDIT_ACTIONS } from '../audit/audit-actions';
 import { GrantInvalidationService } from '../authz/invalidation.service';
 import { ENV } from '../config/config.module';
 import { createTestApplication } from '../testing/app-harness';
+import {
+  grantIamClientAdmin,
+  IAM_ADMIN_ROLE_NAME,
+} from '../testing/authorization.fixture';
 
 const S = `"${IAM_SCHEMA}"`;
 
@@ -233,6 +237,17 @@ describeWithDb(
       return (await response.json()) as RoleBindingDTO;
     };
 
+    /**
+     * `GET /iam/role-bindings`, unfiltered unless asked.
+     *
+     * Every tenant carries one grant this suite did not make: since Session 23
+     * the administrator's own `iam.client.binding.*` permissions come from a
+     * binding at the root, or none of these calls would be authorized
+     * (`testing/authorization.fixture.ts`). It is a real row and the API is
+     * right to list it, so the counts below include it rather than the helper
+     * hiding it — `bindingRows` is the database-side view that does not, because
+     * it is asserting what a *case* wrote.
+     */
     const listBindings = async (
       token: string,
       query = '',
@@ -251,12 +266,26 @@ describeWithDb(
 
     // ── inspection, through the owner connection ──────────────────────────
 
+    /**
+     * Every grant this suite's cases made — which is every grant in the tenant
+     * *except* the administrator's own.
+     *
+     * Since Session 23 the fixture binds the admin to a role carrying the
+     * `iam.client.*` permissions, or none of these calls would be authorized at
+     * all (`testing/authorization.fixture.ts`). That binding is scaffolding, not
+     * a result, and counting it here would make every `toHaveLength` in this file
+     * assert one more than the case is about.
+     */
     const bindingRows = async (tenant: Tenant) => {
       await elevate(admin, tenant.clientId);
       return (await admin.query(
-        `select id, user_id, service_account_id, role_id, scope_node_id, expires_at
-           from ${S}."role_binding" where client_id = $1 order by created_at asc, id asc`,
-        [tenant.clientId],
+        `select rb.id, rb.user_id, rb.service_account_id, rb.role_id,
+                rb.scope_node_id, rb.expires_at
+           from ${S}."role_binding" rb
+           join ${S}."role" r on r.id = rb.role_id
+          where rb.client_id = $1 and r.name <> $2
+          order by rb.created_at asc, rb.id asc`,
+        [tenant.clientId, IAM_ADMIN_ROLE_NAME],
       )) as {
         id: string;
         user_id: string | null;
@@ -514,7 +543,10 @@ describeWithDb(
         const binding = await bind(await asAdmin(), memberAtRoot());
         const theirs = await asAdmin(fixture.other);
 
-        expect((await listBindings(theirs)).data).toEqual([]);
+        // Their own administrator's grant, and nothing of Acme's.
+        expect(
+          (await listBindings(theirs)).data.map((entry) => entry.role_name),
+        ).toEqual([IAM_ADMIN_ROLE_NAME]);
 
         const deletion = await call(
           theirs,
@@ -550,13 +582,14 @@ describeWithDb(
 
         const body = await listBindings(token);
 
-        expect(body).toMatchObject({ page: 1, limit: 25, total: 3 });
+        expect(body).toMatchObject({ page: 1, limit: 25, total: 4 });
         // By subject first, so the table groups by *who*; then by path, so one
         // person's grants read the way the org tree does — the root before the
         // plant beneath it, whichever order they were written in.
         expect(
           body.data.map((entry) => [entry.subject_name, entry.scope_node_id]),
         ).toEqual([
+          ['Session 20 Admin', fixture.acme.rootId],
           ['Session 20 Integration', fixture.acme.rootId],
           ['Session 20 Member', fixture.acme.rootId],
           ['Session 20 Member', fixture.acme.plantId],
@@ -570,7 +603,7 @@ describeWithDb(
 
         const body = await listBindings(token, '?page=2&limit=1');
 
-        expect(body).toMatchObject({ page: 2, limit: 1, total: 2 });
+        expect(body).toMatchObject({ page: 2, limit: 1, total: 3 });
         expect(body.data).toHaveLength(1);
       });
 
@@ -629,9 +662,10 @@ describeWithDb(
 
         // A grant that lapsed last Friday is the answer to "why did this stop
         // working"; a list that dropped the row would leave it unanswerable.
-        expect(body.total).toBe(1);
-        expect(body.data[0]).toMatchObject({ expired: true });
-        expect(body.data[0].expires_at).not.toBeNull();
+        expect(body.total).toBe(2);
+        const [lapsed] = body.data.filter((entry) => entry.expired);
+        expect(lapsed).toMatchObject({ expired: true });
+        expect(lapsed?.expires_at).not.toBeNull();
       });
 
       it('shows the caller only their own tenant`s grants', async () => {
@@ -641,8 +675,10 @@ describeWithDb(
 
         const body = await listBindings(token);
 
-        expect(body.total).toBe(1);
-        expect(body.data[0].client_id).toBe(fixture.acme.clientId);
+        expect(body.total).toBe(2);
+        expect(
+          body.data.every((entry) => entry.client_id === fixture.acme.clientId),
+        ).toBe(true);
       });
     });
 
@@ -799,8 +835,10 @@ describeWithDb(
         // references the *node*, never a snapshot of where the node was. So
         // whichever order the two committed in, reading the grant afterwards
         // reports the post-move path and coverage follows the tree.
-        const [listed] = (await listBindings(token)).data;
-        expect(listed.scope_node_path).toBe(
+        const [listed] = (await listBindings(token)).data.filter(
+          (entry) => entry.scope_node_id === fixture.acme.plantId,
+        );
+        expect(listed?.scope_node_path).toBe(
           `${branch.path}.${scopePathLabel(fixture.acme.plantId)}`,
         );
       });
@@ -1026,6 +1064,13 @@ async function resetTenant(admin: DataSource, tenant: Tenant): Promise<void> {
   await admin.query(`delete from ${S}."audit_trail" where client_id = $1`, [
     tenant.clientId,
   ]);
+  // The administrator's own authorization, last, because the wipes above take
+  // it with them: since Session 23 every route on this surface is gated on an
+  // `iam.client.*` permission, held through a role bound at the tenant root
+  // (`testing/authorization.fixture.ts`).
+  await grantIamClientAdmin(admin, tenant.clientId, tenant.rootId, {
+    userId: tenant.adminUserId,
+  });
 }
 
 /**

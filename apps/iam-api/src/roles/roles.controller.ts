@@ -27,13 +27,15 @@
  *
  * ## Authorization
  *
- * Authenticated by the app-wide `AuthGuard`, then checked inside the service —
- * not as a guard, because a guard runs before the transaction that carries the
- * RLS context exists (`common/administrator.ts`). Interim until Session 23
- * replaces it with `@RequirePermission('iam.client.role.*')`, whose guard
- * carries its own connection and RLS context rather than the request's
- * (`docs/adr/0001-permission-guard-connection-strategy.md`) — the routes,
- * status codes and envelopes below are unaffected by the swap.
+ * Authenticated by the app-wide `AuthGuard`, then authorized by
+ * `PermissionGuard` from the `@RequirePermission('iam.client.role.…')` on each
+ * route below (Doc 04 §8). The guard carries its own connection and RLS context
+ * rather than the request's, because it runs before the interceptor opens one
+ * (`docs/adr/0001-permission-guard-connection-strategy.md`).
+ *
+ * Renaming and setting a role's permissions carry different keys, because they
+ * are different powers: one is cosmetic, the other changes what every subject
+ * bound to the role may do (`authz/iam-permissions.ts`).
  */
 
 import {
@@ -50,6 +52,7 @@ import {
   Put,
   Query,
 } from '@nestjs/common';
+import { RequirePermission } from '@plantops/auth-kit';
 import {
   IAM_ROUTE_PREFIX,
   type Paginated,
@@ -57,6 +60,7 @@ import {
   type RolePermissionsResponse,
 } from '@plantops/contracts';
 import type { VerifiedClaims } from '@plantops/db';
+import { IAM_CLIENT_PERMISSIONS as P } from '../authz/iam-permissions';
 import { Claims } from '../common/claims.decorator';
 import { IamException } from '../common/iam.exception';
 import { RateLimit } from '../common/rate-limit.decorator';
@@ -81,6 +85,7 @@ export class RolesController {
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @RateLimit(ROLES_RATE_LIMIT)
+  @RequirePermission(P.ROLE_CREATE)
   create(
     @Claims() claims: VerifiedClaims,
     @Body() body: CreateRoleDto,
@@ -90,6 +95,7 @@ export class RolesController {
 
   @Get()
   @RateLimit(ROLES_RATE_LIMIT)
+  @RequirePermission(P.ROLE_READ)
   list(
     @Claims() claims: VerifiedClaims,
     @Query() query: RolesPaginationDto,
@@ -99,6 +105,7 @@ export class RolesController {
 
   @Patch(':id')
   @RateLimit(ROLES_RATE_LIMIT)
+  @RequirePermission(P.ROLE_UPDATE)
   async update(
     @Claims() claims: VerifiedClaims,
     @Param('id', uuidParam()) id: string,
@@ -120,6 +127,7 @@ export class RolesController {
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @RateLimit(ROLES_RATE_LIMIT)
+  @RequirePermission(P.ROLE_DELETE)
   async remove(
     @Claims() claims: VerifiedClaims,
     @Param('id', uuidParam()) id: string,
@@ -130,6 +138,7 @@ export class RolesController {
 
   @Get(':id/permissions')
   @RateLimit(ROLES_RATE_LIMIT)
+  @RequirePermission(P.ROLE_PERMISSION_READ)
   async permissions(
     @Claims() claims: VerifiedClaims,
     @Param('id', uuidParam()) id: string,
@@ -142,6 +151,7 @@ export class RolesController {
   /** Replaces the role's permissions, validated against enabled apps (Doc 02 §6). */
   @Put(':id/permissions')
   @RateLimit(ROLES_RATE_LIMIT)
+  @RequirePermission(P.ROLE_PERMISSION_SET)
   async setPermissions(
     @Claims() claims: VerifiedClaims,
     @Param('id', uuidParam()) id: string,

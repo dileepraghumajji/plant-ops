@@ -43,11 +43,13 @@
  *
  * ## Authorization
  *
- * `assertAdministrator()`, replaced in Session 23 by
- * `@RequirePermission('iam.client.user.*')` — the same interim arrangement
- * `UsersService` documents, and isolation does not depend on it: `client_id` is
- * pinned to the token's `cid` in the statement and the whole thing runs under
- * the request's RLS context.
+ * `@RequirePermission('iam.client.user.bulk_upload')` — its own key rather than
+ * `user.create`, because the two are not the same power in practice: one adds a
+ * person, the other adds up to five hundred in a single unreviewed act, and an
+ * organisation may reasonably grant the first without the second.
+ *
+ * Isolation does not depend on it: `client_id` is pinned to the token's `cid` in
+ * the statement and the whole thing runs under the request's RLS context.
  */
 
 import { Injectable } from '@nestjs/common';
@@ -65,7 +67,6 @@ import { IAM_SCHEMA, type VerifiedClaims } from '@plantops/db';
 import type { z } from 'zod';
 import { AUDIT_ACTIONS } from '../audit/audit-actions';
 import { AuditService, type AuditEntry } from '../audit/audit.service';
-import { assertAdministrator } from '../common/administrator';
 import { IamException } from '../common/iam.exception';
 import { entityManager } from '../common/transaction-context';
 import { CsvParseError, parseCsv } from './csv.util';
@@ -140,8 +141,6 @@ export class BulkUploadService {
     claims: VerifiedClaims,
     input: BulkUploadInput,
   ): Promise<BulkUserUploadResponse> {
-    await assertAdministrator(claims);
-
     const candidates = readRows(input);
     const { results, insertable } = adjudicate(candidates);
 

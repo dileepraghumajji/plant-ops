@@ -47,7 +47,6 @@ import { IamException } from '../common/iam.exception';
 import { entityManager } from '../common/transaction-context';
 import { ApplicationsService } from './applications.service';
 import { rethrowAsConflict } from './conflict';
-import { assertPlatformAdmin } from '../common/platform-admin';
 
 const S = `"${IAM_SCHEMA}"`;
 
@@ -91,7 +90,6 @@ export class PermissionsService {
     applicationId: string,
     inputs: readonly CreatePermissionInput[],
   ): Promise<PermissionDTO[]> {
-    await assertPlatformAdmin();
     await this.requireApplication(applicationId);
 
     const created: PermissionRow[] = [];
@@ -146,7 +144,6 @@ export class PermissionsService {
     applicationId: string,
     query: { page?: number; limit?: number } = {},
   ): Promise<Paginated<PermissionDTO>> {
-    await assertPlatformAdmin();
     await this.requireApplication(applicationId);
 
     const { page, limit } = normalizePagination(query);

@@ -19,11 +19,15 @@
  *
  * ## Authorization
  *
- * Every route is authenticated by the app-wide `AuthGuard` and additionally
- * requires a platform subject, checked inside each service. That check is not a
- * guard for the reason `common/platform-admin.ts` explains — a guard runs before
- * the transaction that carries the RLS context exists — and it is interim:
- * Session 23 replaces it with `@RequirePermission('iam.platform.*')`.
+ * Every route is authenticated by the app-wide `AuthGuard` and then authorized
+ * by `PermissionGuard` from its own `@RequirePermission('iam.platform.…')`
+ * (Doc 04 §8). None of them names a scope node, so none runs the coverage step:
+ * platform authority is a binding at the platform scope root, outside every
+ * customer tree, and Doc 04 §10 has it skip tenant coverage.
+ *
+ * The `:id` in the path is a *target*, not an authority: what may be done with
+ * it is decided by a permission held at the platform root, never by the token's
+ * `cid`.
  *
  * ## No handler takes claims
  *
@@ -46,6 +50,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import { RequirePermission } from '@plantops/auth-kit';
 import {
   IAM_ROUTE_PREFIX,
   type ClientAdminDTO,
@@ -53,6 +58,7 @@ import {
   type ClientDTO,
   type Paginated,
 } from '@plantops/contracts';
+import { IAM_PLATFORM_PERMISSIONS as P } from '../authz/iam-permissions';
 import { IamException } from '../common/iam.exception';
 import { RateLimit } from '../common/rate-limit.decorator';
 import { ClientAdminService } from './client-admin.service';
@@ -93,12 +99,14 @@ export class ClientsController {
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @RateLimit(CLIENTS_RATE_LIMIT)
+  @RequirePermission(P.CLIENT_CREATE)
   create(@Body() body: CreateClientDto): Promise<ClientDTO> {
     return this.clients.create(body);
   }
 
   @Get()
   @RateLimit(CLIENTS_RATE_LIMIT)
+  @RequirePermission(P.CLIENT_READ)
   list(@Query() query: PaginationDto): Promise<Paginated<ClientDTO>> {
     return this.clients.list(query);
   }
@@ -106,6 +114,7 @@ export class ClientsController {
   /** Update, or the suspend / reactivate switch of Doc 06 §5. */
   @Patch(':id')
   @RateLimit(CLIENTS_RATE_LIMIT)
+  @RequirePermission(P.CLIENT_UPDATE)
   async update(
     @Param('id', uuidParam()) id: string,
     @Body() body: UpdateClientDto,
@@ -120,6 +129,7 @@ export class ClientsController {
   @Post(':id/applications')
   @HttpCode(HttpStatus.CREATED)
   @RateLimit(CLIENTS_RATE_LIMIT)
+  @RequirePermission(P.CLIENT_APP_ENABLE)
   enableApplications(
     @Param('id', uuidParam()) id: string,
     @Body() body: EnableApplicationsDto,
@@ -130,12 +140,14 @@ export class ClientsController {
   /** Beyond Doc 06 §5's table — see `client-applications.service.ts`. */
   @Get(':id/applications')
   @RateLimit(CLIENTS_RATE_LIMIT)
+  @RequirePermission(P.CLIENT_APP_READ)
   listApplications(@Param('id', uuidParam()) id: string): Promise<ClientApplicationDTO[]> {
     return this.applications.list(id);
   }
 
   @Patch(':id/applications/:appId')
   @RateLimit(CLIENTS_RATE_LIMIT)
+  @RequirePermission(P.CLIENT_APP_UPDATE)
   async updateApplication(
     @Param('id', uuidParam()) id: string,
     @Param('appId', uuidParam()) applicationId: string,
@@ -157,6 +169,7 @@ export class ClientsController {
   @Post(':id/admins')
   @HttpCode(HttpStatus.CREATED)
   @RateLimit(CLIENTS_RATE_LIMIT)
+  @RequirePermission(P.CLIENT_ADMIN_CREATE)
   createAdmin(
     @Param('id', uuidParam()) id: string,
     @Body() body: CreateClientAdminDto,

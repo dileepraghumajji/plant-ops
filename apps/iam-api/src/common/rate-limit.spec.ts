@@ -8,11 +8,14 @@
  */
 
 import { Controller, Get } from '@nestjs/common';
-import { Public } from '@plantops/auth-kit';
+import { NoPermissionRequired, Public } from '@plantops/auth-kit';
 import { IamErrorCode, type IamErrorResponse } from '@plantops/contracts';
 import { RateLimit } from './rate-limit.decorator';
 import { type Harness, createHarness, testEnv } from '../testing/app-harness';
 
+// A fixture controller for a spec about something else. The pipeline it
+// runs through is the real one, so an ungated route still has to say so.
+@NoPermissionRequired('test fixture')
 @Controller('__throttled')
 @Public()
 class ThrottledController {
@@ -35,6 +38,9 @@ class ThrottledController {
 }
 
 /** Authenticated, to exercise the per-subject bucket the guard order enables. */
+// A fixture controller for a spec about something else. The pipeline it
+// runs through is the real one, so an ungated route still has to say so.
+@NoPermissionRequired('test fixture')
 @Controller('__throttled-auth')
 class AuthenticatedThrottledController {
   @Get()

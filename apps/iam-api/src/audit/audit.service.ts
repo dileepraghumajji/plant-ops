@@ -178,9 +178,9 @@ export class AuditService {
   /**
    * Records an authorization denial, on its own connection (Doc 10 §3).
    *
-   * For the `PermissionGuard` hook that arrives in Session 23 — a guard runs
-   * before the request transaction exists, and the request it refuses is about
-   * to be rolled back regardless. See the header for the full argument.
+   * The `PermissionGuard` hook's writer (`authz/denial-auditor.ts`): a guard
+   * runs before the request transaction exists, and the request it refuses is
+   * about to be rolled back regardless. See the header for the full argument.
    *
    * Never throws. The caller is in the middle of refusing a request and has
    * nothing useful to do with a cache-or-database failure here; what it must

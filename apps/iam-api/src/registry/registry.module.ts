@@ -22,9 +22,10 @@
  * operations, and it composes them rather than re-implementing the inserts —
  * which is why it sits in the same module and takes all three as dependencies.
  *
- * The services are exported because later sessions reach for them: Session 23
- * seeds the IAM's own manifest through `ManifestService`, and Session 24 hangs
- * nav-catalog version invalidation off the catalog writers.
+ * The services are exported because other sessions reach for them: the IAM's
+ * own manifest is upserted through `ManifestService` like any application's
+ * (`tools/seed-iam-manifest.ts`), and Session 24 hangs nav-catalog version
+ * invalidation off the catalog writers.
  */
 
 import { Module } from '@nestjs/common';

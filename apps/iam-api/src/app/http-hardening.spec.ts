@@ -22,7 +22,7 @@
  */
 
 import { Body, Controller, HttpCode, Post } from '@nestjs/common';
-import { Public } from '@plantops/auth-kit';
+import { NoPermissionRequired, Public } from '@plantops/auth-kit';
 import {
   DEFAULT_BULK_UPLOAD_BODY_LIMIT_BYTES,
   DEFAULT_MANIFEST_BODY_LIMIT_BYTES,
@@ -51,6 +51,9 @@ const BULK_UPLOAD_LIMIT = 8_192;
 
 class EchoDto extends createZodDto(z.object({ padding: z.string() })) {}
 
+// A fixture controller for a spec about something else. The pipeline it
+// runs through is the real one, so an ungated route still has to say so.
+@NoPermissionRequired('test fixture')
 @Controller('__hardening')
 @Public()
 class EchoController {

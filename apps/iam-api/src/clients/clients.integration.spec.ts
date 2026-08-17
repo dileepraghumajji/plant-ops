@@ -810,6 +810,10 @@ describeWithDb(
           [
             AUDIT_ACTIONS.SCOPE_NODE_CREATED,
             AUDIT_ACTIONS.ROLE_CREATED,
+            // Session 23: the administration role is mapped to the IAM's own
+            // `iam.client.*` catalog in the same transaction, which is what
+            // makes the new administrator able to do anything at all.
+            AUDIT_ACTIONS.ROLE_PERMISSION_SET,
             AUDIT_ACTIONS.USER_CREATED,
             AUDIT_ACTIONS.ROLE_BINDING_CREATED,
           ].sort(),

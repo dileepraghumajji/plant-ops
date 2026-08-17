@@ -3,15 +3,17 @@
  * on (Doc 06 §11).
  *
  * Unlike every other controller in this application, nothing here is an
- * administrative surface. There is no `assertAdministrator()`, and there will be
- * no `@RequirePermission(...)` in Session 23 either: the three routes below
- * answer questions *about the bearer*, so holding the token is the whole of the
- * authorization. A permission gate on "what may I do" would need a permission to
- * find out whether you have any permissions.
+ * administrative surface. There is no `@RequirePermission(...)` and there will
+ * not be one: the three routes below answer questions *about the bearer*, so
+ * holding the token is the whole of the authorization. A permission gate on
+ * "what may I do" would need a permission to find out whether you have any
+ * permissions.
  *
- * That is also why these are the only routes Session 23's `PermissionGuard` must
- * never gate — it would call this same resolver to decide, and the recursion is
- * not hypothetical.
+ * That is also why these are the only routes `PermissionGuard` must never gate —
+ * it would call this same resolver to decide, and the recursion is not
+ * hypothetical. The class-level `@NoPermissionRequired()` below is how that is
+ * stated to the guard, which otherwise denies a route that declares nothing
+ * (`require-permission.decorator.ts`).
  *
  * ## Three routes and three shapes
  *
@@ -46,6 +48,7 @@
  */
 
 import { Body, Controller, Get, HttpCode, HttpStatus, Post, Query } from '@nestjs/common';
+import { NoPermissionRequired } from '@plantops/auth-kit';
 import {
   IAM_ROUTE_PREFIX,
   type IntrospectResponse,
@@ -76,6 +79,11 @@ function subjectOf(claims: VerifiedClaims): SubjectRef {
 }
 
 @Controller(IAM_ROUTE_PREFIX)
+@NoPermissionRequired(
+  'These three answer questions about the bearer themselves (Doc 06 §11). ' +
+    'Gating them would require a permission in order to discover which ' +
+    'permissions one holds, and the guard resolves through this very service.',
+)
 export class AuthzController {
   constructor(
     private readonly resolver: ResolverService,

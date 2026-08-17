@@ -8,7 +8,8 @@
     "migration:show": "nx run @plantops/db:migration:show",
     "keys:rotate": "tsx --conditions=@plantops/source tools/rotate-keys.ts",
     "openapi": "node --conditions=@plantops/source tools/emit-openapi.cjs",
-    "manifest:upload": "tsx --conditions=@plantops/source tools/upload-manifest.ts"
+    "manifest:upload": "tsx --conditions=@plantops/source tools/upload-manifest.ts",
+    "manifest:seed-iam": "tsx --conditions=@plantops/source tools/seed-iam-manifest.ts"
   },
   "private": true,
   "devDependencies": {

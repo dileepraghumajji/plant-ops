@@ -46,11 +46,14 @@
  * recursive delete of a subtree would silently remove the grants anchored to it,
  * which is the one class of change an operator must never make by accident.
  *
- * ## Interim authorization
+ * ## Authorization
  *
- * `assertAdministrator()` in front of every method, replaced in Session 23 by
- * `@RequirePermission('iam.client.scope.*')`. See `common/administrator.ts`.
- * Tenant isolation does not depend on it: every statement below runs under the
+ * `@RequirePermission('iam.client.scope.…')` on the routes, checked by
+ * `PermissionGuard` before this service runs (Session 23). `PATCH` and `DELETE`
+ * name the node itself with `scopeFrom: 'params.id'`, so an admin may only
+ * restructure the part of the tree they hold the permission over; `POST` names
+ * the parent, and tolerates its absence because a tenant's first root has none.
+ * Tenant isolation does not depend on any of that: every statement below runs under the
  * request's RLS context, so a node id from another client is invisible rather
  * than forbidden, and comes back as the same 404 a nonexistent id gets.
  */
@@ -71,7 +74,6 @@ import {
   GrantInvalidationService,
   type AffectedSubject,
 } from '../authz/invalidation.service';
-import { assertAdministrator } from '../common/administrator';
 import { IamException } from '../common/iam.exception';
 import { afterCommit, entityManager } from '../common/transaction-context';
 import {
@@ -131,8 +133,6 @@ export class ScopesService {
    * and RLS would return nothing for any other one regardless.
    */
   async tree(claims: VerifiedClaims): Promise<ScopeTreeResponse> {
-    await assertAdministrator(claims);
-
     const rows = (await entityManager().query(
       `select ${COLUMNS} from ${S}."scope_node"
         where client_id = $1
@@ -161,8 +161,6 @@ export class ScopesService {
     claims: VerifiedClaims,
     input: CreateScopeNodeInput,
   ): Promise<ScopeNodeDTO> {
-    await assertAdministrator(claims);
-
     const id = randomUUID();
     const path = await this.pathForNewNode(claims, id, input.parent_id);
 
@@ -208,8 +206,6 @@ export class ScopesService {
     id: string,
     input: UpdateScopeNodeInput,
   ): Promise<ScopeNodeDTO | null> {
-    await assertAdministrator(claims);
-
     const current = await this.findRow(claims, id);
     if (current === null) return null;
 
@@ -234,8 +230,6 @@ export class ScopesService {
    * @throws {IamException} 409 when the node has children or bindings.
    */
   async remove(claims: VerifiedClaims, id: string): Promise<boolean> {
-    await assertAdministrator(claims);
-
     const row = await this.findRow(claims, id);
     if (row === null) return false;
 

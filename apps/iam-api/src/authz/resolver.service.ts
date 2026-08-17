@@ -11,8 +11,8 @@
  * (Doc 07 §5, `common/transaction-context.ts`).
  *
  * This is the documented exception, decided before the code existed in
- * `docs/adr/0001-permission-guard-connection-strategy.md`. Session 23's
- * `PermissionGuard` runs *before* `TenantContextInterceptor` opens the request
+ * `docs/adr/0001-permission-guard-connection-strategy.md`. `PermissionGuard`
+ * runs *before* `TenantContextInterceptor` opens the request
  * transaction — Nest runs guards ahead of interceptors — so at guard time there
  * is no ambient transaction to borrow and `entityManager()` would throw. The
  * guard therefore brings its own short-lived `QueryRunner` with
@@ -23,8 +23,9 @@
  * behaviour inside the request transaction is unchanged and they still see
  * their own uncommitted writes.
  *
- * Do not "fix" this back to the convention. Doing so does not fail a test — it
- * fails Session 23, at which point the fix is to rewrite this file.
+ * Do not "fix" this back to the convention. Doing so does not fail a test here
+ * — it breaks `PermissionGuard`, at which point the fix is to rewrite this
+ * file.
  *
  * ## Why the query and not a `SECURITY DEFINER` function
  *
@@ -62,9 +63,8 @@
  * clause pins `rb.client_id` as well. The redundancy is the same one
  * `bindings.service.ts` carries on its joins: it lets the planner use the
  * tenant-scoped indexes the policy narrows to anyway, and — more to the point
- * here — the guard's connection in Session 23 is one this service does not open
- * itself, so the query must not depend on somebody else having got the context
- * right.
+ * here — the guard's connection is one this service does not open itself, so
+ * the query must not depend on somebody else having got the context right.
  */
 
 import { Injectable } from '@nestjs/common';
@@ -162,7 +162,8 @@ export class ResolverService {
   /**
    * The subject's grants, from the cache when it can be trusted (Doc 04 §6).
    *
-   * This is what the endpoints and Session 23's `PermissionGuard` call.
+   * This is what the endpoints call, and what `IamGrantsSource` calls on the
+   * guard's own connection.
    *
    * **The `applicationId` slice is never served from the cache, and never
    * written to it.** Doc 04 §6 fixes the key as
@@ -225,9 +226,9 @@ export class ResolverService {
   /**
    * The materialized path of one node of this tenant's tree, or `null`.
    *
-   * Public because Session 23's `PermissionGuard` resolves its target node from
-   * the request the same way, and the two must read the same column under the
-   * same tenant predicate.
+   * Public because `PermissionGuard` resolves the node a request names the same
+   * way (through `IamGrantsSource`), and the two must read the same column under
+   * the same tenant predicate.
    */
   async scopePathOf(
     manager: EntityManager,

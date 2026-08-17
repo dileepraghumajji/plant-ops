@@ -27,10 +27,11 @@
  * - {@link GrantInvalidationService} — the post-commit hook every mutating
  *   surface calls. Session 22 replaced its body with the real bump-and-publish
  *   and wired the remaining rows of Doc 04 §7's table into it.
- * - {@link ResolverService} — the entry point for the endpoints today and for
- *   Session 23's `PermissionGuard` tomorrow, which calls
- *   `grantsFor(runner.manager, …)` on its own connection
- *   (`docs/adr/0001-permission-guard-connection-strategy.md`).
+ * - {@link ResolverService} — the entry point for the endpoints, and for
+ *   `PermissionGuard`, which reaches it through `IamGrantsSource` and calls
+ *   `grantsFor(runner.manager, …)` on a connection of its own
+ *   (`docs/adr/0001-permission-guard-connection-strategy.md`). The guard's
+ *   bindings live in {@link PermissionGuardModule}, which imports this one.
  * - {@link GrantsCacheService} — exported because the integration suites read
  *   the cache directly to prove a hit path is DB-free; the invalidation service
  *   bumps a subject's version through it rather than naming a Redis key of its

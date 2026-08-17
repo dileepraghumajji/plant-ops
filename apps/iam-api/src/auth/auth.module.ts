@@ -26,10 +26,10 @@
  * - **{@link VERIFIED_CLAIMS_SINK} → `RequestClaimsSink`.** The single place
  *   claims become branded and therefore usable as an RLS context (Doc 07 §5).
  *
- * `TokenService` and `KeysService` stay exported because Session 23's
- * `PermissionGuard` builds on them and must sign with the same key set rather
- * than grow its own — as `RefreshService` and Session 11's
- * `ServiceTokenService`, which both live here, already do.
+ * `TokenService` and `KeysService` stay exported because everything that mints
+ * or verifies a token must use the same key set rather than grow its own —
+ * `RefreshService`, Session 11's `ServiceTokenService` and `AuthzApiModule`'s
+ * `/iam/introspect` all reach for them.
  *
  * ## Why the exchange lives here and the CRUD does not
  *

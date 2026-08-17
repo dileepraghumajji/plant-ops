@@ -24,6 +24,7 @@
  * name, which is what makes that impossible rather than merely discouraged.
  */
 
+import { pathIsWithin } from '@plantops/auth-kit';
 import { MAX_SCOPE_TREE_DEPTH } from '@plantops/contracts';
 import { scopePathLabel } from '@plantops/db';
 
@@ -57,10 +58,15 @@ export function pathDepth(path: string): number {
  * Label-wise, not character-wise: a plain `startsWith` would report
  * `n_ab.n_cd` as living under `n_a`, which is the class of bug that makes a
  * coverage test grant access to a sibling subtree.
+ *
+ * Re-exported from `@plantops/auth-kit` rather than written here, because this
+ * is the same predicate `PermissionGuard` runs and every future module runs
+ * (Doc 08 §4). Two definitions of "beneath" would only be found to disagree by
+ * a subject reaching a gate they were never granted — so there is one, in the
+ * library both sides share, and this name stays because the tree arithmetic
+ * around it reads better with it.
  */
-export function isWithin(path: string, prefix: string): boolean {
-  return path === prefix || path.startsWith(`${prefix}${SEPARATOR}`);
-}
+export const isWithin = pathIsWithin;
 
 /**
  * What `path` becomes when the subtree rooted at `oldPrefix` is re-hung under

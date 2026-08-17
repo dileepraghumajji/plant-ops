@@ -17,11 +17,11 @@
  *
  * ## Authorization
  *
- * Every route is authenticated by the app-wide `AuthGuard` and additionally
- * requires a platform subject, checked inside each service. That check is not a
- * guard for the reason `common/platform-admin.ts` explains — a guard runs before the
- * transaction that carries the RLS context exists — and it is interim: Session
- * 23 replaces it with `@RequirePermission('iam.platform.*')`.
+ * Every route is authenticated by the app-wide `AuthGuard` and then authorized
+ * by `PermissionGuard` from its own `@RequirePermission('iam.platform.…')`
+ * (Doc 04 §8). None of them names a scope node, so none runs the coverage step:
+ * platform authority is a binding at the platform scope root, outside every
+ * customer tree, and Doc 04 §10 has it skip tenant coverage.
  *
  * ## No handler takes claims
  *
@@ -45,6 +45,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import { RequirePermission } from '@plantops/auth-kit';
 import {
   IAM_ROUTE_PREFIX,
   type ApplicationDTO,
@@ -55,6 +56,7 @@ import {
   type Paginated,
   type PermissionDTO,
 } from '@plantops/contracts';
+import { IAM_PLATFORM_PERMISSIONS as P } from '../authz/iam-permissions';
 import { IamException } from '../common/iam.exception';
 import { RateLimit } from '../common/rate-limit.decorator';
 import { ApplicationsService } from './applications.service';
@@ -98,12 +100,14 @@ export class ApplicationsController {
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @RateLimit(REGISTRY_RATE_LIMIT)
+  @RequirePermission(P.APP_CREATE)
   create(@Body() body: CreateApplicationDto): Promise<ApplicationDTO> {
     return this.applications.create(body);
   }
 
   @Get()
   @RateLimit(REGISTRY_RATE_LIMIT)
+  @RequirePermission(P.APP_READ)
   list(@Query() query: PaginationDto): Promise<Paginated<ApplicationDTO>> {
     return this.applications.list(query);
   }
@@ -111,6 +115,7 @@ export class ApplicationsController {
   /** Update, or the global on/off switch of Doc 02 §7. */
   @Patch(':id')
   @RateLimit(REGISTRY_RATE_LIMIT)
+  @RequirePermission(P.APP_UPDATE)
   async update(
     @Param('id', applicationId()) id: string,
     @Body() body: UpdateApplicationDto,
@@ -125,6 +130,7 @@ export class ApplicationsController {
   @Post(':id/permissions')
   @HttpCode(HttpStatus.CREATED)
   @RateLimit(REGISTRY_RATE_LIMIT)
+  @RequirePermission(P.PERMISSION_CREATE)
   addPermissions(
     @Param('id', applicationId()) id: string,
     @Body() body: CreatePermissionsDto,
@@ -134,6 +140,7 @@ export class ApplicationsController {
 
   @Get(':id/permissions')
   @RateLimit(REGISTRY_RATE_LIMIT)
+  @RequirePermission(P.PERMISSION_READ)
   listPermissions(
     @Param('id', applicationId()) id: string,
     @Query() query: PaginationDto,
@@ -146,6 +153,7 @@ export class ApplicationsController {
   @Post(':id/nav')
   @HttpCode(HttpStatus.CREATED)
   @RateLimit(REGISTRY_RATE_LIMIT)
+  @RequirePermission(P.NAV_CREATE)
   addNavNodes(
     @Param('id', applicationId()) id: string,
     @Body() body: CreateNavNodesDto,
@@ -155,6 +163,7 @@ export class ApplicationsController {
 
   @Get(':id/nav')
   @RateLimit(REGISTRY_RATE_LIMIT)
+  @RequirePermission(P.NAV_READ)
   navTree(@Param('id', applicationId()) id: string): Promise<NavCatalogResponse> {
     return this.nav.tree(id);
   }
@@ -169,6 +178,7 @@ export class ApplicationsController {
   @Post(':id/nav-permissions')
   @HttpCode(HttpStatus.OK)
   @RateLimit(REGISTRY_RATE_LIMIT)
+  @RequirePermission(P.NAV_MAP)
   mapNavPermissions(
     @Param('id', applicationId()) id: string,
     @Body() body: NavPermissionsDto,
@@ -183,6 +193,7 @@ export class ApplicationsController {
   @Delete(':id/nav-permissions')
   @HttpCode(HttpStatus.OK)
   @RateLimit(REGISTRY_RATE_LIMIT)
+  @RequirePermission(P.NAV_MAP)
   unmapNavPermissions(
     @Param('id', applicationId()) id: string,
     @Body() body: NavPermissionsDto,
@@ -209,6 +220,7 @@ export class ApplicationsController {
   @Post(':id/manifest')
   @HttpCode(HttpStatus.OK)
   @RateLimit(REGISTRY_RATE_LIMIT)
+  @RequirePermission(P.APP_MANIFEST)
   upsertManifest(
     @Param('id', applicationId()) id: string,
     @Body() body: ApplicationManifestDto,

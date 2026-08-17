@@ -11,7 +11,7 @@
  */
 
 import { Body, Controller, Get, HttpCode, Post } from '@nestjs/common';
-import { Public } from '@plantops/auth-kit';
+import { NoPermissionRequired, Public } from '@plantops/auth-kit';
 import {
   IamErrorCode,
   type IamErrorResponse,
@@ -39,6 +39,9 @@ class CreateWidgetDto extends createZodDto(createWidgetSchema) {}
  * authentication required they would all answer 401 and the envelope claims
  * would go untested. The guard's own behaviour is `auth.guard.spec.ts`.
  */
+// A fixture controller for a spec about something else. The pipeline it
+// runs through is the real one, so an ungated route still has to say so.
+@NoPermissionRequired('test fixture')
 @Controller('__test')
 @Public()
 class FailingController {

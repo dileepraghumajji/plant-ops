@@ -27,15 +27,19 @@
  * at all, since the endpoint is idempotent enough to be retried but a stray user
  * without a binding is a login that succeeds and can do nothing.
  *
- * ## The role carries no permissions yet, deliberately
+ * ## The role's permissions are the IAM's own catalog
  *
- * Exactly as migration 0011's platform role does. `iam.client.*` becomes a real
- * permission set when the IAM seeds its own manifest through the real endpoint in
- * Session 23; until then `user.is_client_admin` is the interim shortcut the
- * client-tier services read (Doc 01 §3.6 — "still enforced via permissions" once
- * permissions exist), and it is set here for that reason. That is dogfooding, not
- * an omission: the day the manifest lands, this role gets its mappings through
- * the same `PUT /roles/:id/permissions` every other role uses.
+ * Since Session 23 the role is mapped to every active `iam.client.*` permission
+ * — ordinary `role_permission` rows, over the IAM's ordinary registry entry, so
+ * a tenant administrator's authority is a grant like every other grant in the
+ * system and is revoked by unmapping or unbinding rather than by a special case
+ * (Doc 02 §14: "there is no privileged bypass path"). See
+ * {@link ClientAdminService.grantIamClientPermissions}.
+ *
+ * `user.is_client_admin` is still set, and no longer decides anything: Doc 01
+ * §3.6 calls it a "shortcut flag; still enforced via permissions", and the
+ * permissions now exist. What reads it is the console, to decide which of the
+ * two experiences of Doc 09 §1 to render.
  *
  * ## Re-running it
  *
@@ -58,8 +62,11 @@ import {
 import { randomUUID } from 'node:crypto';
 import { AUDIT_ACTIONS } from '../audit/audit-actions';
 import { AuditService } from '../audit/audit.service';
+import {
+  IAM_APPLICATION_KEY,
+  IAM_CLIENT_PERMISSION_PREFIX,
+} from '../authz/iam-permissions';
 import { IamException } from '../common/iam.exception';
-import { assertPlatformAdmin } from '../common/platform-admin';
 import { entityManager } from '../common/transaction-context';
 import { rethrowAsConflict } from '../registry/conflict';
 import { ClientsService } from './clients.service';
@@ -124,8 +131,6 @@ export class ClientAdminService {
    * email is already taken inside it.
    */
   async create(clientId: string, input: CreateClientAdminInput): Promise<ClientAdminDTO> {
-    await assertPlatformAdmin();
-
     const client = await this.clients.findRow(clientId);
     if (client === null) throw IamException.notFound('The client');
 
@@ -135,6 +140,7 @@ export class ClientAdminService {
     return withProvisioningTenant(manager, clientId, async () => {
       const scope = await this.rootScopeNode(clientId, input.scope_name ?? client.name);
       const role = await this.adminRole(clientId);
+      await this.grantIamClientPermissions(clientId, role);
 
       let users: UserRow[];
       try {
@@ -288,5 +294,70 @@ export class ClientAdminService {
     );
 
     return created;
+  }
+
+  /**
+   * Gives the tenant's administration role the `iam.client.*` permissions, and
+   * enables the IAM for the tenant so they are not inert.
+   *
+   * This is the sentence this file used to end on as a promise — *"the day the
+   * manifest lands, this role gets its mappings through the same
+   * `PUT /roles/:id/permissions` every other role uses"* — kept, and kept here
+   * rather than left to an operator. Since Session 23 every client route is
+   * gated on one of these keys, so a tenant provisioned without them would have
+   * an administrator who can log in and do nothing: the exact "stray user
+   * without a binding" this endpoint's atomicity exists to rule out, one layer
+   * up.
+   *
+   * `iam.platform.*` is deliberately excluded. The two tiers are the boundary
+   * Doc 02 §1 draws, and it is enforced by which keys land here — a tenant
+   * administers itself and nothing above it.
+   *
+   * Both statements are idempotent, because this endpoint is: a second
+   * administrator for the same tenant adopts the same role, and re-running must
+   * not double-map anything or re-announce an enablement that already happened.
+   * `role_permission.set` is audited only when something actually moved, so the
+   * trail says "this role's grants changed" when they did and stays quiet when
+   * they did not.
+   */
+  private async grantIamClientPermissions(
+    clientId: string,
+    role: RoleRow,
+  ): Promise<void> {
+    const manager = entityManager();
+
+    await manager.query(
+      `insert into ${S}."client_application" (client_id, application_id, enabled)
+       select $1, a.id, true from ${S}."application" a where a.key = $2
+       on conflict (client_id, application_id) do nothing`,
+      [clientId, IAM_APPLICATION_KEY],
+    );
+
+    // Every *active* client-tier key of the IAM's catalog, matched by prefix
+    // rather than by a list held here. The catalog is data (Doc 02 §8), so a key
+    // added by a later manifest upload reaches the next tenant provisioned
+    // without this file changing — and one deactivated stops being granted.
+    const granted = (await manager.query(
+      `insert into ${S}."role_permission" (role_id, permission_id)
+       select $1, p.id
+         from ${S}."permission" p
+         join ${S}."application" a on a.id = p.application_id
+        where a.key = $2 and p.is_active and p.key like $3
+       on conflict do nothing
+       returning permission_id`,
+      [role.id, IAM_APPLICATION_KEY, `${IAM_CLIENT_PERMISSION_PREFIX}%`],
+    )) as { permission_id: string }[];
+
+    if (granted.length === 0) return;
+
+    await this.audit.record(
+      AUDIT_ACTIONS.ROLE_PERMISSION_SET,
+      { type: 'role', id: role.id },
+      {
+        role_name: role.name,
+        added: granted.length,
+        source: `${IAM_APPLICATION_KEY} client-tier catalog`,
+      },
+    );
   }
 }

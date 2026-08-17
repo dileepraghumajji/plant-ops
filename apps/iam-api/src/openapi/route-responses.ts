@@ -157,9 +157,10 @@ const failing = (
 /**
  * The two shapes the admin surfaces repeat.
  *
- * `403` because both the platform (`assertPlatformAdmin`) and the client-admin
- * (`assertAdministrator`) checks refuse there; `404` because every by-id route
- * can miss inside the caller's tenant; `409` where a natural key can collide.
+ * `403` because `PermissionGuard` refuses there — with `PERMISSION_DENIED` on
+ * the platform and client tiers alike, and `SCOPE_DENIED` on the routes that
+ * name a scope node; `404` because every by-id route can miss inside the
+ * caller's tenant; `409` where a natural key can collide.
  */
 const DENIED_OR_MISSING = [403, 404] as const;
 const DENIED_MISSING_OR_DUPLICATE = [403, 404, 409] as const;

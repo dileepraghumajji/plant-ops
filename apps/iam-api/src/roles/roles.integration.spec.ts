@@ -72,6 +72,10 @@ import { AppModule } from '../app/app.module';
 import { AUDIT_ACTIONS } from '../audit/audit-actions';
 import { ENV } from '../config/config.module';
 import { createTestApplication } from '../testing/app-harness';
+import {
+  grantIamClientAdmin,
+  IAM_ADMIN_ROLE_NAME,
+} from '../testing/authorization.fixture';
 
 const S = `"${IAM_SCHEMA}"`;
 
@@ -328,14 +332,17 @@ describeWithDb(
         expect(listed.status).toBe(200);
         const body = (await listed.json()) as Paginated<RoleDTO>;
 
-        // Alphabetical, and the seeded system role is in the list: it is a role
-        // the tenant has, and hiding it would make this disagree with the picker
-        // every binding screen uses.
+        // Alphabetical, and both seeded system roles are in the list: they are
+        // roles the tenant has, and hiding them would make this disagree with
+        // the picker every binding screen uses. `Fixture IAM Admin` is the one
+        // carrying the `iam.client.*` permissions this very call was authorized
+        // by (`testing/authorization.fixture.ts`).
         expect(body.data.map((entry) => entry.name)).toEqual([
           SYSTEM_ROLE_NAME,
+          IAM_ADMIN_ROLE_NAME,
           'Gate Supervisor',
         ]);
-        expect(body.total).toBe(2);
+        expect(body.total).toBe(3);
 
         const [record] = await auditFor(fixture.acme, AUDIT_ACTIONS.ROLE_CREATED);
         expect(record).toMatchObject({ name: 'Gate Supervisor', is_system: false });
@@ -764,6 +771,7 @@ describeWithDb(
 
         expect(body.data.map((entry) => entry.name)).toEqual([
           SYSTEM_ROLE_NAME,
+          IAM_ADMIN_ROLE_NAME,
           'Their Role',
         ]);
         expect(body.data.every((entry) => entry.client_id === fixture.other.clientId)).toBe(
@@ -1043,6 +1051,14 @@ async function resetTenant(
       [tenant.clientId, applicationId, enabled],
     );
   }
+
+  // Last, because the wipes above take both halves of it: since Session 23
+  // every route here is gated on an `iam.client.role.*` permission, which is
+  // held through a role bound at the tenant root — and is inert unless the IAM
+  // is among the tenant's enabled applications (Doc 02 §6).
+  await grantIamClientAdmin(admin, tenant.clientId, tenant.scopeNodeId, {
+    userId: tenant.adminUserId,
+  });
 }
 
 /** Every `s17-` tenant and application, and everything hanging off them. */

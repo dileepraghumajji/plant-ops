@@ -21,11 +21,14 @@
  * 4. `RateLimitGuard` — still before any transaction, so a throttled request is
  *    rejected before the expensive work; shedding load after paying for it is
  *    not shedding load.
- * 5. `TenantContextInterceptor` — opens the transaction and applies the RLS
+ * 5. `PermissionGuard` — the WHO × WHAT × WHERE check of Doc 04, from the
+ *    route's `@RequirePermission` (Doc 04 §8). Deny-by-default: a route with
+ *    neither that nor `@NoPermissionRequired()` is refused.
+ * 6. `TenantContextInterceptor` — opens the transaction and applies the RLS
  *    context from the claims the guard established. After the guards, before
  *    the handler.
- * 6. `ZodValidationPipe` — validates and strips the parsed body.
- * 7. `HttpExceptionFilter` — turns whatever came out of all of the above into
+ * 7. `ZodValidationPipe` — validates and strips the parsed body.
+ * 8. `HttpExceptionFilter` — turns whatever came out of all of the above into
  *    the Doc 06 §2 envelope.
  *
  * ## Why body parsing sits ahead of the guards
@@ -53,6 +56,18 @@
  * unauthenticated path — argon2id on `POST /auth/login` — is `@Public()` and so
  * never reaches the verifier at all; it is protected by its own tight
  * fail-closed limit instead.
+ *
+ * ## Why authorization runs last of the three guards
+ *
+ * `PermissionGuard` is the only one that can reach Postgres — on a grants-cache
+ * miss it opens a connection of its own
+ * (`docs/adr/0001-permission-guard-connection-strategy.md`). Putting it behind
+ * the throttle means a flood of authenticated-but-unauthorized requests is shed
+ * before it can take connections out of the pool, which is the same argument
+ * that puts the throttle ahead of the transaction. It stays *before* the
+ * interceptor because Nest runs every guard before every interceptor and
+ * because refusing after opening a transaction would be paying for the work
+ * anyway.
  */
 
 import {
@@ -62,9 +77,10 @@ import {
   RequestMethod,
 } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR, APP_PIPE } from '@nestjs/core';
-import { AuthGuard } from '@plantops/auth-kit';
+import { AuthGuard, PermissionGuard } from '@plantops/auth-kit';
 import { AuthModule } from '../auth/auth.module';
 import { AuthzApiModule } from '../authz/authz-api.module';
+import { PermissionGuardModule } from '../authz/permission-guard.module';
 import { BindingsModule } from '../bindings/bindings.module';
 import { ClientsModule } from '../clients/clients.module';
 import {
@@ -107,13 +123,16 @@ import { UsersModule } from '../users/users.module';
     ServiceAccountsModule,
     BindingsModule,
     AuthzApiModule,
+    PermissionGuardModule,
     OpenApiModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: HttpExceptionFilter },
-    // Order-sensitive: see the note above. AuthGuard, then the throttle.
+    // Order-sensitive: see the note above. Authenticate, then throttle, then
+    // authorize.
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_GUARD, useClass: RateLimitGuard },
+    { provide: APP_GUARD, useClass: PermissionGuard },
     { provide: APP_INTERCEPTOR, useClass: TenantContextInterceptor },
     { provide: APP_PIPE, useClass: ZodValidationPipe },
   ],

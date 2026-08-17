@@ -20,9 +20,9 @@
  * id = $2` statements here is not tidiness. It is what keeps "is this role mine"
  * a single definition: a local copy would be correct the day it was written and
  * would then have to be found again every time one of those surfaces changed
- * what visible means — which is the drift `common/administrator.ts` and
- * `audit-actions.ts` both exist to prevent, applied to the one place where
- * getting it wrong grants somebody access.
+ * what visible means — which is the drift `audit-actions.ts` and
+ * `authz/iam-permissions.ts` both exist to prevent, applied to the one place
+ * where getting it wrong grants somebody access.
  *
  * No cycle: each of the four imports only `AuditModule`, `AuthModule`,
  * `AuthzModule` and `DatabaseModule`, and none of them imports this one. Nothing

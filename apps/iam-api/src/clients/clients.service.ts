@@ -37,10 +37,14 @@
  * created, so a client suspended mid-flight gets no session even if the
  * credential check had already passed.
  *
- * ## Interim authorization
+ * ## Authorization
  *
- * `assertPlatformAdmin()` in front of every method, replaced in Session 23 by
- * `@RequirePermission('iam.platform.*')`. See `common/platform-admin.ts`.
+ * `@RequirePermission('iam.platform.client.…')` on the routes, checked by
+ * `PermissionGuard` before this service runs (Session 23). No scope target: a
+ * platform grant is bound at the platform scope root, outside every customer
+ * tree, and Doc 04 §10 has it skip the tenant coverage step. The `:id` in the
+ * path is a *target*, not an authority — what may be done with it is decided by
+ * a permission held at the platform root, never by the token's `cid`.
  */
 
 import { Injectable } from '@nestjs/common';
@@ -54,7 +58,6 @@ import {
 import { IAM_SCHEMA, withProvisioningTenant } from '@plantops/db';
 import { AUDIT_ACTIONS } from '../audit/audit-actions';
 import { AuditService } from '../audit/audit.service';
-import { assertPlatformAdmin } from '../common/platform-admin';
 import { entityManager } from '../common/transaction-context';
 import { rethrowAsConflict } from '../registry/conflict';
 
@@ -123,8 +126,6 @@ export class ClientsService {
    * is a platform admin who can list every client anyway.
    */
   async create(input: CreateClientInput): Promise<ClientDTO> {
-    await assertPlatformAdmin();
-
     const manager = entityManager();
     const [{ id }] = (await manager.query(`select gen_random_uuid() as id`)) as {
       id: string;
@@ -176,8 +177,6 @@ export class ClientsService {
    * what the `client` table contains to the one caller entitled to know.
    */
   async list(query: { page?: number; limit?: number } = {}): Promise<Paginated<ClientDTO>> {
-    await assertPlatformAdmin();
-
     const { page, limit } = normalizePagination(query);
 
     const rows = (await entityManager().query(
@@ -217,8 +216,6 @@ export class ClientsService {
    * Returns `null` when no such client exists.
    */
   async update(id: string, input: UpdateClientInput): Promise<ClientDTO | null> {
-    await assertPlatformAdmin();
-
     const manager = entityManager();
 
     return withProvisioningTenant(manager, id, async () => {
@@ -310,9 +307,9 @@ export class ClientsService {
    * created under, an id that does not exist must be a 404 naming the client
    * rather than a foreign-key violation reported as a 500.
    *
-   * Deliberately **not** gated: its callers are already past
-   * `assertPlatformAdmin()`, and a second check here would be one more place for
-   * the two to disagree once Session 23 replaces the first.
+   * Deliberately **not** gated: every caller is already past the route's own
+   * `@RequirePermission`, and a second check here would be one more place for
+   * the two to disagree.
    */
   async findRow(id: string): Promise<ClientRow | null> {
     const [row] = (await entityManager().query(

@@ -81,7 +81,6 @@ import {
 } from './manifest-diff';
 import { NavService } from './nav.service';
 import { PermissionsService } from './permissions.service';
-import { assertPlatformAdmin } from '../common/platform-admin';
 
 const S = `"${IAM_SCHEMA}"`;
 
@@ -105,8 +104,6 @@ export class ManifestService {
     applicationId: string,
     manifest: ApplicationManifest,
   ): Promise<ManifestUpsertResponse> {
-    await assertPlatformAdmin();
-
     const application = await this.applications.findRow(applicationId);
     if (application === null) throw IamException.notFound('The application');
 

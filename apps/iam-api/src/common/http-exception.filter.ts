@@ -24,6 +24,7 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
+import { AuthorizationDeniedException } from '@plantops/auth-kit';
 import {
   IamErrorCode,
   type IamErrorDetail,
@@ -116,6 +117,14 @@ export class HttpExceptionFilter implements ExceptionFilter {
         message: exception.message,
         details: exception.details,
       };
+    }
+
+    // `PermissionGuard`'s two refusals. A bare `ForbiddenException` would fall
+    // through to the table below and become `PERMISSION_DENIED` — correct for
+    // one of them and wrong for the other, and `SCOPE_DENIED` is the one that
+    // tells a client *where* the subject lacks access (Doc 06 §2).
+    if (exception instanceof AuthorizationDeniedException) {
+      return { code: exception.code, message: exception.message };
     }
 
     if (exception instanceof HttpException) {

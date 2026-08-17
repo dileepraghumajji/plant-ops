@@ -43,13 +43,14 @@
  *
  * ## Authorization
  *
- * Authenticated by the app-wide `AuthGuard`, then checked inside the service —
- * not as a guard, because a guard runs before the transaction that carries the
- * RLS context exists (`common/administrator.ts`). Interim until Session 23
- * replaces it with `@RequirePermission('iam.client.user.*')`, whose guard
- * carries its own connection and RLS context rather than the request's
- * (`docs/adr/0001-permission-guard-connection-strategy.md`) — the routes, status
- * codes and envelopes below are unaffected by the swap.
+ * Authenticated by the app-wide `AuthGuard`, then authorized by
+ * `PermissionGuard` from the `@RequirePermission('iam.client.user.…')` on each
+ * route below (Doc 04 §8). The guard carries its own connection and RLS context
+ * rather than the request's, because it runs before the interceptor opens one
+ * (`docs/adr/0001-permission-guard-connection-strategy.md`).
+ *
+ * The bulk upload carries its own key rather than `user.create`: one adds a
+ * person, the other adds up to five hundred in a single unreviewed act.
  */
 
 import {
@@ -64,6 +65,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import { RequirePermission } from '@plantops/auth-kit';
 import {
   IAM_ROUTE_PREFIX,
   type BulkUserUploadResponse,
@@ -73,6 +75,7 @@ import {
   type UserDetailDTO,
 } from '@plantops/contracts';
 import type { VerifiedClaims } from '@plantops/db';
+import { IAM_CLIENT_PERMISSIONS as P } from '../authz/iam-permissions';
 import { Claims } from '../common/claims.decorator';
 import { IamException } from '../common/iam.exception';
 import { RateLimit } from '../common/rate-limit.decorator';
@@ -114,6 +117,7 @@ export class UsersController {
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @RateLimit(USERS_RATE_LIMIT)
+  @RequirePermission(P.USER_CREATE)
   create(
     @Claims() claims: VerifiedClaims,
     @Body() body: CreateUserDto,
@@ -132,6 +136,7 @@ export class UsersController {
   @Post('bulk')
   @HttpCode(HttpStatus.OK)
   @RateLimit(BULK_UPLOAD_RATE_LIMIT)
+  @RequirePermission(P.USER_BULK_UPLOAD)
   bulkUpload(
     @Claims() claims: VerifiedClaims,
     @Body() body: BulkUserUploadDto,
@@ -142,6 +147,7 @@ export class UsersController {
   /** List, search and the `status=locked` filter of Doc 09 §3.3. */
   @Get()
   @RateLimit(USERS_RATE_LIMIT)
+  @RequirePermission(P.USER_READ)
   list(
     @Claims() claims: VerifiedClaims,
     @Query() query: UsersQueryDto,
@@ -157,6 +163,7 @@ export class UsersController {
    */
   @Get('by-role/:roleId')
   @RateLimit(USERS_RATE_LIMIT)
+  @RequirePermission(P.USER_READ)
   async byRole(
     @Claims() claims: VerifiedClaims,
     @Param('roleId', uuidParam()) roleId: string,
@@ -176,6 +183,7 @@ export class UsersController {
    */
   @Get(':id')
   @RateLimit(USERS_RATE_LIMIT)
+  @RequirePermission(P.USER_READ)
   async detail(
     @Claims() claims: VerifiedClaims,
     @Param('id', uuidParam()) id: string,
@@ -188,6 +196,7 @@ export class UsersController {
   /** Update, lock, unlock or disable (Doc 06 §8, Doc 03 §8). */
   @Patch(':id')
   @RateLimit(USERS_RATE_LIMIT)
+  @RequirePermission(P.USER_UPDATE)
   async update(
     @Claims() claims: VerifiedClaims,
     @Param('id', uuidParam()) id: string,
