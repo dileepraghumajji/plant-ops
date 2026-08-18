@@ -71,6 +71,7 @@ import {
   resolvedGrantsSchema,
   roleBindingSchema,
   roleSchema,
+  permissionCatalogSchema,
   rolePermissionsSchema,
   scopeNodeSchema,
   scopeTreeSchema,
@@ -310,6 +311,13 @@ export const ROUTE_RESPONSES: ReadonlyMap<
     remove: failing(
       noContent('The role and its bindings were deleted'),
       ...DENIED_MISSING_OR_DUPLICATE,
+    ),
+    permissionCatalog: failing(
+      ok(
+        permissionCatalogSchema,
+        'Everything a role of this tenant may be given (Doc 09 §3.2)',
+      ),
+      403,
     ),
     permissions: failing(ok(rolePermissionsSchema), ...DENIED_OR_MISSING),
     setPermissions: failing(

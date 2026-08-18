@@ -80,6 +80,7 @@ import {
   paginated,
   SubjectType,
   type Paginated,
+  type PermissionCatalogResponse,
   type RoleDTO,
   type RolePermissionDTO,
   type RolePermissionsResponse,
@@ -461,6 +462,43 @@ export class RolesService {
     );
 
     return true;
+  }
+
+  /**
+   * Everything a role of this tenant may be given (Doc 06 §7, Doc 09 §3.2).
+   *
+   * The picker's source. Its `where` clause is deliberately the same three
+   * conditions {@link RolesService.setPermissions} validates each candidate
+   * against — the permission active, its application active in the registry, and
+   * that application enabled for this client (Doc 02 §6) — so anything offered
+   * is mappable. Stated twice in one file rather than shared, because they are
+   * two different statements about the same rule: this one selects a set and
+   * that one explains, per id, which of the three failed. A single fragment
+   * would make the second unable to say why.
+   *
+   * The tenant comes from `claims.cid` alone, and RLS narrows `client_application`
+   * to the caller's rows regardless — the parameter is what makes the `left
+   * join` correlate, not what makes it safe.
+   *
+   * Not paginated: this is one tenant's enabled surface, a few hundred rows at
+   * the outside, and a picker that paged would make the operator hunt for a
+   * permission they can already name.
+   */
+  async permissionCatalog(claims: VerifiedClaims): Promise<PermissionCatalogResponse> {
+    const rows = (await entityManager().query(
+      `select ${PERMISSION_COLUMNS}
+         from ${S}."permission" p
+         join ${S}."application" a on a.id = p.application_id
+         join ${S}."client_application" ca
+           on ca.application_id = a.id and ca.client_id = $1
+        where ca.enabled = true
+          and a.is_active = true
+          and p.is_active = true
+        order by a.name asc, p.key asc`,
+      [claims.cid],
+    )) as RolePermissionRow[];
+
+    return { client_id: claims.cid, permissions: rows.map(toPermissionDto) };
   }
 
   /**

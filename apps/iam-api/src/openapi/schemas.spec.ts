@@ -34,6 +34,7 @@ import type {
   JwkDTO,
   JwksResponse,
   ManifestUpsertResponse,
+  PermissionCatalogResponse,
   NavCatalogResponse,
   NavigationResponse,
   NavPermissionsResult,
@@ -73,6 +74,7 @@ import {
   jwksSchema,
   livenessSchema,
   manifestUpsertSchema,
+  permissionCatalogSchema,
   navCatalogSchema,
   navigationSchema,
   navPermissionsResultSchema,
@@ -135,6 +137,7 @@ export type _ResponseSchemasMirrorTheContracts = [
   Expect<Mirrors<typeof navCatalogSchema, NavCatalogResponse>>,
   Expect<Mirrors<typeof navPermissionsResultSchema, NavPermissionsResult>>,
   Expect<Mirrors<typeof manifestUpsertSchema, ManifestUpsertResponse>>,
+  Expect<Mirrors<typeof permissionCatalogSchema, PermissionCatalogResponse>>,
 
   // clients
   Expect<Mirrors<typeof clientSchema, ClientDTO>>,
