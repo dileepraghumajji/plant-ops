@@ -25,12 +25,14 @@
  * new page takes over its route with no coordination. When the last row goes,
  * so do this file and the two catch-all pages.
  *
- * One wrinkle since Session 33: a *dynamic* segment also beats the catch-all, so
- * `admin/users/[id]` would have swallowed `/admin/users/by-role` and
- * `/admin/users/bulk`. Those two therefore have `page.tsx` files of their own
- * that render `<PendingScreenPage>` — still pending, still listed here, but
- * holding their routes explicitly. `pending-screens.spec.ts` tells the two kinds
- * of page apart rather than assuming a file means a finished screen.
+ * Session 33 hit a wrinkle worth recording even though Session 34 has since
+ * resolved it: a *dynamic* segment also beats the catch-all, so
+ * `admin/users/[id]` swallowed `/admin/users/by-role` and `/admin/users/bulk`,
+ * and both needed `page.tsx` files of their own just to keep rendering the
+ * placeholder they were already rendering. `pending-screens.spec.ts` therefore
+ * tells a placeholder page from a finished one rather than assuming a file means
+ * a screen — which is the check that will matter again the next time a dynamic
+ * segment lands above a pending route.
  */
 
 import type { IamClient } from '@plantops/iam-client';
@@ -81,23 +83,6 @@ export const PENDING_SCREENS: Readonly<Record<string, PendingScreen>> = Object.f
       });
       return count('audit record')(page.total);
     },
-  },
-
-  '/admin/users/by-role': {
-    title: 'Users by role',
-    description: 'Pick a role, see who holds it and at which scope node.',
-    session: 'Session 34',
-    probe: async (iam) =>
-      iam.roles.list({ limit: 1 }).then((page) => count('role')(page.total)),
-  },
-
-  '/admin/users/bulk': {
-    title: 'Bulk user upload',
-    description:
-      'A CSV or JSON roster, with a per-row report: created, skipped or errored, and why.',
-    session: 'Session 34',
-    probe: async (iam) =>
-      iam.users.list({ limit: 1 }).then((page) => count('existing user')(page.total)),
   },
 
   '/admin/access': {

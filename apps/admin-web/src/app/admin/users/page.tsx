@@ -29,7 +29,12 @@
 import type { UserDTO, UserStatus } from '@plantops/contracts';
 import { DataTable, PageHeader, ScreenEmpty, StatusTag } from '@plantops/ui';
 import { useAsync, useIam } from '@plantops/web-kit';
-import { PlusOutlined, SearchOutlined } from '@ant-design/icons';
+import {
+  PlusOutlined,
+  SearchOutlined,
+  TeamOutlined,
+  UploadOutlined,
+} from '@ant-design/icons';
 import { Button, Input, Space, Tabs, Tag, Typography } from 'antd';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState, type ReactElement } from 'react';
@@ -124,15 +129,34 @@ export default function UsersPage(): ReactElement {
         title="Users"
         description="Everyone in your organisation. Signing in is one thing and being able to do something is another — open a profile to see what a person actually holds."
         actions={
-          canCreate && (
+          <>
+            {/*
+              Ungated, like every other way into a screen: the two below make
+              their own calls and render their own refusals, and a link that
+              vanished would leave a menu entry with nothing behind it (Doc 09 §4).
+            */}
             <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              onClick={() => setCreating(true)}
+              icon={<TeamOutlined />}
+              onClick={() => router.push('/admin/users/by-role')}
             >
-              Add a person
+              By role
             </Button>
-          )
+            <Button
+              icon={<UploadOutlined />}
+              onClick={() => router.push('/admin/users/bulk')}
+            >
+              Bulk upload
+            </Button>
+            {canCreate && (
+              <Button
+                type="primary"
+                icon={<PlusOutlined />}
+                onClick={() => setCreating(true)}
+              >
+                Add a person
+              </Button>
+            )}
+          </>
         }
         footer={
           <Space direction="vertical" size="small" style={{ width: '100%' }}>
@@ -181,11 +205,17 @@ export default function UsersPage(): ReactElement {
             }
             action={
               search === '' &&
-              tab.status === undefined &&
-              canCreate && (
-                <Button type="primary" onClick={() => setCreating(true)}>
-                  Add the first person
-                </Button>
+              tab.status === undefined && (
+                <Space>
+                  <Button onClick={() => router.push('/admin/users/bulk')}>
+                    Upload a roster
+                  </Button>
+                  {canCreate && (
+                    <Button type="primary" onClick={() => setCreating(true)}>
+                      Add the first person
+                    </Button>
+                  )}
+                </Space>
               )
             }
           />

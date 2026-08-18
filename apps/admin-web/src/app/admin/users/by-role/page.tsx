@@ -1,22 +1,18 @@
+'use client';
+
 /**
- * Still Session 34's screen — but it needs a route of its own now.
+ * Users by Role (Doc 09 §3.3), at `/admin/users/by-role`.
  *
- * Session 33 added `admin/users/[id]`, and a single dynamic segment beats the
- * optional catch-all in Next's resolution: without this file
- * `/admin/users/by-role` would render the user profile with `id="by-role"`
- * rather than the placeholder, and the first symptom would be a 400 from
- * `GET /iam/users/by-role`.
- *
- * So the placeholder keeps its route explicitly. It renders exactly what the
- * catch-all rendered — `PENDING_SCREENS` is still the single source of what is
- * pending — and Session 34 replaces the body of this file rather than creating
- * it.
+ * The screen is `components/users/users-by-role.tsx`; this file is the route,
+ * and it stays a route of its own rather than a tab of the user list because
+ * that is where the IAM's own manifest puts it (`tools/iam-manifest.json`) and
+ * the console renders the menu the server sends.
  */
 
 import type { ReactElement } from 'react';
 
-import { PendingScreenPage } from '../../../../components/pending-screen-page';
+import { UsersByRole } from '../../../../components/users/users-by-role';
 
-export default function UsersByRolePlaceholder(): ReactElement {
-  return <PendingScreenPage />;
+export default function UsersByRolePage(): ReactElement {
+  return <UsersByRole />;
 }
