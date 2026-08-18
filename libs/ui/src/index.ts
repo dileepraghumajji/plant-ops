@@ -32,6 +32,8 @@
  */
 
 export * from './data/data-table';
+export * from './data/scope-tree';
+export * from './data/scope-tree-select';
 export * from './data/status-tag';
 export * from './feedback/error-copy';
 export * from './feedback/page-header';
