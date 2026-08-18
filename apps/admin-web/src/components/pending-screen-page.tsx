@@ -20,13 +20,14 @@
  * an application registered ahead of its console.
  */
 
-import { PageHeader, ScreenError, ScreenLoading } from '@plantops/ui';
-import { describeError, useAsync, useIam } from '@plantops/web-kit';
+import { PageHeader, ScreenLoading } from '@plantops/ui';
+import { useAsync, useIam } from '@plantops/web-kit';
 import { Alert, Card, Result, Space, Statistic, Typography } from 'antd';
 import { usePathname } from 'next/navigation';
 import type { ReactElement } from 'react';
 
 import { pendingScreenFor } from '../lib/pending-screens';
+import { ScreenFailure } from './screen-failure';
 
 export function PendingScreenPage(): ReactElement {
   const pathname = usePathname();
@@ -63,11 +64,11 @@ export function PendingScreenPage(): ReactElement {
 
         {!probe.loading && probe.error !== null && (
           // The real refusal, rendered. This is the 403 path.
-          <ProbeFailure error={probe.error} onRetry={probe.reload} />
+          <ScreenFailure error={probe.error} onRetry={probe.reload} />
         )}
 
         {!probe.loading && probe.error === null && (
-          <Space direction="vertical" size="large" style={{ width: '100%' }}>
+          <Space orientation="vertical" size="large" style={{ width: '100%' }}>
             <Alert
               type="success"
               showIcon
@@ -85,28 +86,3 @@ export function PendingScreenPage(): ReactElement {
   );
 }
 
-/**
- * Whatever the request threw, explained.
- *
- * `describeError` flattens the three cases a `catch` here can see — the IAM
- * refused, the request never arrived, or something in this code went wrong —
- * into one shape, so the panel does not need an `instanceof` ladder.
- */
-function ProbeFailure({
-  error,
-  onRetry,
-}: {
-  error: unknown;
-  onRetry: () => void;
-}): ReactElement {
-  const described = describeError(error);
-  return (
-    <ScreenError
-      copy={described.copy}
-      detail={described.detail}
-      requestId={described.requestId}
-      details={described.details}
-      onRetry={onRetry}
-    />
-  );
-}

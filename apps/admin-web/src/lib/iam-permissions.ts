@@ -1,0 +1,43 @@
+/**
+ * The IAM permission keys this console names in `usePermission` (Doc 02 §1).
+ *
+ * ## Why they are spelled again here
+ *
+ * `apps/iam-api/src/authz/iam-permissions.ts` already holds this list, and the
+ * obvious move would be to import it. The module boundary forbids it, correctly:
+ * `app:admin-web` may depend on `scope:contracts`, `scope:client`, `scope:ui`,
+ * `scope:web` and `scope:config`, and nothing lets one app reach into another's
+ * source (root `eslint.config.mjs`). Putting the keys in `contracts` instead
+ * would be worse — a permission is a *row created by a manifest upload*
+ * (Doc 02 §8), not a compile-time fact, and `contracts` is where the shapes that
+ * genuinely are compile-time facts live.
+ *
+ * So the console keeps its own spelling of the handful of keys it gates buttons
+ * on, and `specs/iam-permissions.spec.ts` asserts every one of them exists in
+ * `tools/iam-manifest.json` — the same drift guard the backend's
+ * `iam-manifest.spec.ts` applies to its copy. A key renamed in the manifest
+ * fails a test rather than silently hiding a button.
+ *
+ * ## Getting one wrong hides a control; it does not open one
+ *
+ * These strings decide what the console *offers*. A typo makes a button vanish,
+ * which is visible and annoying. It cannot make a forbidden call succeed: the
+ * server re-checks every request through `PermissionGuard` and answers 403,
+ * which the screens render rather than swallow (Doc 09 §4).
+ */
+
+/** Catalog administration — the surface of Doc 06 §4. */
+export const PLATFORM_PERMISSIONS = {
+  APP_CREATE: 'iam.platform.app.create',
+  APP_READ: 'iam.platform.app.read',
+  APP_UPDATE: 'iam.platform.app.update',
+  APP_MANIFEST: 'iam.platform.app.manifest',
+  PERMISSION_CREATE: 'iam.platform.permission.create',
+  PERMISSION_READ: 'iam.platform.permission.read',
+  NAV_CREATE: 'iam.platform.nav.create',
+  NAV_READ: 'iam.platform.nav.read',
+  NAV_MAP: 'iam.platform.nav.map',
+} as const;
+
+export type PlatformPermission =
+  (typeof PLATFORM_PERMISSIONS)[keyof typeof PLATFORM_PERMISSIONS];

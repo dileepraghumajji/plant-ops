@@ -47,15 +47,6 @@ const count = (label: string) => (total: number) =>
   `${total} ${label}${total === 1 ? '' : 's'}`;
 
 export const PENDING_SCREENS: Readonly<Record<string, PendingScreen>> = Object.freeze({
-  '/platform/applications': {
-    title: 'Applications',
-    description:
-      'The application catalog: register an application, upload its manifest, and edit its permissions, navigation and menu-permission mappings.',
-    session: 'Sessions 28–29',
-    probe: async (iam) =>
-      iam.applications.list({ limit: 1 }).then((page) => count('application')(page.total)),
-  },
-
   '/platform/clients': {
     title: 'Clients',
     description:
