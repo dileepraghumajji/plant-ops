@@ -18,6 +18,13 @@
  * soft-deactivating a permission changes no binding and therefore fires no other
  * invalidation, while making the key inert everywhere it was granted.
  *
+ * `NavigationModule` is Session 24's, and it is the same shape of dependency one
+ * layer over: a nav-node or `menu_permission` edit here bumps that module's
+ * `app_nav_version` after commit, so a cached tree for the application is treated
+ * as stale (Doc 05 §6). The arrow points from the writer to whoever cached the
+ * old answer, exactly as it does at `AuthzModule` — see `navigation.module.ts`
+ * for why it does not point back.
+ *
  * `ManifestService` (Session 14) is the declarative form of exactly these
  * operations, and it composes them rather than re-implementing the inserts —
  * which is why it sits in the same module and takes all three as dependencies.
@@ -32,6 +39,7 @@ import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module';
 import { AuthzModule } from '../authz/authz.module';
 import { DatabaseModule } from '../database/database.module';
+import { NavigationModule } from '../navigation/navigation.module';
 import { ApplicationsController } from './applications.controller';
 import { ApplicationsService } from './applications.service';
 import { ManifestService } from './manifest.service';
@@ -39,7 +47,7 @@ import { NavService } from './nav.service';
 import { PermissionsService } from './permissions.service';
 
 @Module({
-  imports: [AuditModule, AuthzModule, DatabaseModule],
+  imports: [AuditModule, AuthzModule, DatabaseModule, NavigationModule],
   controllers: [ApplicationsController],
   providers: [ApplicationsService, PermissionsService, NavService, ManifestService],
   exports: [ApplicationsService, PermissionsService, NavService, ManifestService],

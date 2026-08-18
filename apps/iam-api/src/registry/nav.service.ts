@@ -38,6 +38,21 @@
  * manifest upsert will reuse it: a `requires` list that loses a key has to
  * unmap, and doing so through a second private code path is how the two would
  * come to disagree about what an unmap audits.
+ *
+ * ## Every write here bumps `app_nav_version`
+ *
+ * Doc 05 §6: "when a platform admin edits `nav_node` or `menu_permission` for an
+ * application, bump an `app_nav_version[applicationId]` and treat cached trees
+ * for that app as stale". Session 24's `GET /iam/navigation` caches the
+ * *catalog* these three methods write — one entry per application, shared by
+ * every tenant — and this is the only thing that tells it the rows moved.
+ *
+ * Registered through `afterCommit()`, never inline. Bumping before the commit
+ * lets a navigation call in flight repopulate the entry from the pre-change rows
+ * and re-poison it — Doc 04 §7.1 rule 3's hazard, which belongs to
+ * "invalidate, then commit" rather than to grants specifically. And gated on
+ * something having actually changed: an idempotent re-map that inserted nothing
+ * invalidates nothing, the same rule that keeps it from writing an audit record.
  */
 
 import { Injectable } from '@nestjs/common';
@@ -52,7 +67,8 @@ import { IAM_SCHEMA } from '@plantops/db';
 import { AUDIT_ACTIONS } from '../audit/audit-actions';
 import { AuditService } from '../audit/audit.service';
 import { IamException } from '../common/iam.exception';
-import { entityManager } from '../common/transaction-context';
+import { afterCommit, entityManager } from '../common/transaction-context';
+import { NavCatalogCacheService } from '../navigation/nav-catalog-cache.service';
 import { ApplicationsService } from './applications.service';
 import { rethrowAsConflict } from './conflict';
 import { PermissionsService } from './permissions.service';
@@ -104,6 +120,7 @@ export class NavService {
     private readonly audit: AuditService,
     private readonly applications: ApplicationsService,
     private readonly permissions: PermissionsService,
+    private readonly navCatalog: NavCatalogCacheService,
   ) {}
 
   /**
@@ -188,6 +205,8 @@ export class NavService {
       })),
     );
 
+    this.invalidateCatalog(applicationId, created.length);
+
     // Freshly created nodes have no mappings yet, so `requires` is empty for all
     // of them — stated by construction rather than by a second query.
     return created.map((row) => toDto(row, []));
@@ -268,6 +287,7 @@ export class NavService {
       pairs,
       changed,
     );
+    this.invalidateCatalog(applicationId, changed.length);
 
     return { changed: changed.length, unchanged: pairs.length - changed.length };
   }
@@ -307,8 +327,26 @@ export class NavService {
       pairs,
       changed,
     );
+    this.invalidateCatalog(applicationId, changed.length);
 
     return { changed: changed.length, unchanged: pairs.length - changed.length };
+  }
+
+  /**
+   * Marks the application's cached nav catalog stale, after commit (Doc 05 §6).
+   *
+   * Public because `ManifestService` composes these three methods and also makes
+   * nav-node edits of its own — a re-parent, a relabel, a deactivation — which
+   * have no imperative counterpart to bump on their behalf. One entry point for
+   * "the catalog moved" rather than two callers each naming the cache, so the
+   * post-commit ordering is stated once.
+   *
+   * @param changed how many rows actually moved. Zero is the idempotent re-run,
+   * which invalidates nothing for the same reason it audits nothing.
+   */
+  invalidateCatalog(applicationId: string, changed: number): void {
+    if (changed === 0) return;
+    afterCommit(() => this.navCatalog.bump(applicationId));
   }
 
   /**

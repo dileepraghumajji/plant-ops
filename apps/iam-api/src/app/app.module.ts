@@ -99,6 +99,7 @@ import { ConfigModule } from '../config/config.module';
 import { DatabaseModule } from '../database/database.module';
 import { HealthModule } from '../health/health.module';
 import { IamModule } from '../iam/iam.module';
+import { NavigationModule } from '../navigation/navigation.module';
 import { OpenApiModule } from '../openapi/openapi.module';
 import { RedisModule } from '../redis/redis.module';
 import { RegistryModule } from '../registry/registry.module';
@@ -123,6 +124,7 @@ import { UsersModule } from '../users/users.module';
     ServiceAccountsModule,
     BindingsModule,
     AuthzApiModule,
+    NavigationModule,
     PermissionGuardModule,
     OpenApiModule,
   ],

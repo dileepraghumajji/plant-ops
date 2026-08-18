@@ -52,11 +52,10 @@
 
 import { Injectable } from '@nestjs/common';
 import type { AuthorizationSnapshot, GrantsSource } from '@plantops/auth-kit';
-import { SubjectType } from '@plantops/contracts';
 import { applyRlsContext, type VerifiedClaims } from '@plantops/db';
 import { DatabaseService } from '../database/database.service';
 import { GrantsCacheService } from './grants-cache.service';
-import { ResolverService, type SubjectRef } from './resolver.service';
+import { ResolverService, subjectRefOf } from './resolver.service';
 
 /**
  * The guard runs **before** the validation pipe — Nest orders pipes after
@@ -123,19 +122,4 @@ export class IamGrantsSource implements GrantsSource {
       await runner.release();
     }
   }
-}
-
-/**
- * Claims → the subject the resolution engine is keyed on.
- *
- * Every field comes from the token: the tenant from `cid`, which Doc 07 §5 makes
- * the only trustworthy source of one, and the subject from `sub` interpreted
- * through `sty`. There is no parameter here a caller could influence.
- */
-function subjectRefOf(claims: VerifiedClaims): SubjectRef {
-  return {
-    clientId: claims.cid,
-    type: claims.sty === SubjectType.USER ? SubjectType.USER : SubjectType.SERVICE,
-    id: claims.sub,
-  };
 }

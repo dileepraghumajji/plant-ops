@@ -12,8 +12,8 @@
  * missing field, an extra field, a widened or narrowed union, and an optionality
  * change.
  *
- * The two recursive schemas are asserted the other way round — see the header of
- * `schemas.ts`. Their `z.ZodType<…>` annotation is the check.
+ * The three recursive schemas are asserted the other way round — see the header
+ * of `schemas.ts`. Their `z.ZodType<…>` annotation is the check.
  *
  * The runtime cases at the bottom cover what a type cannot: that the registry's
  * names are unique, and that every schema in it can actually be converted.
@@ -34,6 +34,7 @@ import type {
   JwksResponse,
   ManifestUpsertResponse,
   NavCatalogResponse,
+  NavigationResponse,
   NavPermissionsResult,
   Paginated,
   PermissionCheckResponse,
@@ -71,6 +72,7 @@ import {
   livenessSchema,
   manifestUpsertSchema,
   navCatalogSchema,
+  navigationSchema,
   navPermissionsResultSchema,
   paginatedApplicationsSchema,
   paginatedClientsSchema,
@@ -153,6 +155,9 @@ export type _ResponseSchemasMirrorTheContracts = [
   Expect<Mirrors<typeof permissionCheckSchema, PermissionCheckResponse>>,
   Expect<Mirrors<typeof introspectSchema, IntrospectResponse>>,
 
+  // navigation
+  Expect<Mirrors<typeof navigationSchema, NavigationResponse>>,
+
   // identity & ops
   Expect<Mirrors<typeof whoAmISchema, WhoAmIResponse>>,
   Expect<Mirrors<typeof livenessSchema, LivenessReport>>,
@@ -200,6 +205,9 @@ describe('OpenAPI response schemas', () => {
     );
     expect(JSON.stringify(schemas['NavNodeCatalogDTO'])).toContain(
       `${SCHEMA_REF_PREFIX}NavNodeCatalogDTO`,
+    );
+    expect(JSON.stringify(schemas['NavNodeDTO'])).toContain(
+      `${SCHEMA_REF_PREFIX}NavNodeDTO`,
     );
   });
 

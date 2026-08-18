@@ -61,22 +61,10 @@ import { RateLimit } from '../common/rate-limit.decorator';
 import { entityManager } from '../common/transaction-context';
 import { IntrospectDto, PermissionCheckDto, ResolveQueryDto } from './dto/authz.dto';
 import { IntrospectService } from './introspect.service';
-import { ResolverService, type SubjectRef } from './resolver.service';
+import { ResolverService, subjectRefOf } from './resolver.service';
 
 /** Ten a second sustained — a machine's budget, not an operator's. */
 const RESOLUTION_RATE_LIMIT = { limit: 600, windowSeconds: 60 } as const;
-
-/**
- * The bearer, as the resolver names subjects.
- *
- * Built from the verified claims only. The three fields are `cid`, `sty` and
- * `sub`, and there is no path by which a request body could contribute to any
- * of them — which is the same guarantee `applyRlsContext` makes about the RLS
- * context these queries run under (Doc 07 §5).
- */
-function subjectOf(claims: VerifiedClaims): SubjectRef {
-  return { clientId: claims.cid, type: claims.sty, id: claims.sub };
-}
 
 @Controller(IAM_ROUTE_PREFIX)
 @NoPermissionRequired(
@@ -105,7 +93,7 @@ export class AuthzController {
     @Claims() claims: VerifiedClaims,
     @Query() query: ResolveQueryDto,
   ): Promise<ResolvedGrants> {
-    return this.resolver.grantsFor(entityManager(), subjectOf(claims), {
+    return this.resolver.grantsFor(entityManager(), subjectRefOf(claims), {
       applicationId: query.applicationId,
     });
   }
@@ -128,7 +116,7 @@ export class AuthzController {
   ): Promise<PermissionCheckResponse> {
     const allowed = await this.resolver.check(
       entityManager(),
-      subjectOf(claims),
+      subjectRefOf(claims),
       body.permission,
       body.scopeNodeId,
     );
