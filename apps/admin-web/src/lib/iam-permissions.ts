@@ -26,7 +26,7 @@
  * which the screens render rather than swallow (Doc 09 §4).
  */
 
-/** Catalog administration — the surface of Doc 06 §4. */
+/** Catalog administration (Doc 06 §4) and tenant provisioning (Doc 06 §5). */
 export const PLATFORM_PERMISSIONS = {
   APP_CREATE: 'iam.platform.app.create',
   APP_READ: 'iam.platform.app.read',
@@ -37,6 +37,15 @@ export const PLATFORM_PERMISSIONS = {
   NAV_CREATE: 'iam.platform.nav.create',
   NAV_READ: 'iam.platform.nav.read',
   NAV_MAP: 'iam.platform.nav.map',
+
+  // Tenant provisioning — the surface of Doc 06 §5.
+  CLIENT_CREATE: 'iam.platform.client.create',
+  CLIENT_READ: 'iam.platform.client.read',
+  CLIENT_UPDATE: 'iam.platform.client.update',
+  CLIENT_APP_ENABLE: 'iam.platform.client.app.enable',
+  CLIENT_APP_READ: 'iam.platform.client.app.read',
+  CLIENT_APP_UPDATE: 'iam.platform.client.app.update',
+  CLIENT_ADMIN_CREATE: 'iam.platform.client.admin.create',
 } as const;
 
 export type PlatformPermission =
