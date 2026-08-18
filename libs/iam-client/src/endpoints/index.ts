@@ -6,12 +6,10 @@
  * thousand-line class, and it is what lets a consumer that wants only one
  * surface — a migration script that talks to the registry, say — build it
  * without a token store or a cache.
- *
- * `/iam/audit` (Doc 06 §12) is absent: the endpoint does not exist yet. See the
- * note in `client.ts`.
  */
 
 export * from './applications.js';
+export * from './audit.js';
 export * from './auth.js';
 export * from './authz.js';
 export * from './bindings.js';

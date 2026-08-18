@@ -23,15 +23,12 @@
  *    empties the grants cache. Serving one subject's grants to the next is the
  *    one caching mistake that would hand a user somebody else's menu.
  *
- * ## `/iam/audit` is not here
+ * ## Every Doc 06 surface has a typed method
  *
- * Doc 06 §12's audit read endpoint is the deliverable of roadmap Session 25,
- * which has not been built: there is no `audit.controller.ts`, and
- * `@plantops/contracts` types no audit record or query. A method here would have
- * to invent both, and Session 25 would then be implementing against a client
- * rather than against Doc 06. It is the one gap in "every Doc 06 endpoint has a
- * typed method", and it closes by adding `endpoints/audit.ts` when the endpoint
- * and its contract types land.
+ * `/iam/audit` was the one gap while Session 25's endpoint and its contract
+ * types did not exist — a method here would have had to invent both, and that
+ * session would then have been implementing against a client rather than against
+ * Doc 06. Both landed, and `endpoints/audit.ts` closed it in Session 37.
  */
 
 import type { ResolvedGrants, ResolveQuery, TokenPairResponse } from '@plantops/contracts';
@@ -45,6 +42,7 @@ import {
 } from './auth.js';
 import {
   applicationsEndpoints,
+  auditEndpoints,
   authEndpoints,
   clientsEndpoints,
   navigationEndpoints,
@@ -55,6 +53,7 @@ import {
   serviceAccountsEndpoints,
   usersEndpoints,
   type ApplicationsApi,
+  type AuditApi,
   type AuthApi,
   type ClientsApi,
   type NavigationApi,
@@ -103,13 +102,15 @@ export class IamClient {
   readonly serviceAccounts: ServiceAccountsApi;
   readonly permissions: PermissionsApi;
   readonly navigation: NavigationApi;
+  readonly audit: AuditApi;
 
   /**
    * The raw, authenticated request function.
    *
-   * The escape hatch for an endpoint this library does not yet type — `/iam/audit`
-   * today — so that needing one route never means abandoning the token handling
-   * and error mapping for all of them.
+   * The escape hatch for an endpoint this library does not yet type. Nothing on
+   * Doc 06's surface needs it today; it stays because the alternative, when the
+   * next route arrives ahead of its method, is a consumer abandoning the token
+   * handling and error mapping for all of them.
    */
   readonly request: Requester;
 
@@ -159,6 +160,7 @@ export class IamClient {
     this.roleBindings = roleBindingsEndpoints(this.request);
     this.serviceAccounts = serviceAccountsEndpoints(this.request);
     this.navigation = navigationEndpoints(this.request);
+    this.audit = auditEndpoints(this.request);
   }
 
   /**
