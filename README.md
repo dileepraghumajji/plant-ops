@@ -28,7 +28,14 @@ npm install          # install all workspace deps
 docker compose up -d # local Postgres (ltree available) + Redis
 npm run migration:run             # apply the schema + bootstrap seed
 npx nx serve @plantops/iam-api    # NestJS API → http://localhost:3000
-npx nx dev @plantops/admin-web    # Next.js console → http://localhost:3000 (use -p to change port)
+npx nx dev @plantops/admin-web    # Next.js console → http://localhost:4200
+```
+
+The console has its own env file — the API's `.env` deliberately holds nothing a
+browser reads:
+
+```sh
+cp apps/admin-web/.env.example apps/admin-web/.env.local   # NEXT_PUBLIC_IAM_API_URL
 ```
 
 The API's paths are the ones Doc 06 §1 fixes — `/iam`, `/auth`, and the two ops
@@ -79,3 +86,18 @@ Module boundaries (e.g. only `iam-api` may import `libs/db`) are enforced by
 7. **Audit** woven through all mutations (Doc 10).
 
 Once this is built and proven, the kernel + Gatepass spec suite follows — Gatepass becomes a new `apps/*` that imports `contracts`, `auth-kit`, and `iam-client` and writes zero new authorization logic.
+
+## The frontend libraries
+
+`admin-web` is the first console, not the only one, so the parts a second console
+would otherwise copy live in two libraries rather than in the app:
+
+| Lib | What it is | Depends on |
+|---|---|---|
+| [`libs/ui`](libs/ui) | Presentation: the design tokens, the Ant Design 6 theme built from them, `AppShell`, `NavMenu`, the `nav_node.icon` registry, page/table/state patterns. Calls nothing. | `contracts` |
+| [`libs/web-kit`](libs/web-kit) | The browser runtime: `IamClient` in React providers, the token store, silent refresh, `useGrants`/`usePermission`, `useNavigation`, error → toast. Renders nothing of its own. | `contracts`, `iam-client`, `ui` |
+
+A gatepass or visitor console mounts `<PlantOpsProvider>` and `<AppShell>`, renders
+its own `/iam/navigation` response through the same `<NavMenu>`, and writes only
+its screens. The `scope:ui` / `scope:web` boundaries in the root ESLint config
+keep the split honest — see [`docs/fixtures/boundary-lint-check.md`](docs/fixtures/boundary-lint-check.md).
