@@ -22,13 +22,22 @@ function routesOf(entries: readonly NavEntry[]): string[] {
  * Next resolves a literal segment ahead of the optional catch-all, so a
  * `page.tsx` at the route's path takes the route over from the placeholder with
  * no other coordination. That is the mechanism each screen session uses to
- * retire its own row from `PENDING_SCREENS`, and this is the same question
- * asked of the filesystem.
+ * retire its own row from `PENDING_SCREENS`.
+ *
+ * A file is not enough to answer, though, and has not been since Session 33.
+ * `admin/users/[id]` is a dynamic segment, which also beats the catch-all — so
+ * `/admin/users/by-role` and `/admin/users/bulk` needed `page.tsx` files of
+ * their own just to keep rendering the placeholder they were already rendering.
+ * A page that mounts `<PendingScreenPage>` is still a pending screen, whatever
+ * the filesystem looks like, and this is where the two are told apart.
  */
 function hasBuiltScreen(route: string): boolean {
   const segments = route.replace(/^\/+|\/+$/g, '');
   if (segments === '') return false;
-  return existsSync(join(__dirname, '../src/app', segments, 'page.tsx'));
+
+  const page = join(__dirname, '../src/app', segments, 'page.tsx');
+  if (!existsSync(page)) return false;
+  return !readFileSync(page, 'utf-8').includes('PendingScreenPage');
 }
 
 describe('pending screens', () => {
@@ -77,7 +86,7 @@ describe('pending screens', () => {
   });
 
   it('matches a route with a trailing slash', () => {
-    expect(pendingScreenFor('/admin/users/')?.title).toBe('Users');
+    expect(pendingScreenFor('/admin/access/')?.title).toBe('Access assignment');
   });
 
   it('has nothing for a route the console does not know', () => {

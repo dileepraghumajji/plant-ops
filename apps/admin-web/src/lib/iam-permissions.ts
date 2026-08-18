@@ -71,6 +71,10 @@ export const CLIENT_PERMISSIONS = {
   ROLE_DELETE: 'iam.client.role.delete',
   ROLE_PERMISSION_READ: 'iam.client.role.permission.read',
   ROLE_PERMISSION_SET: 'iam.client.role.permission.set',
+  USER_CREATE: 'iam.client.user.create',
+  USER_READ: 'iam.client.user.read',
+  USER_UPDATE: 'iam.client.user.update',
+  USER_BULK_UPLOAD: 'iam.client.user.bulk_upload',
 } as const;
 
 export type ClientPermission =

@@ -24,6 +24,13 @@
  * path — Next resolves a literal segment ahead of the optional catch-all, so a
  * new page takes over its route with no coordination. When the last row goes,
  * so do this file and the two catch-all pages.
+ *
+ * One wrinkle since Session 33: a *dynamic* segment also beats the catch-all, so
+ * `admin/users/[id]` would have swallowed `/admin/users/by-role` and
+ * `/admin/users/bulk`. Those two therefore have `page.tsx` files of their own
+ * that render `<PendingScreenPage>` — still pending, still listed here, but
+ * holding their routes explicitly. `pending-screens.spec.ts` tells the two kinds
+ * of page apart rather than assuming a file means a finished screen.
  */
 
 import type { IamClient } from '@plantops/iam-client';
@@ -74,15 +81,6 @@ export const PENDING_SCREENS: Readonly<Record<string, PendingScreen>> = Object.f
       });
       return count('audit record')(page.total);
     },
-  },
-
-  '/admin/users': {
-    title: 'Users',
-    description:
-      'The tenant’s people: search, status filters including the locked view, and per-user lock, unlock, disable and password reset.',
-    session: 'Session 33',
-    probe: async (iam) =>
-      iam.users.list({ limit: 1 }).then((page) => count('user')(page.total)),
   },
 
   '/admin/users/by-role': {
