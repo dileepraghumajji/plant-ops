@@ -36,6 +36,7 @@ export default [
                 'scope:contracts',
                 'scope:client',
                 'scope:ui',
+                'scope:web',
                 'scope:config',
               ],
             },
@@ -58,6 +59,29 @@ export default [
             {
               sourceTag: 'scope:ui',
               onlyDependOnLibsWithTags: ['scope:contracts'],
+            },
+            // `scope:web` — the browser-side runtime (`libs/web-kit`): the IAM
+            // client wrapped in React providers, the token store, the grants
+            // and permission hooks every console shares (Session 27).
+            //
+            // A documented extension of the Doc 08 §2 table, added because the
+            // doc's `ui` row is "shared React components, tokens ← contracts"
+            // and that boundary is worth keeping: presentation that cannot
+            // reach an API stays reusable and testable without one. But the
+            // *stateful* half — where tokens live, how a session ends, what the
+            // subject may do — is equally shared by admin-web, gatepass-web and
+            // visitor-web, and putting it in an app would mean the second
+            // console copies it. So it is a lib of its own, allowed to compose
+            // `client` + `ui` + `contracts` and nothing else. Notably absent:
+            // `scope:db` and `scope:auth`, so no browser bundle can reach the
+            // IAM's tables or its NestJS guards.
+            {
+              sourceTag: 'scope:web',
+              onlyDependOnLibsWithTags: [
+                'scope:contracts',
+                'scope:client',
+                'scope:ui',
+              ],
             },
             {
               sourceTag: 'scope:config',
