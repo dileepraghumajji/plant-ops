@@ -86,7 +86,12 @@ describe('pending screens', () => {
   });
 
   it('matches a route with a trailing slash', () => {
-    expect(pendingScreenFor('/admin/access/')?.title).toBe('Access assignment');
+    // Whichever route is still pending — the point is the normalisation, and
+    // naming a route here would make this fail every time a session retires
+    // one, which is what the last three sessions kept doing.
+    const [route, screen] = Object.entries(PENDING_SCREENS)[0];
+
+    expect(pendingScreenFor(`${route}/`)?.title).toBe(screen.title);
   });
 
   it('has nothing for a route the console does not know', () => {
