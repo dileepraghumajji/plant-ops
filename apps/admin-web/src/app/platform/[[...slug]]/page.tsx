@@ -1,16 +1,16 @@
 /**
- * Every `/platform/*` route that has no screen yet.
+ * Every `/platform/*` route the console has no screen for.
  *
- * An *optional* catch-all, so it also answers bare `/platform`. Next resolves a
- * literal segment ahead of a catch-all, which is what lets Session 28 add
- * `platform/applications/page.tsx` and take that route over without touching
- * this file. See `components/pending-screen-page.tsx`.
+ * Next resolves a literal segment — and a dynamic one — ahead of an optional
+ * catch-all, so this only ever runs for a path no page claims. Since Session 37
+ * that means a nav catalog entry this build does not carry, which
+ * `components/unknown-screen.tsx` explains.
  */
 
 import type { ReactElement } from 'react';
 
-import { PendingScreenPage } from '../../../components/pending-screen-page';
+import { UnknownScreen } from '../../../components/unknown-screen';
 
-export default function PlatformPlaceholder(): ReactElement {
-  return <PendingScreenPage />;
+export default function PlatformUnknownRoute(): ReactElement {
+  return <UnknownScreen />;
 }

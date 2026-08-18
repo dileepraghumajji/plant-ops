@@ -8,8 +8,9 @@
  * stops being encoded, a PUT that quietly becomes a PATCH — all of them fail
  * here, against the document rather than against the implementation.
  *
- * `/iam/audit` (§12) is the one absent row: the endpoint is roadmap Session 25
- * and does not exist yet. See the header of `client.ts`.
+ * Every section of Doc 06 has a row, including §12: `/iam/audit` was the one
+ * gap while its endpoint and its contract types did not exist, and Session 37
+ * closed it.
  */
 
 import { IamClient } from '../client.js';
@@ -443,6 +444,25 @@ const CASES: RouteCase[] = [
     reply: { keys: [] },
     call: (c) => c.permissions.jwks(),
   },
+
+  // ── §12 audit ────────────────────────────────────────────────────────────
+  {
+    doc: '§12',
+    method: 'GET',
+    path: '/iam/audit',
+    query: { action: 'auth.login.success' },
+    call: (c) => c.audit.list({ action: 'auth.login.success' }),
+  },
+  {
+    // The one route that answers `text/csv`. Its reply is a plain string, which
+    // is the point: `accept: 'text'` keeps it inside the transport rather than
+    // outside the token handling and the error mapping.
+    doc: '§12',
+    method: 'GET',
+    path: '/iam/audit/export',
+    reply: 'id,created_at',
+    call: (c) => c.audit.export(),
+  },
 ];
 
 describe('Doc 06 route coverage', () => {
@@ -472,7 +492,7 @@ describe('Doc 06 route coverage', () => {
         }`,
     );
     expect(new Set(signatures).size).toBe(signatures.length);
-    expect(signatures).toHaveLength(55);
+    expect(signatures).toHaveLength(57);
   });
 
   it('encodes path segments rather than pasting them in', async () => {

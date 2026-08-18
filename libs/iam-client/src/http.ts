@@ -64,6 +64,17 @@ export interface RequestSpec {
    * `'bearer'` and takes part in the refresh-on-401 retry.
    */
   auth?: 'bearer' | 'none';
+  /**
+   * What the successful body is.
+   *
+   * `'json'` everywhere but one route: `GET /iam/audit/export` answers
+   * `text/csv` (Doc 06 §12), and a client that insisted on JSON would have to
+   * either special-case it outside the transport — losing the token handling and
+   * the error mapping — or hand callers a `Response` this library never exposes.
+   * Failures are unaffected: the Doc 06 §2 envelope is JSON on every route,
+   * including that one.
+   */
+  accept?: 'json' | 'text';
   signal?: AbortSignal;
 }
 
@@ -144,7 +155,7 @@ export class HttpTransport {
       this.reauthorize === undefined ||
       !(await this.reauthorize(token))
     ) {
-      return this.interpret<T>(first);
+      return this.interpret<T>(first, spec.accept);
     }
 
     // The refused response is being thrown away, so drain it: an unread body
@@ -155,7 +166,7 @@ export class HttpTransport {
     // saying this subject may not do this at all, and looping on it would turn
     // a revoked session into an unbounded refresh storm.
     const retryToken = this.authorize ? await this.authorize() : null;
-    return this.interpret<T>(await this.attempt(spec, retryToken));
+    return this.interpret<T>(await this.attempt(spec, retryToken), spec.accept);
   };
 
   private async attempt(
@@ -218,7 +229,10 @@ export class HttpTransport {
   }
 
   /** Body to value, or to the error of Doc 06 §2. */
-  private async interpret<T>(response: HttpResponseLike): Promise<T> {
+  private async interpret<T>(
+    response: HttpResponseLike,
+    accept: 'json' | 'text' = 'json',
+  ): Promise<T> {
     const text = await response.text();
     const parsed = parseJson(text);
 
@@ -228,6 +242,11 @@ export class HttpTransport {
         text,
       });
     }
+
+    // A caller that asked for text gets the body as it arrived — including an
+    // empty one, which for a CSV export is a header row that matched nothing
+    // rather than a missing answer.
+    if (accept === 'text') return text as T;
 
     // The routes that answer 204 with nothing at all (Doc 06 §3, §6, §7, §9).
     if (text.trim() === '') return undefined as T;
