@@ -78,7 +78,13 @@ export const CLIENT_PERMISSIONS = {
   BINDING_CREATE: 'iam.client.binding.create',
   BINDING_READ: 'iam.client.binding.read',
   BINDING_DELETE: 'iam.client.binding.delete',
+  // Machine identities. Both consoles gate on these: `/iam/service-accounts` is
+  // one surface, and a platform admin managing platform-level accounts is
+  // administering the platform *tenant* (`service-accounts.controller.ts`).
+  SVC_CREATE: 'iam.client.svc.create',
   SVC_READ: 'iam.client.svc.read',
+  SVC_ROTATE: 'iam.client.svc.rotate',
+  SVC_UPDATE: 'iam.client.svc.update',
 } as const;
 
 export type ClientPermission =
