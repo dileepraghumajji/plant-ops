@@ -76,15 +76,6 @@ export const PENDING_SCREENS: Readonly<Record<string, PendingScreen>> = Object.f
     },
   },
 
-  '/admin/scopes': {
-    title: 'Org structure',
-    description:
-      'The scope tree — Group, Plant, Department, Gate. This is the WHERE of every grant: access follows the tree downward.',
-    session: 'Session 31',
-    probe: async (iam) =>
-      iam.scopes.tree().then((tree) => count('root node')(tree.tree.length)),
-  },
-
   '/admin/roles': {
     title: 'Roles',
     description:

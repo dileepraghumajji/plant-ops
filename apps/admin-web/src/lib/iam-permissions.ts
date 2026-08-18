@@ -50,3 +50,22 @@ export const PLATFORM_PERMISSIONS = {
 
 export type PlatformPermission =
   (typeof PLATFORM_PERMISSIONS)[keyof typeof PLATFORM_PERMISSIONS];
+
+/**
+ * Tenant administration — the surfaces of Doc 06 §6–9, and the other half of
+ * Doc 09 §1's two consoles.
+ *
+ * A separate object rather than more entries above, because the two tiers answer
+ * different questions and a screen should not be able to reach for the wrong
+ * one by autocomplete: a platform key held by a tenant administrator is a bug in
+ * the grant, not a control this console should offer.
+ */
+export const CLIENT_PERMISSIONS = {
+  SCOPE_CREATE: 'iam.client.scope.create',
+  SCOPE_READ: 'iam.client.scope.read',
+  SCOPE_UPDATE: 'iam.client.scope.update',
+  SCOPE_DELETE: 'iam.client.scope.delete',
+} as const;
+
+export type ClientPermission =
+  (typeof CLIENT_PERMISSIONS)[keyof typeof CLIENT_PERMISSIONS];
