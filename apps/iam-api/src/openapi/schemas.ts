@@ -366,6 +366,7 @@ export const manifestUpsertSchema = named(
   'ManifestUpsertResponse',
   z.object({
     application_id: z.uuid(),
+    dry_run: z.boolean(),
     changed: z.boolean(),
     diff: manifestDiffSchema,
   }),

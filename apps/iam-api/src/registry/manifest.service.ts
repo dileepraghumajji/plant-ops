@@ -1,6 +1,6 @@
 /**
- * `POST /iam/applications/:id/manifest` — the declarative catalog upsert
- * (Doc 02 §2, §7, Doc 06 §4).
+ * `POST /iam/applications/:id/manifest[?dryRun=true]` — the declarative catalog
+ * upsert, and the preview of one (Doc 02 §2, §7, Doc 06 §4, Doc 09 §2.1).
  *
  * ## The primary registration path
  *
@@ -56,10 +56,34 @@
  * empty plan returns early having written nothing at all — no rows, no audit
  * record, `changed: false`. That is what makes a re-upload a true no-op rather
  * than a series of `update`s that happen to set the same values (Doc 02 §7).
+ *
+ * ## The preview is the same computation, stopped one line earlier
+ *
+ * Doc 09 §2.1 has the operator see what an upload would do before it does it,
+ * and {@link ManifestService.preview} is that: {@link ManifestService.planFor}
+ * runs — the application is found, its key checked, the catalog snapshotted, the
+ * plan computed — and then the diff is returned instead of applied.
+ *
+ * It is a mode of *this* service rather than a screen-side simulation, and that
+ * is the point of the whole arrangement. A preview computed anywhere else would
+ * be a second implementation of Doc 02 §7's rules, and the first time the two
+ * disagreed the screen would promise one thing and the confirm button do
+ * another. Here they cannot disagree about anything except what happened to the
+ * catalog in between — which is a real race, and which the console handles by
+ * comparing the diff it previewed with the diff the upload returned.
+ *
+ * A dry run issues three `select`s inside the request transaction and nothing
+ * else: no rows, no audit record, no invalidation. It is still gated by
+ * `iam.platform.app.manifest`, because a preview reads the whole of an
+ * application's catalog and is the first half of the write it previews.
  */
 
 import { Injectable } from '@nestjs/common';
-import type { ApplicationManifest, ManifestUpsertResponse } from '@plantops/contracts';
+import type {
+  ApplicationManifest,
+  ManifestDiff,
+  ManifestUpsertResponse,
+} from '@plantops/contracts';
 import { IAM_SCHEMA } from '@plantops/db';
 import { AUDIT_ACTIONS } from '../audit/audit-actions';
 import { AuditService, type AuditEntry } from '../audit/audit.service';
@@ -95,6 +119,34 @@ export class ManifestService {
   ) {}
 
   /**
+   * What applying `manifest` to the application *would* do — `?dryRun=true`
+   * (Doc 09 §2.1).
+   *
+   * Writes nothing. The refusals are the upload's own, and deliberately so: a
+   * preview that quietly succeeded on a manifest the upload would reject with a
+   * 404 or a 409 would be a preview of something that cannot happen.
+   *
+   * @throws 404 when the application does not exist, 409 when the manifest's
+   * `key` is not the target application's.
+   */
+  async preview(
+    applicationId: string,
+    manifest: ApplicationManifest,
+  ): Promise<ManifestUpsertResponse> {
+    const { diff } = await this.planFor(applicationId, manifest);
+
+    return {
+      application_id: applicationId,
+      dry_run: true,
+      // Not hard-coded `true`: `changed` answers "would this upload do
+      // anything", which is the "no changes" the preview screen shows for a
+      // re-upload of the manifest already in force.
+      changed: !isNoOpDiff(diff),
+      diff,
+    };
+  }
+
+  /**
    * Applies a manifest to an application (Doc 02 §2).
    *
    * @throws 404 when the application does not exist, 409 when the manifest's
@@ -104,27 +156,10 @@ export class ManifestService {
     applicationId: string,
     manifest: ApplicationManifest,
   ): Promise<ManifestUpsertResponse> {
-    const application = await this.applications.findRow(applicationId);
-    if (application === null) throw IamException.notFound('The application');
-
-    // The route names the application by uuid and the document names it by key,
-    // and if they disagree one of them is a mistake nobody would notice
-    // afterwards: applying `gatepass`'s manifest to `visitor` would deactivate
-    // every one of `visitor`'s permissions and rebuild its menu as a copy of
-    // another application's, all reported as a successful upsert. `key` is not
-    // patchable for the same reason (`applications.dto.ts`).
-    if (manifest.key !== application.key) {
-      throw IamException.conflict(
-        `This manifest is for the application "${manifest.key}", but ` +
-          `"${application.key}" was addressed`,
-      );
-    }
-
-    const plan = computeManifestPlan(await this.snapshot(application), manifest);
-    const diff = toManifestDiff(plan);
+    const { plan, diff } = await this.planFor(applicationId, manifest);
 
     if (isNoOpDiff(diff)) {
-      return { application_id: applicationId, changed: false, diff };
+      return { application_id: applicationId, dry_run: false, changed: false, diff };
     }
 
     if (plan.application.changed.length > 0) {
@@ -166,10 +201,41 @@ export class ManifestService {
       },
     );
 
-    return { application_id: applicationId, changed: true, diff };
+    return { application_id: applicationId, dry_run: false, changed: true, diff };
   }
 
-  // ── reading the catalog as it is ──────────────────────────────────────────
+  // ── planning against the catalog as it is ─────────────────────────────────
+
+  /**
+   * The application, its catalog, and what the manifest would do to it.
+   *
+   * Everything the preview and the upload share, which is everything up to the
+   * first `insert`. Both call it, so both make the same two refusals and both
+   * diff against a snapshot read inside their own request transaction.
+   */
+  private async planFor(
+    applicationId: string,
+    manifest: ApplicationManifest,
+  ): Promise<{ plan: ManifestPlan; diff: ManifestDiff }> {
+    const application = await this.applications.findRow(applicationId);
+    if (application === null) throw IamException.notFound('The application');
+
+    // The route names the application by uuid and the document names it by key,
+    // and if they disagree one of them is a mistake nobody would notice
+    // afterwards: applying `gatepass`'s manifest to `visitor` would deactivate
+    // every one of `visitor`'s permissions and rebuild its menu as a copy of
+    // another application's, all reported as a successful upsert. `key` is not
+    // patchable for the same reason (`applications.dto.ts`).
+    if (manifest.key !== application.key) {
+      throw IamException.conflict(
+        `This manifest is for the application "${manifest.key}", but ` +
+          `"${application.key}" was addressed`,
+      );
+    }
+
+    const plan = computeManifestPlan(await this.snapshot(application), manifest);
+    return { plan, diff: toManifestDiff(plan) };
+  }
 
   /**
    * The whole of one application's catalog, keyed for diffing.

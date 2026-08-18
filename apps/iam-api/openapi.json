@@ -616,6 +616,9 @@
             "format": "uuid",
             "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
           },
+          "dry_run": {
+            "type": "boolean"
+          },
           "changed": {
             "type": "boolean"
           },
@@ -625,6 +628,7 @@
         },
         "required": [
           "application_id",
+          "dry_run",
           "changed",
           "diff"
         ],
@@ -4170,7 +4174,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The diff the upsert applied",
+            "description": "The diff the upsert applied — or, with `?dryRun=true`, the diff it would apply",
             "content": {
               "application/json": {
                 "schema": {
@@ -4258,6 +4262,14 @@
             "schema": {
               "type": "string",
               "format": "uuid"
+            }
+          },
+          {
+            "name": "dryRun",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
             }
           }
         ],

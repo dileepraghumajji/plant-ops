@@ -129,6 +129,23 @@ const CASES: RouteCase[] = [
       }),
   },
   {
+    // The preview behind Doc 09 §2.1's upload screen — the same route, with
+    // `?dryRun=true`. Pinned here because the flag is the whole difference
+    // between showing an operator a diff and writing one.
+    doc: '§4',
+    method: 'POST',
+    path: '/iam/applications/app-1/manifest',
+    query: { dryRun: 'true' },
+    body: { key: 'gatepass', name: 'Gatepass', permissions: [], nav: [] },
+    call: (c) =>
+      c.applications.previewManifest('app-1', {
+        key: 'gatepass',
+        name: 'Gatepass',
+        permissions: [],
+        nav: [],
+      }),
+  },
+  {
     doc: '§4',
     method: 'POST',
     path: '/iam/applications/app-1/permissions',
@@ -435,9 +452,18 @@ describe('Doc 06 route coverage', () => {
   });
 
   it('covers every route Doc 06 publishes, and each of them once', () => {
-    const signatures = CASES.map((route) => `${route.method} ${route.path}`);
+    // The query is part of the signature because one route now has two modes:
+    // `POST …/manifest` uploads and `POST …/manifest?dryRun=true` previews, and
+    // both are typed methods a consumer can call. Signing on the path alone
+    // would make the second look like a duplicate of the first.
+    const signatures = CASES.map(
+      (route) =>
+        `${route.method} ${route.path}${
+          route.query === undefined ? '' : `?${new URLSearchParams(route.query).toString()}`
+        }`,
+    );
     expect(new Set(signatures).size).toBe(signatures.length);
-    expect(signatures).toHaveLength(53);
+    expect(signatures).toHaveLength(54);
   });
 
   it('encodes path segments rather than pasting them in', async () => {

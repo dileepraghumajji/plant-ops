@@ -63,6 +63,24 @@ export interface ApplicationsApi {
     id: string,
     manifest: ApplicationManifest,
   ): Promise<ManifestUpsertResponse>;
+
+  /**
+   * What {@link ApplicationsApi.upsertManifest} *would* do — `?dryRun=true`.
+   *
+   * The preview behind Doc 09 §2.1's upload screen: the same validation, the
+   * same refusals and the same `ManifestDiff`, computed against the catalog as
+   * it stands and applied to nothing. `dry_run` comes back `true`, and `changed`
+   * answers whether confirming would do anything at all.
+   *
+   * A separate method rather than an options argument, because the difference
+   * between the two calls is whether they write. A boolean parameter that
+   * decides that reads the same at both call sites and is the wrong thing to get
+   * backwards.
+   */
+  previewManifest(
+    id: string,
+    manifest: ApplicationManifest,
+  ): Promise<ManifestUpsertResponse>;
 }
 
 export function applicationsEndpoints(request: Requester): ApplicationsApi {
@@ -90,5 +108,12 @@ export function applicationsEndpoints(request: Requester): ApplicationsApi {
 
     upsertManifest: (id, manifest) =>
       request({ method: 'POST', path: at(id, '/manifest'), body: manifest }),
+    previewManifest: (id, manifest) =>
+      request({
+        method: 'POST',
+        path: at(id, '/manifest'),
+        query: { dryRun: true },
+        body: manifest,
+      }),
   };
 }

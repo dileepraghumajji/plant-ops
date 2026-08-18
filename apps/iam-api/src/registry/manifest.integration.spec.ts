@@ -293,6 +293,25 @@ describeWithDb(
       return (await response.json()) as ManifestUpsertResponse;
     };
 
+    /** The same route with `?dryRun=true` — Doc 09 2.1's preview. */
+    const dryRun = (
+      token: string,
+      id: string,
+      manifest: unknown,
+      value = 'true',
+    ): Promise<Response> =>
+      call(token, 'POST', `/iam/applications/${id}/manifest?dryRun=${value}`, manifest);
+
+    const previewed = async (
+      token: string,
+      id: string,
+      manifest: unknown,
+    ): Promise<ManifestUpsertResponse> => {
+      const response = await dryRun(token, id, manifest);
+      expect(response.status).toBe(200);
+      return (await response.json()) as ManifestUpsertResponse;
+    };
+
     // ── inspection ────────────────────────────────────────────────────────
 
     const navTree = async (token: string, id: string): Promise<NavCatalogResponse> => {
@@ -501,6 +520,166 @@ describeWithDb(
         // A trail with one `application.manifest.upserted` per deploy is one in
         // which the deploy that changed the catalog is invisible.
         expect(await auditActions()).toEqual([]);
+      });
+    });
+
+    // ── dry run ────────────────────────────────────────────────────────────────
+
+    /**
+     * Session 29's three acceptance criteria, at the layer that decides them.
+     *
+     * The screen renders this answer and nothing more, so what has to be true is
+     * true here: a preview writes nothing, an identical manifest previews as no
+     * change, and confirming applies *exactly* what was previewed — which is
+     * checked the only way it honestly can be, by previewing, uploading, and
+     * comparing the two diffs.
+     */
+    describe('dry run — the preview behind the upload screen', () => {
+      it('reports the whole first upload and writes not one row', async () => {
+        const token = await asPlatform();
+        const application = await registeredApplication(token);
+        const manifest = manifestFor(application);
+
+        const preview = await previewed(token, application.id, manifest);
+
+        expect(preview.dry_run).toBe(true);
+        expect(preview.changed).toBe(true);
+        expect(preview.diff.permissions.created).toEqual([
+          `${application.key}.dc.create`,
+          `${application.key}.dc.approve`,
+          `${application.key}.gate.verify`,
+        ]);
+        expect(preview.diff.nav.created).toEqual([
+          'gatepass',
+          'dc.create',
+          'dc.approvals',
+        ]);
+
+        // Nothing at all — and the audit trail is the sharper half of that. A
+        // preview that quietly audited would be a trail claiming an upload that
+        // never happened.
+        expect(await rowCount('permission', application.id)).toBe(0);
+        expect(await rowCount('nav_node', application.id)).toBe(0);
+        expect(await auditActions()).toEqual([AUDIT_ACTIONS.APPLICATION_CREATED]);
+      });
+
+      it('previews exactly what the confirm then applies', async () => {
+        const token = await asPlatform();
+        const application = await registeredApplication(token);
+        const manifest = manifestFor(application);
+
+        const preview = await previewed(token, application.id, manifest);
+        const applied = await uploaded(token, application.id, manifest);
+
+        // The criterion, stated as the equality the console promises its
+        // operator — and the reason the console compares the two itself, since
+        // only a concurrent edit can make them differ.
+        expect(applied.diff).toEqual(preview.diff);
+        expect(applied.dry_run).toBe(false);
+        expect(applied.changed).toBe(true);
+      });
+
+      it('previews an identical manifest as no change', async () => {
+        const token = await asPlatform();
+        const application = await registeredApplication(token);
+        const manifest = manifestFor(application);
+        await uploaded(token, application.id, manifest);
+
+        const preview = await previewed(token, application.id, manifest);
+
+        expect(preview.dry_run).toBe(true);
+        expect(preview.changed).toBe(false);
+        expect(preview.diff.permissions).toEqual({
+          created: [],
+          updated: [],
+          deactivated: [],
+        });
+        expect(preview.diff.nav).toEqual({ created: [], updated: [], deactivated: [] });
+        expect(preview.diff.menu_permissions).toEqual({ mapped: [], unmapped: [] });
+      });
+
+      it('shows a shrink without shrinking anything', async () => {
+        const token = await asPlatform();
+        const application = await registeredApplication(token);
+        await uploaded(token, application.id, manifestFor(application));
+
+        const shrunk = manifestWith(application, [moduleNode([createNode(application)])], {
+          permissions: [{ key: `${application.key}.dc.create`, name: 'Create DC' }],
+        });
+
+        const preview = await previewed(token, application.id, shrunk);
+
+        expect(preview.diff.permissions.deactivated).toEqual([
+          `${application.key}.dc.approve`,
+          `${application.key}.gate.verify`,
+        ]);
+        expect(preview.diff.nav.deactivated).toEqual(['dc.approvals']);
+
+        // Every row the preview said would be retired is still active.
+        const permissions = await permissionsByKey(token, application.id);
+        expect(permissions.get(`${application.key}.dc.approve`)?.is_active).toBe(true);
+        expect(
+          (await navByKey(token, application.id)).get('dc.approvals')?.is_active,
+        ).toBe(true);
+      });
+
+      it('refuses an invalid document before it previews anything', async () => {
+        const token = await asPlatform();
+        const application = await registeredApplication(token);
+
+        const response = await dryRun(token, application.id, {
+          ...manifestFor(application),
+          nav: [
+            moduleNode([createNode(application, { requires: ['not.declared.anywhere'] })]),
+          ],
+        });
+
+        expect(response.status).toBe(400);
+        expect(await errorCodeOf(response)).toBe(IamErrorCode.VALIDATION_FAILED);
+      });
+
+      it('previews a manifest addressed elsewhere as the 409 it would be', async () => {
+        const token = await asPlatform();
+        const application = await registeredApplication(token);
+
+        const response = await dryRun(token, application.id, {
+          ...manifestFor(application),
+          key: `${KEY_PREFIX}${suffix}-other`,
+        });
+
+        expect(response.status).toBe(409);
+        expect(await errorCodeOf(response)).toBe(IamErrorCode.CONFLICT);
+      });
+
+      it('treats ?dryRun=false as the upload it says it is', async () => {
+        // The coercion trap, at the wire: `Boolean('false')` is `true`, so a
+        // schema built on `z.coerce.boolean()` would turn this into a preview
+        // and leave the operator's catalog unwritten with a 200 to say it went
+        // fine.
+        const token = await asPlatform();
+        const application = await registeredApplication(token);
+
+        const response = await dryRun(
+          token,
+          application.id,
+          manifestFor(application),
+          'false',
+        );
+
+        expect(response.status).toBe(200);
+        expect(((await response.json()) as ManifestUpsertResponse).dry_run).toBe(false);
+        expect(await rowCount('permission', application.id)).toBe(3);
+      });
+
+      it('is gated exactly as the upload is', async () => {
+        const platform = await asPlatform();
+        const application = await registeredApplication(platform);
+        const outsider = await asOutsider();
+
+        const response = await dryRun(outsider, application.id, manifestFor(application));
+
+        expect(response.status).toBe(403);
+        expect(await errorCodeOf(response)).toBe(IamErrorCode.PERMISSION_DENIED);
       });
     });
 

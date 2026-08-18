@@ -65,7 +65,7 @@ import {
   PaginationDto,
   UpdateApplicationDto,
 } from './dto/applications.dto';
-import { ApplicationManifestDto } from './dto/manifest.dto';
+import { ApplicationManifestDto, ManifestQueryDto } from './dto/manifest.dto';
 import { CreateNavNodesDto, NavPermissionsDto } from './dto/nav.dto';
 import { CreatePermissionsDto } from './dto/permissions.dto';
 import { ManifestService } from './manifest.service';
@@ -204,7 +204,8 @@ export class ApplicationsController {
   // ── the whole of the above, declaratively (Doc 02 §2) ─────────────────────
 
   /**
-   * Upserts an application's permission and nav catalog from its manifest.
+   * Upserts an application's permission and nav catalog from its manifest, or —
+   * with `?dryRun=true` — reports what that would do without doing it.
    *
    * A 200, not a 201. The four routes above each create something and say so;
    * this one is idempotent by definition — the same document uploaded twice
@@ -216,6 +217,20 @@ export class ApplicationsController {
    * an application ships, and a wrapper would mean the file on disk and the body
    * on the wire are two different documents (`tools/upload-manifest.ts` posts
    * the file unchanged, which is the point).
+   *
+   * ## Why the preview is this route with a flag
+   *
+   * Doc 09 §2.1's upload screen previews a diff and then confirms it, and the
+   * two calls have to answer for the same document: same validation, same
+   * refusals, same plan. A `POST …/manifest/preview` would be a second route
+   * that could drift from this one in any of those three, and the drift would
+   * only show up as a confirm doing something the preview did not describe. The
+   * flag keeps them one handler, and `manifest.service.ts` keeps them one
+   * computation.
+   *
+   * Both modes carry `@RequirePermission(APP_MANIFEST)`. A dry run reads the
+   * whole of an application's catalog and is the first half of the write it
+   * previews; it is not a lesser thing to be allowed.
    */
   @Post(':id/manifest')
   @HttpCode(HttpStatus.OK)
@@ -223,8 +238,11 @@ export class ApplicationsController {
   @RequirePermission(P.APP_MANIFEST)
   upsertManifest(
     @Param('id', applicationId()) id: string,
+    @Query() query: ManifestQueryDto,
     @Body() body: ApplicationManifestDto,
   ): Promise<ManifestUpsertResponse> {
-    return this.manifest.upsert(id, body);
+    return query.dryRun === true
+      ? this.manifest.preview(id, body)
+      : this.manifest.upsert(id, body);
   }
 }

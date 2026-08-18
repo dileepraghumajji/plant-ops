@@ -34,6 +34,7 @@ import { DataTable, PageHeader, ScreenEmpty, StatusTag } from '@plantops/ui';
 import { useAsync, useIam, useNotices } from '@plantops/web-kit';
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import { Alert, Button, Form, Input, Modal, Space, Typography } from 'antd';
+import Link from 'next/link';
 import { useState, type ReactElement } from 'react';
 
 import { ScreenFailure } from '../screen-failure';
@@ -110,7 +111,17 @@ export function PermissionsTab({
     <>
       <PageHeader
         title="Permissions"
-        description="What a role can carry for this application. Keys are permanent — a role mapping, a manifest and every audit record refer to them."
+        description={
+          <>
+            What a role can carry for this application. Keys are permanent — a
+            role mapping, a manifest and every audit record refer to them. To
+            rename or retire one,{' '}
+            <Link href="/platform/applications/manifest">
+              upload this application’s manifest
+            </Link>
+            .
+          </>
+        }
         actions={
           canCreate && (
             <Button icon={<PlusOutlined />} onClick={() => setAdding(true)}>

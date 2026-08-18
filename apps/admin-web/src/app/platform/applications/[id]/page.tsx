@@ -29,6 +29,7 @@ import type { ApplicationDTO } from '@plantops/contracts';
 import { PageHeader, ScreenLoading, StatusTag } from '@plantops/ui';
 import { useAsync, useIam, useNotices } from '@plantops/web-kit';
 import { Button, Result, Space, Tabs, Tooltip, Typography } from 'antd';
+import { UploadOutlined } from '@ant-design/icons';
 import { useParams, useRouter } from 'next/navigation';
 import { useCallback, useState, type ReactElement } from 'react';
 
@@ -158,33 +159,42 @@ export default function ApplicationDetailPage(): ReactElement {
           </Space>
         }
         actions={
-          canUpdate && (
-            <>
-              <Button onClick={() => setEditing(true)}>Edit</Button>
-              <Tooltip
-                title={
-                  app.is_active
-                    ? 'Hides it everywhere and stops its permissions resolving. Nothing is deleted.'
-                    : 'Restores it exactly as it was.'
-                }
-              >
-                <Button
-                  danger={app.is_active}
-                  loading={toggling}
-                  onClick={() => void setActive(!app.is_active)}
+          <>
+            <Button
+              icon={<UploadOutlined />}
+              onClick={() => router.push('/platform/applications/manifest')}
+            >
+              Upload manifest
+            </Button>
+            {canUpdate && (
+              <>
+                <Button onClick={() => setEditing(true)}>Edit</Button>
+                <Tooltip
+                  title={
+                    app.is_active
+                      ? 'Hides it everywhere and stops its permissions resolving. Nothing is deleted.'
+                      : 'Restores it exactly as it was.'
+                  }
                 >
-                  {app.is_active ? 'Deactivate' : 'Activate'}
-                </Button>
-              </Tooltip>
-            </>
-          )
+                  <Button
+                    danger={app.is_active}
+                    loading={toggling}
+                    onClick={() => void setActive(!app.is_active)}
+                  >
+                    {app.is_active ? 'Deactivate' : 'Activate'}
+                  </Button>
+                </Tooltip>
+              </>
+            )}
+          </>
         }
       />
 
       <Tabs
-        // Kept off the URL for now: Session 29 adds the manifest screen at
-        // `…/applications/manifest`, and deciding how a tab is addressed is
-        // better done once, with both screens in view.
+        // Kept off the URL. The manifest screen turned out to be a sibling route
+        // rather than a fourth tab — the document names its own application, so
+        // it does not belong under one — which leaves nothing here that needs to
+        // be linkable at tab granularity.
         defaultActiveKey="permissions"
         destroyOnHidden
         items={[
