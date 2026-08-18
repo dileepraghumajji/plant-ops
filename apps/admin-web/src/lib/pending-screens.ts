@@ -56,17 +56,6 @@ const count = (label: string) => (total: number) =>
   `${total} ${label}${total === 1 ? '' : 's'}`;
 
 export const PENDING_SCREENS: Readonly<Record<string, PendingScreen>> = Object.freeze({
-  '/platform/service-accounts': {
-    title: 'Service accounts',
-    description:
-      'Platform machine identities. Secrets are shown exactly once, at create and at rotate.',
-    session: 'Session 36',
-    probe: async (iam) =>
-      iam.serviceAccounts
-        .list({ limit: 1 })
-        .then((page) => count('service account')(page.total)),
-  },
-
   '/platform/audit': {
     title: 'Platform audit',
     description:
@@ -83,17 +72,6 @@ export const PENDING_SCREENS: Readonly<Record<string, PendingScreen>> = Object.f
       });
       return count('audit record')(page.total);
     },
-  },
-
-  '/admin/service-accounts': {
-    title: 'Service accounts',
-    description:
-      'This client’s machine identities, bindable to roles and scope nodes exactly like people.',
-    session: 'Session 36',
-    probe: async (iam) =>
-      iam.serviceAccounts
-        .list({ limit: 1 })
-        .then((page) => count('service account')(page.total)),
   },
 
   '/admin/audit': {
