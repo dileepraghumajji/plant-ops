@@ -53,7 +53,11 @@ import { RouteParamtypes } from '@nestjs/common/enums/route-paramtypes.enum';
 import { IS_PUBLIC_METADATA } from '@plantops/auth-kit';
 import { z } from 'zod';
 import { type ZodDtoClass, zodSchemaOf } from '../common/validation.pipe';
-import { ROUTE_RESPONSES, type ResponseSpec } from './route-responses';
+import {
+  ROUTE_RESPONSES,
+  type ResponseBody,
+  type ResponseSpec,
+} from './route-responses';
 import {
   componentSchemas,
   errorResponseSchema,
@@ -95,7 +99,13 @@ interface OpenApiParameter {
 
 interface OpenApiResponse {
   description: string;
-  content?: { 'application/json': { schema: unknown } };
+  /**
+   * Keyed by media type, because one route on this surface does not answer with
+   * JSON: `GET /iam/audit/export` is a `text/csv` document (Doc 10 §7). Every
+   * other entry is `application/json`, including every error response — the
+   * envelope of Doc 06 §2 is JSON whatever the success body was.
+   */
+  content?: Record<string, { schema: unknown }>;
 }
 
 /** One route, as read off a controller class. */
@@ -346,21 +356,35 @@ function successResponses(spec: ResponseSpec): Record<string, OpenApiResponse> {
   return Object.fromEntries(
     [spec, ...(spec.also ?? [])].map((entry) => [
       String(entry.status),
-      entry.schema === undefined
-        ? { description: entry.description }
-        : {
-            description: entry.description,
-            content: {
-              'application/json': {
-                schema:
-                  'array' in entry && entry.array === true
-                    ? { type: 'array', items: { $ref: refFor(entry.schema) } }
-                    : { $ref: refFor(entry.schema) },
-              },
-            },
-          },
+      successResponse(entry),
     ]),
   );
+}
+
+/**
+ * One success response — a body, a media type, or neither.
+ *
+ * A `mediaType` with no `schema` is a document rather than a structure: the
+ * CSV export of Doc 10 §7, whose shape is its own format and whose columns are
+ * published as a constant (`contracts/audit.ts`) rather than as a JSON Schema
+ * nobody could generate a client from. `type: 'string'` is what OpenAPI has to
+ * say about such a body, and saying it is better than omitting the content and
+ * implying there is none.
+ */
+function successResponse(entry: ResponseBody): OpenApiResponse {
+  if (entry.schema === undefined && entry.mediaType === undefined) {
+    return { description: entry.description };
+  }
+
+  const mediaType = entry.mediaType ?? 'application/json';
+  const schema =
+    entry.schema === undefined
+      ? { type: 'string' }
+      : entry.array === true
+        ? { type: 'array', items: { $ref: refFor(entry.schema) } }
+        : { $ref: refFor(entry.schema) };
+
+  return { description: entry.description, content: { [mediaType]: { schema } } };
 }
 
 /**

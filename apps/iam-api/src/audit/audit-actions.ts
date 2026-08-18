@@ -171,6 +171,21 @@ export const AUDIT_ACTIONS = {
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];
 
 /**
+ * The same catalog as a list, sorted, for the places that need values rather
+ * than a type.
+ *
+ * There is exactly one such place: the `?action=` filter of `GET /iam/audit`
+ * (Doc 06 §12), which validates against the catalog and publishes it as an enum
+ * so a console builds its dropdown from the API instead of from a copy
+ * (`dto/audit.dto.ts`). Sorted because the published document is a committed
+ * artefact that gets diffed, and the declaration order above is grouped by Doc
+ * 10 §4's sections rather than by anything a reader of the enum would expect.
+ */
+export const AUDIT_ACTION_VALUES: readonly AuditAction[] = Object.values(
+  AUDIT_ACTIONS,
+).sort();
+
+/**
  * The two actions {@link AuditService.recordDenial} may write.
  *
  * Narrower than {@link AuditAction} on purpose: the denial writer commits on

@@ -138,7 +138,12 @@ export interface DenialAuditor {
   recordDenial(
     claims: SubjectClaims,
     outcome: Exclude<AuthorizationOutcome, 'allowed'>,
-    permission: PermissionKey,
+    /**
+     * The keys the refusal was about — one on all but the routes that admit
+     * either tier's key, and never empty. `AuthorizationDecision` in
+     * `scope-resolver.ts` says which keys a given outcome names.
+     */
+    permissions: readonly PermissionKey[],
     scopeNodeId?: string,
   ): Promise<void>;
 }
@@ -216,7 +221,7 @@ export class PermissionGuard implements CanActivate {
     await this.auditor?.recordDenial(
       claims,
       decision.outcome,
-      decision.permission,
+      decision.permissions,
       decision.scopeNodeId,
     );
 

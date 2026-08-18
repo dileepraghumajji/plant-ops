@@ -13,6 +13,7 @@
  * generator produced something", but "the generator produced what is running".
  */
 
+import { HEADERS_METADATA } from '@nestjs/common/constants';
 import { ModulesContainer } from '@nestjs/core';
 import type { Type } from '@nestjs/common';
 import { Controller, Get } from '@nestjs/common';
@@ -290,6 +291,74 @@ describe('the generated OpenAPI document', () => {
         }
       }
       expect(disagreements).toEqual([]);
+    });
+  });
+
+  describe('media types', () => {
+    /**
+     * `route-responses.ts` declares the media type and the handler sets the
+     * header; the two are independent statements about the same byte stream, so
+     * — exactly as with `@HttpCode` above — they are cross-checked rather than
+     * one being derived from the other.
+     *
+     * Compared on the type alone: the header carries `charset`, which is a
+     * parameter of the media type and not part of it, and OpenAPI keys `content`
+     * by the type.
+     */
+    const declaredMediaTypeOf = (
+      controller: Type<unknown>,
+      handler: string,
+    ): string | undefined => {
+      const headers = Reflect.getMetadata(
+        HEADERS_METADATA,
+        (controller.prototype as unknown as Record<string, object>)[handler],
+      ) as { name: string; value: string }[] | undefined;
+
+      return headers
+        ?.find(({ name }) => name.toLowerCase() === 'content-type')
+        ?.value.split(';')[0]
+        .trim();
+    };
+
+    it('agrees with the content-type header the handler sets', () => {
+      const disagreements: string[] = [];
+
+      for (const [controller, responses] of ROUTE_RESPONSES) {
+        for (const [handler, spec] of Object.entries(responses)) {
+          const header = declaredMediaTypeOf(controller, handler);
+          const declared = spec.mediaType ?? (spec.schema && 'application/json');
+          if (header !== undefined && header !== declared) {
+            disagreements.push(`${controller.name}.${handler}: ${header} ≠ ${declared}`);
+          }
+        }
+      }
+
+      expect(disagreements).toEqual([]);
+    });
+
+    it('names every body that is not JSON, and there are two', () => {
+      // Enumerated rather than spot-checked: the interesting regression is a
+      // *new* non-JSON body appearing unnoticed, or one of these two silently
+      // reverting to `application/json` — which a generated client would then
+      // try to parse. Both fail here.
+      const exceptions = Object.entries(document.paths)
+        .flatMap(([path, operations]) =>
+          Object.entries(operations).flatMap(([verb, operation]) =>
+            Object.entries(operation.responses).flatMap(([status, response]) =>
+              Object.keys(response.content ?? {}).map(
+                (type) => `${verb} ${path} ${status} → ${type}`,
+              ),
+            ),
+          ),
+        )
+        .filter((entry) => !entry.endsWith('application/json'));
+
+      expect(exceptions.sort()).toEqual([
+        // The JWK Set of RFC 7517 §8.5.1 …
+        'get /iam/.well-known/jwks.json 200 → application/jwk-set+json',
+        // … and the CSV export of Doc 10 §7.
+        'get /iam/audit/export 200 → text/csv',
+      ]);
     });
   });
 

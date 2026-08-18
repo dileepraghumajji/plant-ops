@@ -27,6 +27,7 @@
 
 import type { Type } from '@nestjs/common';
 import type { ZodType } from 'zod';
+import { AuditController } from '../audit/audit.controller';
 import { AuthController } from '../auth/auth.controller';
 import { JwksController } from '../auth/jwks.controller';
 import { AuthzController } from '../authz/authz.controller';
@@ -56,6 +57,7 @@ import {
   navPermissionsResultSchema,
   navigationSchema,
   paginatedApplicationsSchema,
+  paginatedAuditSchema,
   paginatedClientsSchema,
   paginatedPermissionsSchema,
   paginatedRoleBindingsSchema,
@@ -88,6 +90,15 @@ export interface ResponseBody {
   readonly schema?: ZodType;
   /** The handler returns an array of `schema`. */
   readonly array?: true;
+  /**
+   * The media type of the body, where it is not `application/json`.
+   *
+   * One route: the CSV of Doc 10 §7. Stated here rather than read off the
+   * handler's `@Header('content-type', …)`, for the reason the header of this
+   * file gives about statuses — the two are declared separately so that they
+   * must agree, and `openapi.spec.ts` asserts they do.
+   */
+  readonly mediaType?: string;
 }
 
 /** One handler's success response, plus what else it is documented to do. */
@@ -203,7 +214,16 @@ export const ROUTE_RESPONSES: ReadonlyMap<
   }),
 
   routes(JwksController, {
-    jwks: ok(jwksSchema, 'The public keys tokens are verified against'),
+    // `application/jwk-set+json`, which is what the handler's own
+    // `@Header` already answers with (RFC 7517 §8.5.1). Declared here since
+    // Session 25, when the media-type cross-check in `openapi.spec.ts` found
+    // the document claiming plain JSON for it — the body is unchanged and every
+    // client that read it still does; the document simply stopped understating
+    // what it is.
+    jwks: {
+      ...ok(jwksSchema, 'The public keys tokens are verified against'),
+      mediaType: 'application/jwk-set+json',
+    },
   }),
 
   routes(HealthController, {
@@ -362,6 +382,26 @@ export const ROUTE_RESPONSES: ReadonlyMap<
     // ungated route an existence oracle over the platform catalog (Doc 06 §2).
     // The universal 400 covers a malformed `?applicationId=`.
     tree: ok(navigationSchema, 'The bearer’s pruned menu'),
+  }),
+
+  routes(AuditController, {
+    // 403 and nothing else beyond the universal list. There is no 404 because
+    // there is nothing to miss — a filter that matches nothing is an empty page,
+    // and for a client admin naming another tenant's `client_id` that emptiness
+    // is the answer Doc 06 §2 requires (`audit-query.service.ts`). No 409
+    // because nothing here writes a row a key could collide with.
+    list: failing(ok(paginatedAuditSchema, 'One page of the audit trail'), 403),
+    // The 400 the universal list already carries is this route's real refusal:
+    // a filter matching more than the export cap is refused with the count
+    // rather than truncated (`audit-export.service.ts`).
+    export: failing(
+      {
+        status: 200,
+        description: 'The filtered trail as CSV; the export is itself audited',
+        mediaType: 'text/csv',
+      },
+      403,
+    ),
   }),
 
   routes(ServiceAccountsController, {

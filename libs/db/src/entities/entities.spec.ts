@@ -10,6 +10,8 @@
  */
 
 import {
+  AUDIT_ACTOR_TYPE_VALUES,
+  AuditActorType,
   CLIENT_STATUS_VALUES,
   ClientStatus,
   NavNodeKind,
@@ -260,6 +262,16 @@ describe('Postgres enums (migration 0001)', () => {
     // can get in at all.
     expect([...USER_STATUSES]).toEqual([...USER_STATUS_VALUES]);
     expect([...USER_STATUSES]).toEqual(Object.values(UserStatus));
+  });
+
+  it('agrees with @plantops/contracts on the audit actor types', () => {
+    // The same two-vocabulary problem once more, for `GET /iam/audit`
+    // (Doc 06 §12). This column is never written by the API — `iam.write_audit`
+    // derives it (migration 0010) — so the drift would be silent in the other
+    // direction: a read shape publishing an `actor_type` the column can never
+    // produce, and a filter on it that always returns nothing.
+    expect([...AUDIT_ACTOR_TYPES]).toEqual([...AUDIT_ACTOR_TYPE_VALUES]);
+    expect([...AUDIT_ACTOR_TYPES]).toEqual(Object.values(AuditActorType));
   });
 
   it('agrees with @plantops/contracts on the client states', () => {

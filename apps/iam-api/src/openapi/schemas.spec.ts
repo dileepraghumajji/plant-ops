@@ -22,6 +22,7 @@
 import type {
   AccessTokenResponse,
   ApplicationDTO,
+  AuditRecordDTO,
   BulkUserUploadResponse,
   ClientAdminDTO,
   ClientApplicationDTO,
@@ -60,6 +61,7 @@ import {
   SCHEMA_REF_PREFIX,
   accessTokenSchema,
   applicationSchema,
+  auditRecordSchema,
   bulkUserUploadSchema,
   clientAdminSchema,
   clientApplicationSchema,
@@ -75,6 +77,7 @@ import {
   navigationSchema,
   navPermissionsResultSchema,
   paginatedApplicationsSchema,
+  paginatedAuditSchema,
   paginatedClientsSchema,
   paginatedPermissionsSchema,
   paginatedRoleBindingsSchema,
@@ -158,6 +161,9 @@ export type _ResponseSchemasMirrorTheContracts = [
   // navigation
   Expect<Mirrors<typeof navigationSchema, NavigationResponse>>,
 
+  // audit
+  Expect<Mirrors<typeof auditRecordSchema, AuditRecordDTO>>,
+
   // identity & ops
   Expect<Mirrors<typeof whoAmISchema, WhoAmIResponse>>,
   Expect<Mirrors<typeof livenessSchema, LivenessReport>>,
@@ -172,6 +178,7 @@ export type _ResponseSchemasMirrorTheContracts = [
   Expect<Mirrors<typeof paginatedUsersByRoleSchema, Paginated<UserByRoleDTO>>>,
   Expect<Mirrors<typeof paginatedRoleBindingsSchema, Paginated<RoleBindingDTO>>>,
   Expect<Mirrors<typeof paginatedServiceAccountsSchema, Paginated<ServiceAccountDTO>>>,
+  Expect<Mirrors<typeof paginatedAuditSchema, Paginated<AuditRecordDTO>>>,
 ];
 
 describe('OpenAPI response schemas', () => {

@@ -148,21 +148,21 @@ describe('ScopeResolver.decide — the rule PermissionGuard enforces', () => {
     new ScopeResolver(sourceOf(grants, tree));
 
   it('allows an unscoped route when the permission is held', async () => {
-    const decision = await resolve(PLANT_A).decide(CLAIMS, { permission: APPROVE });
+    const decision = await resolve(PLANT_A).decide(CLAIMS, { permissions: [APPROVE] });
     expect(decision.outcome).toBe(AuthorizationOutcome.ALLOWED);
   });
 
   // Deny-by-default (Doc 04 §9), which is the property with no code of its own:
   // an empty grant set falls out of the membership test, not out of a branch.
   it('denies deny-by-default: no binding, no access', async () => {
-    const decision = await resolve(NOTHING).decide(CLAIMS, { permission: APPROVE });
+    const decision = await resolve(NOTHING).decide(CLAIMS, { permissions: [APPROVE] });
     expect(decision.outcome).toBe(AuthorizationOutcome.PERMISSION_DENIED);
   });
 
   it('reports PERMISSION_DENIED before it ever looks at the scope', async () => {
     const decision = await resolve(PLANT_A, { n1: 'g.a' }).decide(
       CLAIMS,
-      { permission: CREATE, scopeFrom: 'params.id' },
+      { permissions: [CREATE], scopeFrom: 'params.id' },
       'n1',
     );
     // Not SCOPE_DENIED: the subject would not hold it anywhere, and telling them
@@ -173,12 +173,12 @@ describe('ScopeResolver.decide — the rule PermissionGuard enforces', () => {
   it('allows a scoped route at a covered node', async () => {
     const decision = await resolve(PLANT_A, { gate1: 'g.a.1' }).decide(
       CLAIMS,
-      { permission: APPROVE, scopeFrom: 'params.id' },
+      { permissions: [APPROVE], scopeFrom: 'params.id' },
       'gate1',
     );
     expect(decision).toEqual({
       outcome: AuthorizationOutcome.ALLOWED,
-      permission: APPROVE,
+      permissions: [APPROVE],
       scopeNodeId: 'gate1',
     });
   });
@@ -186,7 +186,7 @@ describe('ScopeResolver.decide — the rule PermissionGuard enforces', () => {
   it('reports SCOPE_DENIED when the permission is held elsewhere', async () => {
     const decision = await resolve(PLANT_A, { gate9: 'g.b.9' }).decide(
       CLAIMS,
-      { permission: APPROVE, scopeFrom: 'params.id' },
+      { permissions: [APPROVE], scopeFrom: 'params.id' },
       'gate9',
     );
     expect(decision.outcome).toBe(AuthorizationOutcome.SCOPE_DENIED);
@@ -199,7 +199,7 @@ describe('ScopeResolver.decide — the rule PermissionGuard enforces', () => {
   it('defers an invisible node to the handler rather than refusing it', async () => {
     const decision = await resolve(PLANT_A, {}).decide(
       CLAIMS,
-      { permission: APPROVE, scopeFrom: 'params.id' },
+      { permissions: [APPROVE], scopeFrom: 'params.id' },
       'somebody-elses-node',
     );
     expect(decision.outcome).toBe(AuthorizationOutcome.ALLOWED);
@@ -207,7 +207,7 @@ describe('ScopeResolver.decide — the rule PermissionGuard enforces', () => {
 
   it('refuses a scoped route whose request named no node', async () => {
     const decision = await resolve(PLANT_A).decide(CLAIMS, {
-      permission: APPROVE,
+      permissions: [APPROVE],
       scopeFrom: 'body.scope_node_id',
     });
     expect(decision.outcome).toBe(AuthorizationOutcome.SCOPE_DENIED);
@@ -215,7 +215,7 @@ describe('ScopeResolver.decide — the rule PermissionGuard enforces', () => {
 
   it('permits the absence where the route said absence is legitimate', async () => {
     const decision = await resolve(PLANT_A).decide(CLAIMS, {
-      permission: APPROVE,
+      permissions: [APPROVE],
       scopeFrom: 'body.parent_id',
       scopeOptional: true,
     });
@@ -226,7 +226,7 @@ describe('ScopeResolver.decide — the rule PermissionGuard enforces', () => {
     const authorize = jest.fn(() => Promise.resolve({ grants: PLANT_A }));
     const resolver = new ScopeResolver({ authorize });
 
-    await resolver.decide(CLAIMS, { permission: APPROVE });
+    await resolver.decide(CLAIMS, { permissions: [APPROVE] });
 
     expect(authorize).toHaveBeenCalledWith(CLAIMS, undefined);
   });
@@ -240,5 +240,90 @@ describe('ScopeResolver.decide — the rule PermissionGuard enforces', () => {
     // `covers` is the point check, not the guard: an unknown node is `false`
     // here, the way `POST /iam/permissions/check` answers it.
     await expect(resolver.covers(CLAIMS, APPROVE, 'unknown')).resolves.toBe(false);
+  });
+});
+
+/**
+ * Routes that admit either tier's key — Doc 06 §12's `iam.*.audit.read`, and
+ * nothing else on the IAM surface (`require-permission.decorator.ts`).
+ *
+ * The claim under test is narrow and worth stating exactly: *any one* key
+ * admits, and everything else about the decision — deny-by-default, the
+ * permission-before-scope order, which keys the denial names — behaves as it
+ * does for a one-key route. The last of those is what the audit trail reads, so
+ * it is asserted rather than assumed.
+ */
+describe('ScopeResolver.decide — a route that admits either of two keys', () => {
+  const CLIENT_AUDIT = 'iam.client.audit.read';
+  const PLATFORM_AUDIT = 'iam.platform.audit.read';
+  const EITHER = [CLIENT_AUDIT, PLATFORM_AUDIT] as const;
+
+  const holding = (permission: string, path = 'g.a'): ResolvedGrants => ({
+    permissions: [permission],
+    scopes: { [permission]: [path] },
+  });
+
+  const resolverFor = (grants: ResolvedGrants, tree: Record<string, string> = {}) =>
+    new ScopeResolver({
+      authorize: (_claims, scopeNodeId): Promise<AuthorizationSnapshot> =>
+        Promise.resolve(
+          scopeNodeId === undefined
+            ? { grants }
+            : { grants, targetPath: tree[scopeNodeId] ?? null },
+        ),
+    });
+
+  it.each([
+    ['the first key', CLIENT_AUDIT],
+    ['the second key', PLATFORM_AUDIT],
+  ])('admits a subject holding %s alone', async (_label, held) => {
+    const decision = await resolverFor(holding(held)).decide(CLAIMS, {
+      permissions: EITHER,
+    });
+
+    expect(decision.outcome).toBe(AuthorizationOutcome.ALLOWED);
+    // The key that actually admitted, not the list: an allowed request has one
+    // authority behind it, and naming both would misreport which was used.
+    expect(decision.permissions).toEqual([held]);
+  });
+
+  it('still denies a subject holding neither, and names both', async () => {
+    const decision = await resolverFor(NOTHING).decide(CLAIMS, {
+      permissions: EITHER,
+    });
+
+    expect(decision.outcome).toBe(AuthorizationOutcome.PERMISSION_DENIED);
+    expect(decision.permissions).toEqual([CLIENT_AUDIT, PLATFORM_AUDIT]);
+  });
+
+  it('names only the held key on a scope denial', async () => {
+    // Holds the client key at Plant A, and names a node under Plant B. The
+    // platform key was never in play, so a trail that listed it would send an
+    // operator looking for a grant that was never relevant.
+    const decision = await resolverFor(holding(CLIENT_AUDIT), {
+      gate9: 'g.b.9',
+    }).decide(CLAIMS, { permissions: EITHER, scopeFrom: 'params.id' }, 'gate9');
+
+    expect(decision.outcome).toBe(AuthorizationOutcome.SCOPE_DENIED);
+    expect(decision.permissions).toEqual([CLIENT_AUDIT]);
+  });
+
+  it('covers with whichever held key covers the node', async () => {
+    // Both held, but only the platform key reaches Plant B. Answering
+    // SCOPE_DENIED because the first key does not cover would deny a request the
+    // route's own declaration admits.
+    const grants: ResolvedGrants = {
+      permissions: [CLIENT_AUDIT, PLATFORM_AUDIT],
+      scopes: { [CLIENT_AUDIT]: ['g.a'], [PLATFORM_AUDIT]: ['g.b'] },
+    };
+
+    const decision = await resolverFor(grants, { gate9: 'g.b.9' }).decide(
+      CLAIMS,
+      { permissions: EITHER, scopeFrom: 'params.id' },
+      'gate9',
+    );
+
+    expect(decision.outcome).toBe(AuthorizationOutcome.ALLOWED);
+    expect(decision.permissions).toEqual([PLATFORM_AUDIT]);
   });
 });

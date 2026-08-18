@@ -207,7 +207,32 @@ These are the hot-path, cached endpoints. They are the contract every future Pla
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | /iam/audit | filter by actor, action, target, date range (scoped to client; platform sees all) |
+| GET | /iam/audit | filter by actor, action, target, client, date range (scoped to client; platform sees all) |
+| GET | /iam/audit/export | the same filter as a CSV attachment; the export is itself audited (Doc 10 §7) |
+
+Either tier's key admits — hence `iam.*.audit.read` — and which one the caller
+holds decides nothing about the route. What a reader sees is decided by the
+`audit_trail_read` policy alone (Doc 07 §6, Doc 10 §7): a client admin their own
+tenant's rows, a platform admin everything including the `client_id IS NULL` rows
+that record platform-level acts.
+
+Filters are `?actor_id=&actor_type=&action=&target_type=&target_id=&client_id=&from=&to=`,
+composable, each of them narrowing. `action` and `target_type` are validated
+against the Doc 10 §4 catalog, so a misspelling is a `400` rather than an empty
+page; `from`/`to` are ISO-8601 instants **with an offset**, compared half-open
+(`from` inclusive, `to` exclusive). A `client_id` the caller may not see is an
+empty page, never a `403` or a `404` (§2).
+
+The export takes the same filters and no page: it is the whole of the filter or
+it is refused. A filter matching more than **10 000** records comes back `400
+VALIDATION_FAILED` with the count, because a truncated compliance export is
+indistinguishable from a complete one. It answers `text/csv` with
+`Content-Disposition: attachment`, and writes `audit.exported` in the same
+transaction — so a failed export leaves no record, and every record has a file
+behind it.
+
+There is no mutating route on this surface and there is not meant to be
+(Doc 10 §7).
 
 ## 13. Health / ops
 
