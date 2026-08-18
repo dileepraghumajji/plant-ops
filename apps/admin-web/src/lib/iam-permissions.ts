@@ -75,6 +75,10 @@ export const CLIENT_PERMISSIONS = {
   USER_READ: 'iam.client.user.read',
   USER_UPDATE: 'iam.client.user.update',
   USER_BULK_UPLOAD: 'iam.client.user.bulk_upload',
+  BINDING_CREATE: 'iam.client.binding.create',
+  BINDING_READ: 'iam.client.binding.read',
+  BINDING_DELETE: 'iam.client.binding.delete',
+  SVC_READ: 'iam.client.svc.read',
 } as const;
 
 export type ClientPermission =

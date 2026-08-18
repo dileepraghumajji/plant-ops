@@ -85,15 +85,6 @@ export const PENDING_SCREENS: Readonly<Record<string, PendingScreen>> = Object.f
     },
   },
 
-  '/admin/access': {
-    title: 'Access assignment',
-    description:
-      'The central screen: who × which role × where, with the scope node chosen from the org tree and never assumed.',
-    session: 'Session 35',
-    probe: async (iam) =>
-      iam.roleBindings.list({ limit: 1 }).then((page) => count('grant')(page.total)),
-  },
-
   '/admin/service-accounts': {
     title: 'Service accounts',
     description:
