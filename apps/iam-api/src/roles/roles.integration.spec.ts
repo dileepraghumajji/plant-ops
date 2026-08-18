@@ -54,6 +54,7 @@ import {
   IamErrorCode,
   type IamErrorResponse,
   type Paginated,
+  type PermissionCatalogResponse,
   type RoleDTO,
   type RolePermissionsResponse,
   type TokenPairResponse,
@@ -462,6 +463,105 @@ describeWithDb(
     });
 
     // ── the rule this session exists for (Doc 02 §6) ──────────────────────
+
+    /**
+     * The picker's source (Doc 09 §3.2), and the reason it exists: a tenant
+     * administrator cannot read the catalog — that is `iam.platform.permission.read`
+     * — so without this endpoint the only permissions a role editor could offer
+     * are the ones the role already has.
+     *
+     * What is under test is that the offered set is exactly the mappable set.
+     * All four ways a permission is not mappable exist in this suite's fixture,
+     * and each of them is a 409 from `setPermissions`: offering a row the save
+     * would refuse is the failure this endpoint exists to prevent.
+     */
+    describe('the permission catalog', () => {
+      const catalogOf = async (token: string): Promise<PermissionCatalogResponse> => {
+        const response = await call(token, 'GET', '/iam/roles/permission-catalog');
+        expect(response.status).toBe(200);
+        return (await response.json()) as PermissionCatalogResponse;
+      };
+
+      it('offers the enabled application’s live permissions', async () => {
+        const catalog = await catalogOf(await asAdmin());
+
+        expect(catalog.client_id).toBe(fixture.acme.clientId);
+        expect(catalog.permissions.map((entry) => entry.key)).toEqual(
+          expect.arrayContaining([
+            `${PREFIX}gatepass.dc.approve`,
+            `${PREFIX}gatepass.dc.create`,
+          ]),
+        );
+        expect(
+          catalog.permissions.find((entry) => entry.id === fixture.catalog.createId),
+        ).toMatchObject({
+          application_id: fixture.catalog.gatepassId,
+          application_key: `${PREFIX}gatepass`,
+          is_active: true,
+          application_enabled: true,
+        });
+      });
+
+      it('offers nothing the save would refuse', async () => {
+        const catalog = await catalogOf(await asAdmin());
+        const offered = new Set(catalog.permissions.map((entry) => entry.id));
+
+        // Retired by a later manifest upload — `permission.is_active = false`.
+        expect(offered.has(fixture.catalog.retiredId)).toBe(false);
+        // Enabled for Acme once, since toggled off — `client_application.enabled`.
+        expect(offered.has(fixture.catalog.weighId)).toBe(false);
+        // Never enabled for anyone — no `client_application` row at all.
+        expect(offered.has(fixture.catalog.visitId)).toBe(false);
+        // Deactivated platform-wide — `application.is_active = false`.
+        expect(offered.has(fixture.catalog.legacyDoId)).toBe(false);
+      });
+
+      it('offers exactly what a save then accepts', async () => {
+        // The property the picker rests on, checked rather than assumed: every
+        // id offered maps in one call, so a 409 from a save is a real conflict
+        // rather than the ordinary result of choosing a row that was on screen.
+        const token = await asAdmin();
+        const catalog = await catalogOf(token);
+        const role = await createRole(token, { name: 'Everything' });
+
+        const mapping = await setPermissions(
+          token,
+          role.id,
+          catalog.permissions.map((entry) => entry.id),
+        );
+
+        expect(mapping.permissions.map((entry) => entry.id).sort()).toEqual(
+          catalog.permissions.map((entry) => entry.id).sort(),
+        );
+      });
+
+      it('follows the caller’s own enablement, not the catalog’s', async () => {
+        // The two tenants share a platform catalog and differ only in what they
+        // have switched on, which is the whole of what this endpoint filters by.
+        // `beforeEach` restores the canonical enablement, so the toggle is local
+        // to this case.
+        await toggleApplication(admin, fixture.other, fixture.catalog.gatepassId, false);
+
+        const acme = await catalogOf(await asAdmin());
+        const other = await catalogOf(await asAdmin(fixture.other));
+
+        expect(other.client_id).toBe(fixture.other.clientId);
+        expect(acme.permissions.map((entry) => entry.key)).toContain(
+          `${PREFIX}gatepass.dc.create`,
+        );
+        expect(other.permissions.map((entry) => entry.key)).not.toContain(
+          `${PREFIX}gatepass.dc.create`,
+        );
+      });
+
+      it('refuses a subject without the permission-read grant', async () => {
+        const member = await login(fixture.acme.memberEmail, fixture.acme.slug);
+
+        const response = await call(member, 'GET', '/iam/roles/permission-catalog');
+
+        expect(response.status).toBe(403);
+      });
+    });
 
     describe('mapping permissions', () => {
       it('maps permissions from an enabled application, grouped for the picker', async () => {

@@ -10,6 +10,7 @@ import type {
   CreateRoleRequest,
   Paginated,
   PaginationQuery,
+  PermissionCatalogResponse,
   RoleDTO,
   RolePermissionsResponse,
   SetRolePermissionsRequest,
@@ -25,6 +26,11 @@ export interface RolesApi {
   update(id: string, body: UpdateRoleRequest): Promise<RoleDTO>;
   /** Cascades the role's bindings, with an audit record for each (Doc 06 §7). */
   remove(id: string): Promise<void>;
+  /**
+   * Everything a role of the caller's tenant may be given — the source of
+   * Doc 09 §3.2's picker. Every entry is one `setPermissions` will accept.
+   */
+  permissionCatalog(): Promise<PermissionCatalogResponse>;
   permissions(id: string): Promise<RolePermissionsResponse>;
   setPermissions(
     id: string,
@@ -42,6 +48,8 @@ export function rolesEndpoints(request: Requester): RolesApi {
     list: (query) => request({ method: 'GET', path: base, query: { ...query } }),
     update: (id, body) => request({ method: 'PATCH', path: at(id), body }),
     remove: (id) => request({ method: 'DELETE', path: at(id) }),
+    permissionCatalog: () =>
+      request({ method: 'GET', path: `${base}/permission-catalog` }),
     permissions: (id) => request({ method: 'GET', path: at(id, '/permissions') }),
     setPermissions: (id, body) =>
       request({ method: 'PUT', path: at(id, '/permissions'), body }),

@@ -482,6 +482,11 @@ export const rolePermissionsSchema = named(
   z.object({ role_id: z.uuid(), permissions: z.array(rolePermissionSchema) }),
 );
 
+export const permissionCatalogSchema = named(
+  'PermissionCatalogResponse',
+  z.object({ client_id: z.uuid(), permissions: z.array(rolePermissionSchema) }),
+);
+
 // ── users (Doc 06 §8) ───────────────────────────────────────────────────────
 
 export const userSchema = named(

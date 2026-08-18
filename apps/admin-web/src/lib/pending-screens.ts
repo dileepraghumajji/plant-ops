@@ -76,15 +76,6 @@ export const PENDING_SCREENS: Readonly<Record<string, PendingScreen>> = Object.f
     },
   },
 
-  '/admin/roles': {
-    title: 'Roles',
-    description:
-      'Roles and what they carry: a permission picker grouped by the applications enabled for this client.',
-    session: 'Session 32',
-    probe: async (iam) =>
-      iam.roles.list({ limit: 1 }).then((page) => count('role')(page.total)),
-  },
-
   '/admin/users': {
     title: 'Users',
     description:

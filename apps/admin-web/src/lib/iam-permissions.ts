@@ -65,6 +65,12 @@ export const CLIENT_PERMISSIONS = {
   SCOPE_READ: 'iam.client.scope.read',
   SCOPE_UPDATE: 'iam.client.scope.update',
   SCOPE_DELETE: 'iam.client.scope.delete',
+  ROLE_CREATE: 'iam.client.role.create',
+  ROLE_READ: 'iam.client.role.read',
+  ROLE_UPDATE: 'iam.client.role.update',
+  ROLE_DELETE: 'iam.client.role.delete',
+  ROLE_PERMISSION_READ: 'iam.client.role.permission.read',
+  ROLE_PERMISSION_SET: 'iam.client.role.permission.set',
 } as const;
 
 export type ClientPermission =

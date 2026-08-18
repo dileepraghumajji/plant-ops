@@ -128,6 +128,45 @@ export interface RolePermissionsResponse {
 }
 
 /**
+ * `GET /iam/roles/permission-catalog` → everything a role of this tenant may be
+ * given (Doc 06 §7, Doc 09 §3.2).
+ *
+ * ## Why this exists at all
+ *
+ * Doc 09 §3.2's permission picker offers "only apps enabled for the client", and
+ * until this endpoint there was no way for a tenant administrator to find out
+ * what those were: the catalog lives behind `iam.platform.permission.read`, which
+ * is platform authority no client admin holds, and
+ * `GET /iam/roles/:id/permissions` answers a narrower question — what one role
+ * already carries. A picker built from that could only ever offer what was
+ * already chosen.
+ *
+ * ## Every entry is one `PUT /iam/roles/:id/permissions` will accept
+ *
+ * The set is exactly the four conditions that endpoint validates (Doc 02 §6):
+ * the permission is active, its application is active in the registry, and that
+ * application is enabled for this client. Anything the picker offers is
+ * therefore mappable, which is what makes a 409 from a save a real conflict —
+ * something changed underneath — rather than the ordinary result of choosing a
+ * row that was on screen.
+ *
+ * ## It reuses {@link RolePermissionDTO}
+ *
+ * `is_active` and `application_enabled` are constant `true` for every entry
+ * here, by construction. They are on the wire anyway so that a picker can hold
+ * catalog entries and a role's own *inert* mappings — a preserved
+ * `role_permission` whose application is currently disabled (Doc 02 §7) — in one
+ * list without a union type. Those two are the rows that differ, and they are
+ * the rows the screen has to render differently.
+ */
+export interface PermissionCatalogResponse {
+  /** The caller's tenant, from the token — never from a query parameter. */
+  client_id: string;
+  /** Ordered by application name, then by permission key. */
+  permissions: RolePermissionDTO[];
+}
+
+/**
  * `POST /iam/roles` body (Doc 06 §7).
  *
  * The client is the caller's own, taken from the token's `cid` and from nowhere

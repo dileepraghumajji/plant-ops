@@ -56,6 +56,7 @@ import { RequirePermission } from '@plantops/auth-kit';
 import {
   IAM_ROUTE_PREFIX,
   type Paginated,
+  type PermissionCatalogResponse,
   type RoleDTO,
   type RolePermissionsResponse,
 } from '@plantops/contracts';
@@ -101,6 +102,28 @@ export class RolesController {
     @Query() query: RolesPaginationDto,
   ): Promise<Paginated<RoleDTO>> {
     return this.roles.list(claims, query);
+  }
+
+  /**
+   * Everything a role of this tenant may be given (Doc 09 §3.2's picker).
+   *
+   * Declared above the `:id` routes because it is a literal segment where they
+   * take a uuid, and reading it in that order is how the file says so — Nest
+   * would resolve it correctly either way, since `ParseUUIDPipe` refuses
+   * `permission-catalog` outright, but a route whose correctness depends on a
+   * pipe rejecting a sibling's path is one edit away from not being correct.
+   *
+   * Gated on `role.permission.read` rather than `.set`: it is a read, and it
+   * answers nothing that holding a role's permission list does not already
+   * reveal.
+   */
+  @Get('permission-catalog')
+  @RateLimit(ROLES_RATE_LIMIT)
+  @RequirePermission(P.ROLE_PERMISSION_READ)
+  permissionCatalog(
+    @Claims() claims: VerifiedClaims,
+  ): Promise<PermissionCatalogResponse> {
+    return this.roles.permissionCatalog(claims);
   }
 
   @Patch(':id')

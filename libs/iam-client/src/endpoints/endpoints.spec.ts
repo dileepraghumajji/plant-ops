@@ -289,6 +289,15 @@ const CASES: RouteCase[] = [
     call: (c) => c.roles.remove('r-1'),
   },
   {
+    // Not in Doc 06 §7's table: added with Session 32's picker, because the
+    // client tier had no way to enumerate what a role may be given — the
+    // catalog itself lives behind platform authority no tenant admin holds.
+    doc: '§7',
+    method: 'GET',
+    path: '/iam/roles/permission-catalog',
+    call: (c) => c.roles.permissionCatalog(),
+  },
+  {
     doc: '§7',
     method: 'GET',
     path: '/iam/roles/r-1/permissions',
@@ -463,7 +472,7 @@ describe('Doc 06 route coverage', () => {
         }`,
     );
     expect(new Set(signatures).size).toBe(signatures.length);
-    expect(signatures).toHaveLength(54);
+    expect(signatures).toHaveLength(55);
   });
 
   it('encodes path segments rather than pasting them in', async () => {
