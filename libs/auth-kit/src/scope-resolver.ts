@@ -134,8 +134,24 @@ export type AuthorizationOutcome =
 
 export interface AuthorizationDecision {
   outcome: AuthorizationOutcome;
-  /** What was asked for — carried through so the denial audit can name it. */
-  permission: PermissionKey;
+  /**
+   * What was asked for — carried through so the denial audit can name it.
+   *
+   * A list because a route may admit any one of several keys
+   * (`require-permission.decorator.ts`), which on this surface is Doc 06 §12
+   * and nothing else. Which keys are named depends on where the decision was
+   * reached, and the difference is what makes the trail readable:
+   *
+   * - **`permission_denied`** — every key the route would have accepted, since
+   *   the subject held none of them and all of them are the answer to "what
+   *   would have let this through".
+   * - **`scope_denied`** — only the keys the subject actually *holds*, because
+   *   those are the ones the coverage test ran against; listing a key they
+   *   never held would misreport a scope refusal as being about a permission
+   *   that was never in play.
+   * - **`allowed`** — the key that admitted, alone.
+   */
+  permissions: readonly PermissionKey[];
   /** The scope node the request named, where it named one. */
   scopeNodeId?: string;
 }
@@ -262,41 +278,53 @@ export class ScopeResolver {
     requirement: PermissionRequirement,
     scopeNodeId?: string,
   ): Promise<AuthorizationDecision> {
-    
     const scoped = requirement.scopeFrom !== undefined && scopeNodeId !== undefined;
     const snapshot = await this.source.authorize(
       claims,
       scoped ? scopeNodeId : undefined,
     );
 
-    const base = { permission: requirement.permission, ...(scoped ? { scopeNodeId } : {}) };
+    const at = (scoped ? { scopeNodeId } : {}) as { scopeNodeId?: string };
 
-    if (!holdsPermission(snapshot.grants, requirement.permission)) {
-      return { ...base, outcome: AuthorizationOutcome.PERMISSION_DENIED };
+    // Held first, covered second — Doc 04 §9's asymmetry, over however many keys
+    // the route admits. On the one-key routes this is `[key]` or `[]`, and every
+    // branch below reads exactly as it did when the field was a single key.
+    const held = requirement.permissions.filter((permission) =>
+      holdsPermission(snapshot.grants, permission),
+    );
+
+    if (held.length === 0) {
+      return {
+        ...at,
+        permissions: requirement.permissions,
+        outcome: AuthorizationOutcome.PERMISSION_DENIED,
+      };
     }
 
     // The route declared a target and the request did not supply one. Refused
     // unless the route said absence is legitimate — see `scopeOptional`.
     if (requirement.scopeFrom !== undefined && scopeNodeId === undefined) {
-      return {
-        ...base,
-        outcome: requirement.scopeOptional
-          ? AuthorizationOutcome.ALLOWED
-          : AuthorizationOutcome.SCOPE_DENIED,
-      };
+      return requirement.scopeOptional
+        ? { ...at, permissions: [held[0]], outcome: AuthorizationOutcome.ALLOWED }
+        : { ...at, permissions: held, outcome: AuthorizationOutcome.SCOPE_DENIED };
     }
 
-    if (!scoped) return { ...base, outcome: AuthorizationOutcome.ALLOWED };
+    if (!scoped) {
+      return { ...at, permissions: [held[0]], outcome: AuthorizationOutcome.ALLOWED };
+    }
 
     // Invisible to this subject: not a coverage question — see above.
     const targetPath = snapshot.targetPath ?? null;
-    if (targetPath === null) return { ...base, outcome: AuthorizationOutcome.ALLOWED };
+    if (targetPath === null) {
+      return { ...at, permissions: [held[0]], outcome: AuthorizationOutcome.ALLOWED };
+    }
 
-    return {
-      ...base,
-      outcome: coversPath(snapshot.grants, requirement.permission, targetPath)
-        ? AuthorizationOutcome.ALLOWED
-        : AuthorizationOutcome.SCOPE_DENIED,
-    };
+    const covering = held.find((permission) =>
+      coversPath(snapshot.grants, permission, targetPath),
+    );
+
+    return covering === undefined
+      ? { ...at, permissions: held, outcome: AuthorizationOutcome.SCOPE_DENIED }
+      : { ...at, permissions: [covering], outcome: AuthorizationOutcome.ALLOWED };
   }
 }

@@ -47,6 +47,36 @@
  * than to a place in it. Omitting the scope does not weaken the check: the
  * permission dimension still has to be held, and RLS still confines every row
  * the handler can reach to the caller's own tenant.
+ *
+ * ## A route may name more than one key, and almost none of them should
+ *
+ * ```ts
+ * ⁣@RequirePermission([P.CLIENT_AUDIT_READ, P.PLATFORM_AUDIT_READ])
+ * ```
+ *
+ * Any **one** of the listed keys admits. That is a widening, so it is worth
+ * being precise about when it is the right shape and when it is a mistake
+ * dressed as convenience.
+ *
+ * It is right when one route genuinely serves two tiers *and the tiers differ in
+ * what they see rather than in what they may do*. Doc 06 §12 is the only such
+ * route on this surface, and the spec says so in its own heading: every other
+ * section names a concrete prefix (`iam.platform.*`, `iam.client.scope.*`),
+ * while §12 is headed `iam.*.audit.read` — one route, either key. What separates
+ * the two readers afterwards is not the handler but the `audit_trail_read` RLS
+ * policy, which shows a client admin their tenant's rows and a platform admin
+ * everything (Doc 10 §7). Splitting that into two routes would publish two paths
+ * that differ in nothing a client could observe, and gating it on one key would
+ * mean granting the other tier a permission that describes the wrong power.
+ *
+ * It is wrong as a way to spare somebody a second grant. Two keys on a route
+ * that does one thing means the narrower key has stopped being a boundary: an
+ * operator who holds either may act, and the audit trail can no longer say which
+ * authority was exercised. Where a route does two things, it is two routes.
+ *
+ * A single key stays a single key: the argument accepts a bare
+ * {@link PermissionKey} and normalizes it, so the ordinary call site is
+ * unchanged and the list form has to be typed out deliberately.
  */
 
 import { SetMetadata } from '@nestjs/common';
@@ -80,7 +110,15 @@ export interface RequirePermissionOptions {
 
 /** What a route declares about itself. */
 export interface PermissionRequirement extends RequirePermissionOptions {
-  permission: PermissionKey;
+  /**
+   * The keys that admit, any one of which is enough. One on all but a single
+   * route — see the header.
+   *
+   * Normalized to an array by {@link RequirePermission} so that everything
+   * downstream — {@link ScopeResolver.decide}, the guard, the denial audit —
+   * has one shape to handle rather than a union it must narrow at each step.
+   */
+  permissions: readonly PermissionKey[];
 }
 
 /**
@@ -90,13 +128,16 @@ export interface PermissionRequirement extends RequirePermissionOptions {
  * Applicable to a method or to a whole controller; the method wins where both
  * carry one, which is Nest's `getAllAndOverride` order and lets a controller
  * state the common case once.
+ *
+ * Pass an array to admit any one of several keys — see the header for the one
+ * route that legitimately does, and for why the others must not.
  */
 export const RequirePermission = (
-  permission: PermissionKey,
+  permission: PermissionKey | readonly PermissionKey[],
   options: RequirePermissionOptions = {},
 ) =>
   SetMetadata<string, PermissionRequirement>(REQUIRE_PERMISSION_METADATA, {
-    permission,
+    permissions: typeof permission === 'string' ? [permission] : [...permission],
     ...options,
   });
 

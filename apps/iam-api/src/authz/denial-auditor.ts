@@ -26,6 +26,21 @@
  * The permission key is in the payload either way, so an action filter plus a
  * payload match answers "who has been trying to do this" without joining
  * anything.
+ *
+ * ## Why `permission` stays singular in the payload
+ *
+ * Since Session 25 a route may admit any one of several keys — Doc 06 §12's
+ * `iam.*.audit.read`, and nothing else on this surface
+ * (`require-permission.decorator.ts`). The guard therefore hands over a list.
+ *
+ * The payload still leads with `permission`, because every row already written
+ * carries that key and a filter over the trail must keep matching them: an audit
+ * payload whose shape depends on when the row was written is one that no query
+ * can be written against (the argument `audit-actions.ts` makes about spellings,
+ * one level down). Where the refusal genuinely involved more than one key, the
+ * full list is added beside it as `permissions` — additive, so the singular
+ * field keeps meaning what it always meant, which is "the key this refusal was
+ * about" for the routes that have exactly one.
  */
 
 import { Injectable } from '@nestjs/common';
@@ -42,7 +57,7 @@ export class GuardDenialAuditor implements DenialAuditor {
   async recordDenial(
     claims: VerifiedClaims,
     outcome: Exclude<AuthorizationOutcome, 'allowed'>,
-    permission: PermissionKey,
+    permissions: readonly PermissionKey[],
     scopeNodeId?: string,
   ): Promise<void> {
     const target: AuditTarget =
@@ -56,7 +71,11 @@ export class GuardDenialAuditor implements DenialAuditor {
         ? AUDIT_ACTIONS.SCOPE_DENIED
         : AUDIT_ACTIONS.PERMISSION_DENIED,
       target,
-      { permission, ...(scopeNodeId === undefined ? {} : { scope_node_id: scopeNodeId }) },
+      {
+        permission: permissions[0],
+        ...(permissions.length > 1 ? { permissions: [...permissions] } : {}),
+        ...(scopeNodeId === undefined ? {} : { scope_node_id: scopeNodeId }),
+      },
     );
   }
 }

@@ -254,7 +254,7 @@ describe('PermissionGuard', () => {
     expect(recordDenial).toHaveBeenCalledWith(
       CLAIMS,
       AuthorizationOutcome.PERMISSION_DENIED,
-      'gatepass.dc.create',
+      ['gatepass.dc.create'],
       undefined,
     );
   });
@@ -272,7 +272,7 @@ describe('PermissionGuard', () => {
     expect(recordDenial).toHaveBeenCalledWith(
       CLAIMS,
       AuthorizationOutcome.SCOPE_DENIED,
-      APPROVE,
+      [APPROVE],
       'gate9',
     );
   });

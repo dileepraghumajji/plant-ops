@@ -41,6 +41,7 @@
  */
 
 import {
+  AUDIT_ACTOR_TYPE_VALUES,
   BULK_USER_ROW_STATUS_VALUES,
   CLIENT_STATUS_VALUES,
   NAV_NODE_KIND_VALUES,
@@ -706,6 +707,30 @@ export const navigationSchema = named(
   }),
 );
 
+// ── audit (Doc 06 §12, Doc 10 §2) ───────────────────────────────────────────
+
+/**
+ * `action` and `target_type` are open strings rather than enums, and the reason
+ * is in `contracts/audit.ts`: rows outlive the catalog that wrote them, so a
+ * union here would be a claim the append-only table cannot keep. The `?action=`
+ * *filter* is an enum, and appears in the document as one — that asymmetry is
+ * the intended one (`audit/dto/audit.dto.ts`).
+ */
+export const auditRecordSchema = named(
+  'AuditRecordDTO',
+  z.object({
+    id: z.uuid(),
+    client_id: z.uuid().nullable(),
+    actor_type: z.enum(AUDIT_ACTOR_TYPE_VALUES),
+    actor_id: z.uuid().nullable(),
+    action: z.string(),
+    target_type: z.string().nullable(),
+    target_id: z.uuid().nullable(),
+    payload: jsonObject,
+    created_at: timestamp,
+  }),
+);
+
 // ── identity & ops (Doc 06 §11, §13) ────────────────────────────────────────
 
 export const whoAmISchema = named(
@@ -761,3 +786,4 @@ export const paginatedServiceAccountsSchema = paginated(
   'PaginatedServiceAccountDTO',
   serviceAccountSchema,
 );
+export const paginatedAuditSchema = paginated('PaginatedAuditRecordDTO', auditRecordSchema);
