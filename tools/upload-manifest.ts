@@ -4,6 +4,7 @@
  *
  *   npm run manifest:upload -- ./gatepass.manifest.json
  *   npm run manifest:upload -- ./gatepass.manifest.json --create
+ *   npm run manifest:upload -- ./gatepass.manifest.json --dry-run
  *   npm run manifest:upload -- ./iam.manifest.json --api-url https://iam.staging.internal
  *
  * ## Why a tool at all, when the endpoint is one POST
@@ -73,6 +74,8 @@ Options:
                          http://localhost:$PORT, or http://localhost:3000)
   --account-key <key>    platform service account (default: ${PLATFORM_SERVICE_ACCOUNT_KEY})
   --create               register the application if its key is not known yet
+  --dry-run              print the diff the upload would apply, and apply
+                         nothing (the same preview the console shows)
 
 The account secret is read from PLATFORM_BOOTSTRAP_SECRET (or
 IAM_ACCOUNT_SECRET), never from an argument.`;
@@ -82,6 +85,8 @@ type Flags = Record<string, string | true>;
 interface Options extends ApiTarget {
   file: string;
   create: boolean;
+  /** `?dryRun=true` — ask what would change, change nothing. */
+  dryRun: boolean;
 }
 
 // ── arguments and environment ────────────────────────────────────────────────
@@ -116,6 +121,7 @@ function parseArgs(argv: readonly string[]): Options {
         : PLATFORM_SERVICE_ACCOUNT_KEY,
     accountSecret: accountSecretFromEnv(),
     create: flags['create'] === true,
+    dryRun: flags['dry-run'] === true,
   };
 }
 
@@ -190,6 +196,19 @@ async function main(): Promise<void> {
 
   let application = await findApplication(options, token, manifest.key);
   if (application === null) {
+    // A dry run has nothing to preview against: the endpoint is addressed by
+    // application id, and there is no row to address. Reporting what the first
+    // upload would create is the honest answer, and it does not need `--create`
+    // precisely because it creates nothing.
+    if (options.dryRun) {
+      console.log(
+        `No application is registered with the key "${manifest.key}". This ` +
+          `upload would register it and create ${manifest.permissions.length} ` +
+          `permission(s) and its whole nav tree. Re-run with --create to do it.`,
+      );
+      return;
+    }
+
     if (!options.create) {
       throw new Error(
         `No application is registered with the key "${manifest.key}". Pass ` +
@@ -208,7 +227,7 @@ async function main(): Promise<void> {
     options,
     token,
     'POST',
-    `/iam/applications/${application.id}/manifest`,
+    `/iam/applications/${application.id}/manifest${options.dryRun ? '?dryRun=true' : ''}`,
     manifest,
   );
 
@@ -217,7 +236,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  console.log('Upserted:');
+  console.log(result.dry_run ? 'Would upsert:' : 'Upserted:');
   printDiff(result.diff);
 }
 

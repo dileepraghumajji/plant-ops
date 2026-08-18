@@ -269,7 +269,10 @@ export const ROUTE_RESPONSES: ReadonlyMap<
       ...DENIED_OR_MISSING,
     ),
     upsertManifest: failing(
-      ok(manifestUpsertSchema, 'The diff the upsert applied'),
+      ok(
+        manifestUpsertSchema,
+        'The diff the upsert applied — or, with `?dryRun=true`, the diff it would apply',
+      ),
       ...DENIED_MISSING_OR_DUPLICATE,
     ),
   }),

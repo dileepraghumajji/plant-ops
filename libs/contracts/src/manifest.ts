@@ -119,11 +119,22 @@ export interface ManifestDiff {
   menu_permissions: ManifestMappingDiff;
 }
 
-/** `POST /iam/applications/:id/manifest` (Doc 06 §4). */
+/** `POST /iam/applications/:id/manifest[?dryRun=true]` (Doc 06 §4). */
 export interface ManifestUpsertResponse {
   application_id: string;
   /**
-   * `false` when the manifest described exactly what was already there.
+   * `true` when the call only *computed* the diff — `?dryRun=true`, the preview
+   * Doc 09 §2.1 shows an operator before they confirm an upload.
+   *
+   * A preview writes nothing: no catalog rows, no audit record, no cache
+   * invalidation. It is otherwise the same answer the real upload gives, from
+   * the same function against the same snapshot, which is what lets the screen
+   * promise that confirming applies what was previewed.
+   */
+  dry_run: boolean;
+  /**
+   * `false` when the manifest described exactly what was already there — and,
+   * on a dry run, that applying it *would* change nothing.
    *
    * A no-op upsert writes nothing at all — no rows, no audit record — so this
    * flag is the only way a caller can tell an idempotent re-upload from a

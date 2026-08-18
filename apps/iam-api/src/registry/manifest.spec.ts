@@ -14,7 +14,7 @@
  */
 
 import type { ApplicationManifest, ManifestNavNode } from '@plantops/contracts';
-import { applicationManifestSchema } from './dto/manifest.dto';
+import { applicationManifestSchema, manifestQuerySchema } from './dto/manifest.dto';
 import {
   computeManifestPlan,
   flattenManifestNav,
@@ -250,6 +250,34 @@ describe('the manifest schema', () => {
     expect(
       applicationManifestSchema.safeParse({ key: 'gatepass', name: 'Gate Pass' }).success,
     ).toBe(false);
+  });
+});
+
+describe('the ?dryRun= query', () => {
+  it('is absent by default — a bare POST is the upload', () => {
+    expect(manifestQuerySchema.parse({})).toEqual({});
+  });
+
+  it.each([
+    ['true', true],
+    ['1', true],
+    ['yes', true],
+    ['false', false],
+    ['0', false],
+    ['no', false],
+  ])('reads ?dryRun=%s as %s', (value, expected) => {
+    expect(manifestQuerySchema.parse({ dryRun: value })).toEqual({ dryRun: expected });
+  });
+
+  it('does not coerce — the case that would write a catalog on a request that asked not to', () => {
+    // `Boolean('false')` is `true`. Were this `z.coerce.boolean()`, the line
+    // above would pass with `dryRun: true` and `?dryRun=false` would preview a
+    // change it had already made.
+    expect(manifestQuerySchema.parse({ dryRun: 'false' }).dryRun).toBe(false);
+  });
+
+  it('refuses a spelling it cannot be sure of', () => {
+    expect(manifestQuerySchema.safeParse({ dryRun: 'maybe' }).success).toBe(false);
   });
 });
 

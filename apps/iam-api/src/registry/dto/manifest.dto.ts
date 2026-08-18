@@ -186,6 +186,32 @@ export const applicationManifestSchema = z
 
 export class ApplicationManifestDto extends createZodDto(applicationManifestSchema) {}
 
+/**
+ * `?dryRun=` — preview instead of apply (Doc 09 §2.1).
+ *
+ * The upload screen shows an operator what a manifest would do *before* it does
+ * it, and the only honest way to produce that is to compute it the way the real
+ * upload computes it: same snapshot, same `computeManifestPlan`, same
+ * `ManifestDiff`. So the preview is this endpoint with a flag rather than a
+ * second route with a second implementation — see `manifest.service.ts` for
+ * where the two paths part company (one statement after the plan is built).
+ *
+ * `z.stringbool()` rather than `z.coerce.boolean()`, and the distinction is the
+ * whole reason this is spelled out: `Boolean("false")` is `true`, so a coerced
+ * `?dryRun=false` would *write the catalog* on a request that asked not to. This
+ * accepts the spellings a caller might reasonably send — `true`/`false`,
+ * `1`/`0`, `yes`/`no`, `on`/`off` — and rejects anything else with a 400 rather
+ * than guessing.
+ *
+ * Absent means `false`: a `POST …/manifest` with no query string is the upload,
+ * exactly as it was before this parameter existed.
+ */
+export const manifestQuerySchema = z.object({
+  dryRun: z.stringbool().optional(),
+});
+
+export class ManifestQueryDto extends createZodDto(manifestQuerySchema) {}
+
 /** Every node of a manifest tree, depth-first, with its path and 1-based depth. */
 function* walk(
   nodes: readonly ManifestNavNode[],

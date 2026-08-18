@@ -19,8 +19,11 @@
  * ## Registering by form is the secondary path
  *
  * Doc 02 §2 makes the manifest the primary way an application arrives, and
- * Session 29 builds that screen. The form here is what registers the
- * application *row* — which the manifest upload needs to exist first, since it
+ * `applications/manifest` is that screen — which is why "Upload manifest" sits
+ * beside "Register application" here rather than inside one application's tabs:
+ * the document names its own application, so the operator does not have to pick
+ * one before they can look at what they have. The form registers the
+ * application *row*, which the manifest upload needs to exist first since it
  * uploads to `/iam/applications/:id/manifest`.
  */
 
@@ -28,7 +31,7 @@ import type { ApplicationDTO } from '@plantops/contracts';
 import { DataTable, PageHeader, ScreenEmpty, StatusTag } from '@plantops/ui';
 import { useAsync, useIam, useNotices } from '@plantops/web-kit';
 import { Button, Space, Switch, Tooltip, Typography } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
+import { PlusOutlined, UploadOutlined } from '@ant-design/icons';
 import { useRouter } from 'next/navigation';
 import { useCallback, useState, type ReactElement } from 'react';
 
@@ -156,15 +159,28 @@ export default function ApplicationsPage(): ReactElement {
         title="Applications"
         description="Every application registered with the IAM. Open one to edit its permissions, its navigation and the mapping between them."
         actions={
-          canCreate && (
+          <>
+            {/*
+              Ungated, unlike the form beside it: the upload screen's own header
+              explains why it attempts its call and renders the 403 rather than
+              hiding the way in (Doc 09 §4).
+            */}
             <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              onClick={() => setRegistering(true)}
+              icon={<UploadOutlined />}
+              onClick={() => router.push('/platform/applications/manifest')}
             >
-              Register application
+              Upload manifest
             </Button>
-          )
+            {canCreate && (
+              <Button
+                type="primary"
+                icon={<PlusOutlined />}
+                onClick={() => setRegistering(true)}
+              >
+                Register application
+              </Button>
+            )}
+          </>
         }
       />
 
@@ -180,11 +196,18 @@ export default function ApplicationsPage(): ReactElement {
             title="No applications yet"
             description="An application is registered once, then evolves by manifest upload — permissions, menus and mappings, without a deploy."
             action={
-              canCreate && (
-                <Button type="primary" onClick={() => setRegistering(true)}>
-                  Register the first application
+              <Space>
+                <Button
+                  onClick={() => router.push('/platform/applications/manifest')}
+                >
+                  Upload a manifest
                 </Button>
-              )
+                {canCreate && (
+                  <Button type="primary" onClick={() => setRegistering(true)}>
+                    Register the first application
+                  </Button>
+                )}
+              </Space>
             }
           />
         }
