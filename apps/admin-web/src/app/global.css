@@ -28,3 +28,11 @@ html {
   outline: 2px solid #0e7c66;
   outline-offset: 2px;
 }
+
+/* A row that is still listed but no longer in effect — an expired role binding
+ * (Doc 04 §4). Dimmed rather than removed: a grant that lapsed on Friday is the
+ * answer to "why did this stop working", and a table that dropped it would
+ * leave the question unanswerable. */
+.plantops-row-muted > td {
+  opacity: 0.6;
+}
