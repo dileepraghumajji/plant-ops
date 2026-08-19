@@ -59,6 +59,21 @@ Module boundaries (e.g. only `iam-api` may import `libs/db`) are enforced by
 `@nx/enforce-module-boundaries` in [eslint.config.mjs](eslint.config.mjs) — see
 [docs/fixtures/boundary-lint-check.md](docs/fixtures/boundary-lint-check.md).
 
+## Manuals (start here if you are not writing code)
+
+[`docs/manuals/`](docs/manuals/README.md) holds four task-oriented guides, one
+per persona — the [founder](docs/manuals/founder-guide.md) (what this is, in
+plain English), the [platform admin](docs/manuals/platform-admin-manual.md)
+(catalogue + tenant onboarding), the
+[client admin](docs/manuals/client-admin-manual.md) (a tenant's own world), and
+the [developer](docs/manuals/developer-manual.md) (architecture, local setup,
+building a module on top). The spec suite below remains the authority.
+
+The same four are also built as standalone, shareable web pages in
+[`docs/manuals/html/`](docs/manuals/html/index.html) — one self-contained file
+each, for handing to a customer at onboarding. Rebuild with `npm run manuals:html`
+after editing any manual.
+
 ## Read in order
 
 | Doc | Title | Read it for |
