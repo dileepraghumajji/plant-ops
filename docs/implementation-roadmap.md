@@ -564,6 +564,218 @@
 
 ---
 
+## Phase 8 — Single-tenant delivery (dedicated & self-hosted)
+
+> **Authority:** Doc 11. Phase 7 delivers the managed multi-tenant path (Railway + Vercel); this phase delivers the two single-tenant ones — a dedicated instance we operate, and a self-hosted install the client operates. Doc 11 §3 is the constraint every session here obeys: **one codebase, one image set, no per-customer fork.** Everything that varies between deployments varies as configuration.
+>
+> These sessions modify code delivered in Sessions 1–38. That is expected and is why they are separate sessions: no entry above is edited, and each session below states exactly which shipped files it touches and what must not change about them.
+>
+> OIDC/SSO federation stays deferred per Doc 03 §10 and is not in this phase — but note Doc 11 §12: if the first enterprise client runs Active Directory, SSO outranks most of the work below and should be specced before it.
+
+# Session 40 — Origin-agnostic admin console
+**Goal:** Make `admin-web` work at any hostname without a rebuild, by defaulting its API base to the same-origin path `/api` (Doc 11 §8, gap 2). Today `NEXT_PUBLIC_IAM_API_URL` is substituted into the bundle at build time, so one image cannot serve two customer hostnames and a per-customer build would be a fork by another name.
+**Expected Output:** One `admin-web` build that runs unchanged on `localhost`, on Vercel, on a dedicated instance, and inside a client's network.
+**Files to Create:** `apps/admin-web/.env.example` (referenced by the README today but absent from the repo), `apps/admin-web/src/lib/api-config.spec.ts`.
+**Files to Modify:** `apps/admin-web/src/lib/api-config.ts` (default `IAM_API_URL` to `/api`; `IAM_API_LABEL` must render a relative base as something meaningful rather than the result of stripping a scheme that is not there), `libs/web-kit/src/index.ts` (the `PlantOpsProvider` docblock example still shows `process.env.NEXT_PUBLIC_IAM_API_URL!`), `README.md` (quickstart env step), `.env.example` (`CORS_ALLOWED_ORIGINS` guidance — same-origin deployments need no entry at all).
+**Dependencies:** Sessions 26, 27
+**Acceptance Criteria:**
+- A **relative** base works end-to-end without touching `libs/iam-client`: `http.ts` builds request URLs by concatenating `baseUrl + path`, so `/api` + `/auth/login` is already correct. Prove it with a test rather than assume it — that concatenation is the single line this session depends on.
+- Setting `NEXT_PUBLIC_IAM_API_URL` to an absolute origin still works exactly as before; the local dev flow (console on 4200, API on 3000) is unchanged.
+- Same-origin deployments require **no** `CORS_ALLOWED_ORIGINS` entry; the cross-origin dev flow still does, and `.env.example` says which is which.
+- No change to `libs/iam-client` or `libs/web-kit` runtime code.
+**Definition of Done:** `nx test admin-web` green; console verified against both an absolute base (dev) and a relative base (behind a local proxy).
+**Suggested Commit Message:** `feat(admin-web): default the API base to a same-origin path so one build serves any hostname`
+
+# Session 41 — Container images for both apps, proxy, and migration runner
+**Goal:** The images a single-tenant stack needs. Session 39 containerizes `iam-api` for the managed platform, where `admin-web` is hosted by Vercel and migrations run as a release step; neither assumption holds on a client's server. This session adds the console image, the reverse proxy that makes §40's same-origin path real, and a **one-shot migration runner** so an upgrade never requires a Node toolchain on the host (Doc 11 §5.3).
+**Expected Output:** `docker compose up` on any machine yields a working stack: proxy → console + API → Postgres + Redis.
+**Files to Create:** `apps/admin-web/Dockerfile` (Next standalone output), `deploy/proxy/{Dockerfile,nginx.conf}` (serves the console at `/`, proxies `/api` → iam-api with the `/api` prefix stripped, forwards `X-Forwarded-For`), `deploy/migrate/Dockerfile` (runs `tools/migrate.ts` against the direct URL and exits), `.dockerignore`, `apps/iam-api/src/health/version.spec.ts`.
+**Files to Modify:** `apps/admin-web/next.config.js` (`output: 'standalone'`), `apps/iam-api/src/health/health.controller.ts` (report the build version — Doc 11 §8, gap 8: support cannot start without it), `libs/config/src/env.schema.ts` (`APP_VERSION`, stamped at build), `.github/workflows/ci.yml` (build and tag all images; digest-pin base images), `apps/iam-api/Dockerfile` (add the version label — **create it here if Session 39 has not run yet**, since this phase must not block on the managed deploy path).
+**Dependencies:** Session 40 (Session 39 if it has already run — see the note on `apps/iam-api/Dockerfile`)
+**Acceptance Criteria:**
+- `TRUST_PROXY=true` is correct and documented behind the bundled proxy, and the proxy rewrites `X-Forwarded-For` rather than passing a client-supplied value through — otherwise every caller picks their own rate-limit bucket (`env.schema.ts` already warns about exactly this).
+- The console image contains no customer-specific value; the same digest runs on two different hostnames in the test.
+- The migration runner exits non-zero on failure and is safe to re-run when already up to date.
+- Version reported by `/health` matches the image tag; CI fails if they diverge.
+**Definition of Done:** All four images build in CI; a compose stack assembled from them serves login end-to-end on a machine with no workspace checkout.
+**Suggested Commit Message:** `chore(deploy): console, proxy, and migration-runner images with build version stamping`
+
+# Session 42 — Offline production bundle & first-boot bootstrap
+**Goal:** The handover kit of Doc 11 §5.3 — a versioned bundle that installs on a machine with **no internet access**, because plant networks routinely have no egress and an installer that needs one fails on site on day one (Doc 11 §5.1).
+**Expected Output:** A single artifact a client's IT can copy to a server and install from, with no registry pull and no workspace checkout.
+**Files to Create:** `deploy/docker-compose.prod.yml`, `deploy/.env.template` (every variable `libs/config` validates, with its meaning — the template is what stops a boot-time validation failure becoming a support call), `tools/build-bundle.mjs` (`docker save` the pinned digests + compose + template + runbooks into one tarball), `tools/bootstrap-install.mjs` (roles → migrate → platform identity → client → initial admin), `deploy/README.md`.
+**Files to Modify:** `tools/setup-db-roles.sql` (invoked by bootstrap rather than run by hand), `.env.example` (point at the template for production).
+**Dependencies:** Session 41
+**Acceptance Criteria:**
+- **Both database roles from Doc 07 §5.1 are created by bootstrap** — an owner for migrations and a non-owner `app_role` for requests. This is the load-bearing one: a self-hosted install that runs the app as the table owner silently exempts itself from every RLS policy, and `startup-checks.ts` is the only thing standing between that mistake and a shipped product. The install must fail loudly, not start.
+- Install completes on a host with networking disabled, from the tarball alone.
+- Bootstrap is idempotent — re-running changes nothing and re-reports the same state.
+- `PLATFORM_BOOTSTRAP_SECRET` is consumed once, never written to a log or to the compose file, and the runbook step to rotate it immediately is part of the script's own output.
+- The stack answers `/ready` 200 before the script reports success.
+**Definition of Done:** A clean VM, network off, tarball copied in → working login, verified by a scripted smoke test that ships in the bundle.
+**Suggested Commit Message:** `chore(deploy): offline installable production bundle with idempotent first-boot bootstrap`
+
+# Session 43 — Application manifests as release artifacts
+**Goal:** Ship manifests with the release and apply them idempotently at install and on every upgrade, so a single-tenant deployment never needs a human in the platform console to register an application (Doc 11 §6.3). Doc 02 §2 already defines manifest upload as an upsert keyed by `(application, key)` — this session makes the release, rather than an operator, the thing that performs it.
+**Expected Output:** The permission and nav catalog on a client's box is always the catalog we tested, and re-converges on upgrade if anyone has edited it.
+**Files to Create:** `deploy/manifests/` (the release's bundled manifest set, `tools/iam-manifest.json` among them), `tools/apply-manifests.ts`, `apps/iam-api-e2e/src/manifest-convergence.e2e.ts`.
+**Files to Modify:** `tools/bootstrap-install.mjs` (apply after migrate), `deploy/migrate/Dockerfile` (apply as the second step of the upgrade path), `tools/seed-iam-manifest.ts` (fold into the general applier rather than duplicating it), `.github/workflows/ci.yml` (bundle the manifests into the images).
+**Dependencies:** Sessions 14, 23, 42
+**Acceptance Criteria:**
+- Applying the shipped manifests twice is a no-op, and the second run audits nothing (Session 14's idempotence, now exercised by the release path).
+- A catalog hand-edited through the API **re-converges** on the next upgrade: added permissions are restored, and keys absent from the manifest soft-deactivate rather than hard-delete, exactly as Doc 02 §7 requires.
+- A failure part-way through leaves the catalog untouched — the whole application of one manifest is a single transaction.
+- The IAM's own manifest continues to be seeded through the real endpoint (Session 23's dogfooding property is preserved, not bypassed).
+**Definition of Done:** Install → hand-edit the catalog → upgrade → catalog matches the release, proven by e2e.
+**Suggested Commit Message:** `feat(deploy): ship application manifests with the release and apply them idempotently on upgrade`
+
+# Session 44 — Single-tenant deployment mode
+**Goal:** `DEPLOYMENT_MODE=single_tenant`: one client pinned at boot, login without a tenant slug, client creation refused, platform routes hidden (Doc 11 §6.5, §8 gap 4). **This session changes the login path — treat it with the care Sessions 8 and 9 were given.**
+**Expected Output:** A single-tenant install whose users type an email and a password, and nothing else.
+**Files to Create:** `apps/iam-api/src/config/deployment-mode.ts`, `apps/iam-api-e2e/src/single-tenant.e2e.ts`.
+**Files to Modify:** `libs/config/src/env.schema.ts` (`DEPLOYMENT_MODE`, `SINGLE_TENANT_CLIENT_SLUG`), `.env.example`, `deploy/.env.template`, `apps/iam-api/src/auth/auth.dto.ts` (`client_slug` optional in single-tenant mode only), `auth.service.ts` (resolve the pinned client server-side), `apps/iam-api/src/clients/clients.controller.ts` (refuse creation), `apps/admin-web/src/app/login/page.tsx` (drop the field), `apps/admin-web/src/components/shell/sidebar.tsx` (hide the platform section), `README.md`.
+**Dependencies:** Sessions 8, 15, 42
+**Acceptance Criteria:**
+- **The pinned client id is resolved at boot from configuration and never from anything the browser sends.** A request supplying a different `client_slug` in single-tenant mode is refused, not honoured — the field being absent from the form is a UX change, not the control.
+- **RLS is unchanged and still enforced.** `app.current_client_id` is still set per request, `force row level security` still applies, and `rls-isolation.e2e.ts` passes without modification. Doc 11 §3: a bypass path would be a second code path that nobody tests.
+- **In `saas` mode, behaviour is identical to today** — every existing e2e in `apps/iam-api-e2e` passes unmodified. This is the property that makes the session safe; assert it, do not assume it.
+- Client creation in single-tenant mode returns a clear error explaining that the deployment is pinned to one tenant. This is a coherence rule, not a licensing one: a second `client` row would be unreachable by every request the process serves.
+- Boot fails loudly if `DEPLOYMENT_MODE=single_tenant` and the named client does not exist.
+- Hiding platform routes in the console is UX only; the API still enforces (Doc 09 §4).
+**Definition of Done:** Both modes green — the full existing e2e battery in `saas`, and the new single-tenant suite in `single_tenant`.
+**Suggested Commit Message:** `feat(iam-api): single-tenant deployment mode with a boot-pinned client and slugless login`
+
+# Session 45 — Restricted platform role & break-glass recovery
+**Goal:** What a self-hosted client legitimately gets of the platform tier, and how they recover when locked out (Doc 11 §6.4). On their hardware we cannot withhold anything technically — so the aim is to make platform access unnecessary, and to make the one genuinely necessary capability auditable.
+**Expected Output:** An on-prem platform role that grants visibility and nothing that writes to the catalog, plus a host-level recovery path.
+**Files to Create:** `libs/db/src/migrations/0018-onprem-platform-role.ts` (seeds the role; **0018 is the next free number** — 0017 is the last shipped migration), `tools/break-glass-admin.ts`, `apps/iam-api-e2e/src/onprem-role.e2e.ts`.
+**Files to Modify:** `tools/bootstrap-install.mjs` (seed the role in single-tenant mode only), `deploy/README.md`.
+**Dependencies:** Sessions 23, 44
+**Acceptance Criteria:**
+- The role is assembled **entirely from permission keys that already exist** in `0017-iam-permission-seed.ts` — no new permission is invented. Granted: `iam.platform.{app,permission,nav,client,client.app}.read` and `iam.platform.audit.read`. Withheld: `app.create`, `app.update`, `app.manifest`, `permission.create`, `nav.create`, `nav.map`, `client.create`, `client.app.enable`, `client.app.update`.
+- **No console change is needed** — `admin-web` already gates screen-by-screen on individual permissions (`applications/page.tsx` disables its button on `iam.platform.app.update`), so ungranted actions degrade to a disabled control naming the missing permission. Verify this rather than adding new gating.
+- **Break-glass is a host command, not a standing permission.** `tools/break-glass-admin.ts` runs on the host, requires the bootstrap secret, creates or unlocks a client admin, and audits the action distinctly from a routine console operation. Rationale in Doc 11 §12 decision 4: a locked-out client on an air-gapped network with us unreachable must have a way back in, but it should not be a permission sitting in a role forever. *(If the alternative in that decision is chosen instead, this is one line in the seed — grant `iam.platform.client.admin.create` and drop the tool.)*
+- The role is seeded only in `single_tenant` mode; a SaaS deployment is unaffected.
+**Definition of Done:** e2e proves the role can read everything and write nothing; break-glass recovers a locked-out install and leaves an audit record.
+**Suggested Commit Message:** `feat(iam): restricted on-prem platform role and audited break-glass admin recovery`
+
+# Session 46 — Deployment-agnostic database configuration
+**Goal:** Stop the DB layer assuming a Supabase pooler. `DATABASE_URL` is documented as the PgBouncer endpoint with prepared statements disabled accordingly; an on-premise Postgres has no pooler, both URLs are the same, and the decision should follow an explicit flag rather than an assumption about where the database lives (Doc 11 §8, gap 3).
+**Expected Output:** One data source that is correct against Supabase, against a bundled container, and against a client's existing Postgres cluster.
+**Files to Create:** `libs/db/src/data-source.spec.ts` (matrix over the supported combinations).
+**Files to Modify:** `libs/db/src/data-source.ts` (prepared statements follow `DATABASE_POOLED`), `libs/config/src/env.schema.ts` (`DATABASE_POOLED`, richer `DATABASE_SSL` than a boolean — a client terminating TLS at their own Postgres needs a CA, not a yes/no), `.env.example`, `deploy/.env.template`, `docs/07-database-rls.md` §2 note.
+**Dependencies:** Sessions 3, 5, 42
+**Acceptance Criteria:**
+- Both URLs pointing at the same non-pooled host is a supported, documented configuration — not a warning.
+- Prepared statements are enabled when unpooled and disabled when pooled; the current Supabase behaviour is unchanged when `DATABASE_POOLED=true`, which must remain the managed default.
+- TLS to a client-supplied Postgres works with a custom CA; the bundled-container case still needs no TLS config at all.
+- The Doc 07 §5.1 two-role split is orthogonal to all of this and still enforced by `startup-checks.ts`.
+**Definition of Done:** Integration tests green against a pooled and an unpooled Postgres; no behaviour change on the managed path.
+**Suggested Commit Message:** `feat(db): explicit pooling and TLS configuration so one data source fits every deployment`
+
+# Session 47 — SMTP password-reset delivery
+**Goal:** Bind a real transport to the delivery port. `password-reset.delivery.ts` is deliberately a port with a logging default that refuses to print tokens in production — correct design, but nothing implements it, so password reset silently does nothing on any real deployment (Doc 11 §8, gap 6).
+**Expected Output:** A self-hosted client points the IAM at their own SMTP relay and password reset works, with no egress beyond their relay.
+**Files to Create:** `apps/iam-api/src/auth/smtp-password-reset.delivery.ts`, its unit tests against a fake transport.
+**Files to Modify:** `apps/iam-api/src/auth/auth.module.ts` (bind SMTP when configured, keep the logging default otherwise), `libs/config/src/env.schema.ts` (`SMTP_*`, with the host treated as a secret-adjacent value in `redactEnv`), `.env.example`, `deploy/.env.template`.
+**Dependencies:** Session 10
+**Acceptance Criteria:**
+- With SMTP unset, behaviour is exactly today's: the token is logged outside production, and production logs an error naming the misconfiguration **without** the token. That existing guard is not weakened — it is the only place in the codebase a credential reaches a log at all.
+- Delivery failure never changes the endpoint's response: `/auth/password/reset-request` still answers 202 regardless, so the no-enumeration property of Session 10 survives.
+- The transport is not in the request path — a hung relay cannot hold the endpoint open.
+- The token appears in no audit payload (Doc 10 §8).
+**Definition of Done:** Reset completes end-to-end against a local SMTP sink; the unconfigured path is unchanged, proven by the existing tests passing untouched.
+**Suggested Commit Message:** `feat(auth): SMTP password-reset delivery behind the existing port`
+
+# Session 48 — Entitlements & offline licence
+**Goal:** Ceilings and term on the tenant, and a signed licence a self-hosted install can verify **offline** (Doc 11 §10). `client_application` carries `enabled` and a `config` jsonb today but no `expires_at` and no limits, so SaaS billing and self-hosted licensing have nowhere shared to read from.
+**Expected Output:** One entitlement source serving both commercial models, and an expiry that degrades rather than detonates.
+**Files to Create:** `libs/db/src/migrations/0019-entitlements.ts`, `apps/iam-api/src/licence/{licence.service.ts,licence.guard.ts}`, `tools/issue-licence.ts` (our signing side — never shipped in the bundle), `apps/iam-api-e2e/src/entitlements.e2e.ts`.
+**Files to Modify:** `libs/db/src/entities/client-application.entity.ts` and `client.entity.ts` (`expires_at`, `max_users`, `max_sites`), `apps/iam-api/src/clients/client-applications.service.ts`, `users/users.service.ts` and `users/bulk-upload.service.ts` (user ceiling), `scopes/scopes.service.ts` (site ceiling — **not** keyed off `scope_node.kind`, per Doc 11 §10.1 and ADR 0002), `libs/config/src/env.schema.ts` (licence path + our public key), `apps/admin-web/src/components/shell/header.tsx` (expiry banner).
+**Dependencies:** Sessions 15, 21, 44
+**Acceptance Criteria:**
+- **An expired licence blocks administrative writes but never blocks `/auth/*` or `/iam/permissions/resolve`.** This is the load-bearing criterion of the session: an IAM that stops issuing tokens is a plant that stops running, and no invoice is worth that (Doc 11 §10).
+- Verification is offline — signature checked against a public key in the image, with no network call on any path.
+- The console warns from 30 days out.
+- Exceeding `max_users` fails the create with a clear, quotable error; the bulk upload reports it per row rather than failing the whole file.
+- SaaS deployments read the same columns with no licence file present — absent licence means unlimited, not blocked.
+- No DRM: the mechanism makes the honest path easy and is enforced contractually beyond that (Doc 11 §10).
+**Definition of Done:** e2e over the matrix — valid, expiring, expired, absent — with the auth-and-resolve-still-work property asserted explicitly in the expired case.
+**Suggested Commit Message:** `feat(iam): tenant entitlements with offline-verifiable licence and non-destructive expiry`
+
+# Session 49 — Runbooks, upgrade testing & diagnostic bundle
+**Goal:** Close the operational gaps (Doc 11 §8, gaps 7–8). A client applies their own upgrades, so the upgrade path must be tested rather than described; and support for an install we cannot see starts with a diagnostic bundle we can read.
+**Expected Output:** Everything the handover kit still lacks, and a tested claim that upgrades work across a version gap.
+**Files to Create:** `docs/runbooks/{install.md,backup-restore.md,upgrade.md,support.md}`, `tools/diagnostics.ts`, `apps/iam-api-e2e/src/upgrade-migration.e2e.ts`.
+**Files to Modify:** `deploy/README.md`, `tools/build-bundle.mjs` (include the runbooks), `docs/11-deployment-models.md` (§5.3 checklist → shipped file references).
+**Dependencies:** Sessions 43, 44, 45, 46, 47, 48
+**Acceptance Criteria:**
+- **Skipping versions works, and is tested**: a database migrated to an early version upgrades cleanly to head in one run. A client on 1.2 going to 1.9 will not stop at every release, and the migration runner's sequential application must be proven across that gap rather than assumed.
+- The restore procedure is **executed** by a test, not merely written down — a backup taken, the volume destroyed, the restore run, and login working afterwards.
+- `tools/diagnostics.ts` emits version, migration state, redacted config, recent logs and row counts, and **contains no secret** — assert against `SECRET_ENV_KEYS` so the redaction cannot drift.
+- The support runbook states the Doc 11 §5.5 boundary explicitly, including what is out of scope.
+- The upgrade runbook makes a backup step one and says the upgrade is unsupported without it.
+**Definition of Done:** Cross-version migration e2e green; restore drill scripted and passing; a diagnostic bundle generated from a running stack and reviewed for leakage.
+**Suggested Commit Message:** `docs(ops): install, backup, upgrade and support runbooks with tested restore and diagnostics`
+
+---
+
+## Phase 9 — Consumable IAM (products outside this repo)
+
+> **Authority:** Doc 12. Doc 00 §7 chose a monorepo so PlantOps modules could share contracts without a publish-and-version dance, and Doc 08 §1 adds future modules as new `apps/*`. That reasoning still holds **for PlantOps modules**. It does not extend to unrelated products with independent release cadences, which is what this phase serves: they consume the IAM as a versioned dependency over HTTP and npm, not as workspace siblings.
+>
+> Nothing here is speculative packaging work. Sessions 50 and 51 are on the critical path for gatepass and visitor management too — those are the first consumers, whether they live in this repo or not.
+>
+> Two things are deliberately **not** sessions. `scope_node.kind` is an open fork recorded in ADR 0002 and closed by the gatepass spec, not by a session. The `aud` claim question (Doc 12 §5) is a conditional decision, not work.
+
+# Session 50 — Split `auth-kit` into a framework-free core and adapters
+**Goal:** Make server-side authorization usable outside NestJS. `libs/auth-kit` depends on `@nestjs/common` and `@nestjs/core`, so a Next.js route handler, an Express service or a Fastify one gets nothing from it — and the guard is the piece that enforces `@RequirePermission` (Doc 12 §4).
+**Expected Output:** One verification-and-resolution core with no framework dependency, plus thin adapters that keep `iam-api`'s current usage byte-for-byte identical.
+**Files to Create:** `libs/auth-kit/src/core/{verify.ts,resolve.ts,coverage.ts,index.ts}` (JWKS verification, grants fetch, `covers()` — no framework imports), `libs/auth-kit/src/adapters/nestjs/index.ts` (today's `AuthGuard`, `PermissionGuard`, `@RequirePermission`, `ScopeResolver`, re-exported unchanged), `libs/auth-kit/src/adapters/fetch/index.ts` (a `Request`-in, decision-out helper for Next.js route handlers and any WinterCG runtime), core unit tests with no Nest test harness.
+**Files to Modify:** `libs/auth-kit/src/index.ts` (re-export both, so no existing import path breaks), `libs/auth-kit/package.json` (move `@nestjs/*` to `peerDependencies` and add subpath `exports` for `./core` and `./adapters/nestjs`), every `apps/iam-api` import site only if the barrel cannot keep them stable.
+**Dependencies:** Session 23
+**Acceptance Criteria:**
+- **`libs/auth-kit/src/core/**` imports nothing from `@nestjs/*`** — enforced by a lint rule or an import test, not by review. This is the whole point of the session and it will regress silently otherwise.
+- `iam-api`'s authorization behaviour is unchanged: the Session 23 authorization matrix e2e passes **unmodified**, including the `docs/adr/0001` connection strategy — the guard still opens its own `QueryRunner`, applies the RLS context and commits in a `finally`.
+- The core is usable from a plain Node script with no Nest container: verify a token, resolve grants, answer a coverage question.
+- Installing the package without NestJS present does not fail — `@nestjs/*` are peers, and the adapter is a subpath import.
+- `ScopeResolver`'s coverage logic lives in core and is used by both adapters, not duplicated.
+**Definition of Done:** `nx test auth-kit` green; a scratch Node script authorizes a request end-to-end without NestJS; iam-api's e2e battery unchanged.
+**Suggested Commit Message:** `refactor(auth-kit): framework-free authorization core with NestJS and fetch adapters`
+
+# Session 51 — Publishable shared libraries
+**Goal:** Make the libs installable from outside this workspace. All five are `"private": true` at version `0.0.1`, and `web-kit` and `ui` publish **source** (`main: ./src/index.ts`) rather than a build — so an external repo cannot consume them at all (Doc 12 §3).
+**Expected Output:** `@plantops/{contracts,iam-client,auth-kit,web-kit,ui}` installable from a private registry, versioned, with a documented release process.
+**Files to Create:** `.npmrc` template for consumers, `docs/12-consuming-the-iam.md` companion release notes section, `.github/workflows/publish.yml` (tag-triggered, builds then publishes in dependency order), `CHANGELOG.md` per published lib.
+**Files to Modify:** `libs/{contracts,iam-client,auth-kit,web-kit,ui}/package.json` (`private: false`, real version, `publishConfig`, `files`, `repository`, `license`), `libs/web-kit/package.json` and `libs/ui/package.json` (build to `dist`; `main`/`types`/`exports` point at the build, with the `@plantops/source` condition retained so in-workspace consumers still resolve to source), their `project.json`/build targets, `docs/08-nx-workspace-structure.md` §1 (a short note that libs are now published as well as imported in-workspace).
+**Dependencies:** Session 50
+**Acceptance Criteria:**
+- `web-kit` and `ui` build to `dist` and are consumable by a plain `npm install` in a repo with no Nx and no path aliases — proven by installing the packed tarballs into a throwaway Next.js app, not by inspection.
+- **In-workspace imports still resolve to source.** `admin-web` and `iam-api` must not start consuming stale `dist` builds; the `@plantops/source` export condition already in these manifests is what preserves that, and a test should pin it.
+- Versions move together on a single release tag, and inter-lib dependency ranges are rewritten from `0.0.1` to the published version at pack time.
+- `antd` and `react` stay `peerDependencies` on `web-kit`/`ui` — a consumer must not end up with two React copies.
+- Publishing is tag-triggered and idempotent; re-running a published version fails loudly rather than overwriting.
+- Boundary lint (Doc 08 §2) is unaffected — `contracts` still depends on nothing.
+**Definition of Done:** A throwaway Next.js app outside this repo installs the packages, renders `PlantOpsProvider`, and completes a login against a running IAM.
+**Suggested Commit Message:** `chore(libs): publish contracts, iam-client, auth-kit, web-kit and ui as versioned packages`
+
+# Session 52 — Consumer integration guide & quickstart
+**Goal:** The documentation an engineer outside this repo needs to put a product behind the IAM. Doc 12 states the model; this session ships the runnable path — the OpenAPI reference, a quickstart, and a working example app (Doc 12 §6).
+**Expected Output:** A developer with no knowledge of this codebase integrates a new product in an afternoon.
+**Files to Create:** `examples/nextjs-consumer/**` (a minimal Next.js app: login via `web-kit`, one server route authorized through `auth-kit`'s fetch adapter, nav rendered from `/iam/navigation?applicationId=`), `docs/quickstart-new-product.md` (register the application by manifest → enable for a client → verify tokens → authorize a route → render nav), `examples/README.md`.
+**Files to Modify:** `tools/emit-openapi.ts` (publish the 44-path document as a browsable reference artifact rather than a checked-in file only), `README.md` (link the quickstart), `docs/12-consuming-the-iam.md` (point at the example rather than restating it).
+**Dependencies:** Sessions 50, 51
+**Acceptance Criteria:**
+- The example app builds and runs in CI against an ephemeral IAM, and its login-plus-authorized-route path is asserted — a quickstart that rots is worse than none.
+- The quickstart never instructs anyone to edit the IAM's code or run a migration: registering a product is a manifest upload and a `client_application` toggle (Doc 02 §8).
+- Permission keys in the example are namespaced to the example's own application, demonstrating that `unique(application_id, key)` is what keeps products from colliding.
+- The example verifies tokens against **JWKS**, never a shared secret, and the guide says why.
+- The guide states the one-instance-versus-many decision (Doc 12 §5) plainly, including that a token carries no `aud` and is therefore valid at every application on its instance.
+**Definition of Done:** CI builds and exercises the example; a reader following the quickstart on a clean machine reaches an authorized request.
+**Suggested Commit Message:** `docs(consumers): integration guide, quickstart, and a runnable Next.js example`
+
+---
+
 ## Dependency Graph
 
 Linear backbone with these explicit edges (a session also implicitly depends on everything its dependencies depend on):
@@ -608,9 +820,26 @@ S36 → S27 (API: S11)
 S37 → S27 (API: S25)
 S38 → S23, S24, S25, S26
 S39 → S38
+S40 → S26, S27
+S41 → S40 (and S39 if already run)
+S42 → S41
+S43 → S14, S23, S42
+S44 → S8, S15, S42
+S45 → S23, S44
+S46 → S3, S5, S42
+S47 → S10
+S48 → S15, S21, S44
+S49 → S43, S44, S45, S46, S47, S48
+S50 → S23
+S51 → S50
+S52 → S50, S51
 ```
 
-Parallelizable clusters (if two conversations run side by side): {S9, S10, S11} after S8; {S16, S17, S18} after S15; {S28, S30–S33, S36} after S27.
+Parallelizable clusters (if two conversations run side by side): {S9, S10, S11} after S8; {S16, S17, S18} after S15; {S28, S30–S33, S36} after S27; {S43, S44, S46, S47} after S42 — though S44 touches the auth path and should not run beside anything else that does.
+
+**Phase 8 does not depend on Session 39.** S39 delivers the managed Railway/Vercel path; S41 creates `apps/iam-api/Dockerfile` itself if S39 has not run. A pilot that is going out self-hosted can therefore go 38 → 40 → 41 → 42 and ship, deferring the managed deploy entirely.
+
+**Phase 9 does not depend on Phase 8 at all.** S50 hangs off S23, which shipped. The two phases answer different questions — how the IAM is *delivered* versus how it is *consumed* — and can run in either order or side by side.
 
 ---
 
@@ -631,6 +860,16 @@ Exit test: complete platform-onboards-tenant → tenant-self-serves → guard-lo
 **Milestone 4 — Production Ready** (Sessions 38–39)
 Deliverables: hardening battery (RLS, auth, resolution, load smoke); CI with `nx affected`; containerized deploy to Railway/Vercel with migration release step; ops runbook.
 Exit test: green CI + staging environment running the Milestone 3 demo.
+
+**Milestone 5 — Single-tenant Deliverable** (Sessions 40–49)
+Deliverables: an origin-agnostic console; container images for both apps plus proxy and migration runner; an offline-installable bundle with idempotent bootstrap that creates both database roles; manifests applied by the release rather than by hand; single-tenant mode with a boot-pinned client; the restricted on-prem platform role and audited break-glass recovery; deployment-agnostic database and mail configuration; entitlements with an offline-verifiable licence; and the runbooks, tested restore, cross-version migration proof, and diagnostic bundle.
+Exit test: on a clean VM with networking disabled, install from the tarball, log in without a tenant slug, upgrade across a version gap, and produce a diagnostic bundle containing no secret.
+
+**Milestone 6 — Consumable IAM** (Sessions 50–52)
+Deliverables: a framework-free authorization core with NestJS and fetch adapters; the five shared libs published as versioned packages consumable outside this workspace; and an integration guide with a runnable, CI-exercised example.
+Exit test: a Next.js app in a separate repository installs the published packages, logs a user in, authorizes a server route, and renders its menu from the IAM — with no change to the IAM's code and no migration.
+
+*Partial-credit checkpoint:* Sessions 40–42 alone are enough to hand a first client a working install — the slug and the licence are handled by hand for customer one. Sessions 43–49 are what make it repeatable rather than heroic.
 
 ---
 
@@ -692,5 +931,24 @@ The specs name these as out of scope or optional; the schema already accommodate
 | 37 | UI: audit views | Low | 3–5 | Low | Sonnet |
 | 38 | E2E hardening battery | High | 8–12 | Medium | Opus |
 | 39 | Deployment + CI + runbook | Medium | 6–8 | Medium | Sonnet |
+| 40 | Origin-agnostic console | Low | 3–4 | Low | Sonnet |
+| 41 | Container images + proxy + migrator | Medium | 5–7 | Medium | Sonnet |
+| 42 | Offline bundle + bootstrap | Medium | 5–7 | **High** | Opus |
+| 43 | Manifests as release artifacts | Medium | 4–6 | Medium | Sonnet |
+| 44 | Single-tenant mode | Medium | 6–8 | **High** | Opus |
+| 45 | On-prem role + break-glass | Low | 3–4 | Medium | Sonnet |
+| 46 | Deployment-agnostic DB config | Low | 3–4 | Medium | Sonnet |
+| 47 | SMTP delivery binding | Low | 3–5 | Low | Sonnet |
+| 48 | Entitlements + licence | Medium | 6–8 | Medium | Opus |
+| 49 | Runbooks + upgrade test + diagnostics | Medium | 6–8 | Medium | Sonnet |
+| 50 | auth-kit core + adapters | Medium | 5–7 | **High** | Opus |
+| 51 | Publishable shared libraries | Medium | 5–7 | Medium | Sonnet |
+| 52 | Integration guide + example | Low | 4–6 | Low | Sonnet |
 
-**Total: ~205–285 hours across 39 sessions.** High-risk sessions (5, 9, 14, 16, 21–23) are the ones the spec itself flags as load-bearing — budget review time there and don't parallelize them with anything that touches the same tables.
+**Total: ~205–285 hours across 39 sessions**, plus **~44–61 hours** for single-tenant delivery (40–49) and **~14–20 hours** for consumability (50–52) — **~263–366 hours across 52 sessions.**
+
+High-risk sessions (5, 9, 14, 16, 21–23) are the ones the spec itself flags as load-bearing — budget review time there and don't parallelize them with anything that touches the same tables.
+
+Phase 8 adds two more. **Session 44** changes the login path, so it carries the same risk as Sessions 8 and 9 and its safety property is that `saas` mode stays byte-for-byte unchanged. **Session 42** is high-risk for a less obvious reason: it is where a self-hosted install can silently run the app as the table owner, which exempts it from every RLS policy in Doc 07. The bootstrap creating both roles correctly is the single most consequential line in the phase.
+
+Phase 9 adds one. **Session 50** rearranges the module that decides every authorization answer in the system. It changes no behaviour by design, which is exactly what makes it dangerous — a refactor with no visible output is one where a regression hides easily. Its safety property is that Session 23's authorization matrix passes unmodified, and that is the criterion to check first, not last.
