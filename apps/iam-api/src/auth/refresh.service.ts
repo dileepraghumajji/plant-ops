@@ -21,7 +21,7 @@
  *   never saw the election, so the token in hand belongs to nothing. Refuse,
  *   without revoking.
  * - **`reuse`** — the session is already revoked and audited by the time control
- *   returns; all that remains is to refuse.
+ *   returns; what remains is to publish the revoked `sid` and refuse.
  * - **`invalid`** — no such session, revoked, or expired. Refuse.
  *
  * ## One refusal for four different situations
@@ -119,10 +119,22 @@ export class RefreshService {
     }
 
     if (result.outcome !== 'rotated' && result.outcome !== 'replay') {
-      // `reuse` has already revoked the session and written
-      // `auth.refresh.reuse_detected`, on its own connection, before returning;
-      // `invalid` means there was never a live session to speak of. Nothing to
-      // add — least of all a hint in the response.
+      if (result.outcome === 'reuse') {
+        // `auth_rotate_refresh_token` has already set `revoked_at` and written
+        // `auth.refresh.reuse_detected` — but only in the database, and the
+        // database is not what `AuthGuard` reads on the hot path. Without this
+        // publish the revoked `sid` never reaches the cache every verifier
+        // checks (Doc 03 §6), so the *access* token that came with the stolen
+        // refresh token goes on working for the rest of its TTL — up to fifteen
+        // minutes of exactly the access this branch exists to end.
+        //
+        // Direct rather than deferred: the function is one statement and has
+        // already committed by the time it returns, so there is no transaction
+        // to hang an `afterCommit` on (see `publishRevocations`).
+        await this.sessions.publishRevocations([presented.sessionId]);
+      }
+      // Beyond that there is nothing to add — least of all a hint in the
+      // response. `invalid` means there was never a live session to speak of.
       throw invalidRefreshToken();
     }
 
