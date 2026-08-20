@@ -8,5 +8,9 @@
     "noImplicitAny": false
   },
   "include": ["src/**/*.ts"],
-  "references": []
+  "references": [
+    {
+      "path": "../../libs/contracts"
+    }
+  ]
 }

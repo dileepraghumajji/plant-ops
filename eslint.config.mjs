@@ -30,6 +30,19 @@ export default [
                 'scope:config',
               ],
             },
+            // `app:iam-api-e2e` — the Session 38 hardening battery. It drives a
+            // *served* iam-api over HTTP and connects to Postgres with `pg`
+            // directly, which is why it needs no lib but `contracts`. Naming it
+            // here rather than letting the `type:app` → `type:lib` rule stand
+            // alone is what keeps Doc 08 §2's "libs/db is importable only by
+            // iam-api" true of the e2e project too: an isolation suite that
+            // imported `@plantops/db` could reach for `applyRlsContext` and end
+            // up asserting that the helper works rather than that the policies
+            // do.
+            {
+              sourceTag: 'app:iam-api-e2e',
+              onlyDependOnLibsWithTags: ['scope:contracts'],
+            },
             {
               sourceTag: 'app:admin-web',
               onlyDependOnLibsWithTags: [
@@ -142,6 +155,13 @@ export default [
       // Test plumbing and specs build fixtures across tenants deliberately.
       '**/testing/**',
       '**/*.spec.ts',
+      // The Session 38 battery and its support modules, for the same reason
+      // squared: `rls-isolation.e2e.ts` exists precisely to set a context by
+      // hand, as the app role, and watch the database refuse to leak. It has no
+      // access to `applyRlsContext()` either — the `app:iam-api-e2e` boundary
+      // above keeps `@plantops/db` out of it deliberately.
+      '**/*.e2e.ts',
+      '**/support/**',
     ],
     rules: {
       'no-restricted-syntax': [

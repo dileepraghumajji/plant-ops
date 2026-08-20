@@ -1,0 +1,129 @@
+# CI — **placeholder**, finalized in roadmap Session 39.
+#
+# Session 38 builds the hardening battery; Session 39 owns deployment and is
+# where `nx affected`, caching, the build/publish steps and the migration
+# release step land. What is here now is the smallest workflow that runs the
+# battery this session created, so that its Definition of Done — "one command
+# runs the whole battery green on a clean environment" — is true of a clean
+# machine and not only of a developer's laptop.
+#
+# What Session 39 is expected to change:
+#   - `nx affected -t lint test build` instead of `run-many --all`
+#   - Nx remote caching / `nx-cloud` or the equivalent
+#   - the release job: migrations over DATABASE_DIRECT_URL, then the app swap
+#   - environment matrices and the deploy targets (Railway, Vercel)
+#
+# What it should *not* change: the services below. The battery is not a mock
+# suite — it needs a real Postgres with `ltree` and a real Redis, and the whole
+# point of `rls-isolation.e2e.ts` is that it runs as a **non-owning** role
+# against `force row level security`. Weakening either would leave a green
+# pipeline proving nothing.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        # `ltree` and `pgcrypto` ship with the standard image; migration 0001
+        # creates both extensions (Doc 07 §2).
+        image: postgres:17
+        env:
+          POSTGRES_USER: plantops
+          POSTGRES_PASSWORD: plantops
+          POSTGRES_DB: plantops_iam
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U plantops -d plantops_iam"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+
+      redis:
+        image: redis:7
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+
+    env:
+      NODE_ENV: test
+      # Two roles, not two endpoints. `plantops` owns the schema and runs the
+      # migrations; `plantops_app` owns nothing and serves the requests, so the
+      # policies apply to it (Doc 07 §5.1). A single-role setup would make every
+      # isolation assertion pass with every policy inert.
+      DATABASE_URL: postgresql://plantops_app:plantops_app@localhost:5432/plantops_iam
+      DATABASE_DIRECT_URL: postgresql://plantops:plantops@localhost:5432/plantops_iam
+      DATABASE_SSL: 'false'
+      REDIS_URL: redis://localhost:6379
+      JWT_ISSUER: plantops-iam
+      JWT_SIGNING_KEY_ID: ci-key-1
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Create the application role
+        # `tools/setup-db-roles.sql` is the same script a developer runs, so CI
+        # and a laptop end up with the same two roles rather than with two
+        # arrangements that drift. It expects the login role to exist already
+        # (creating one needs CREATEROLE, which the migration role deliberately
+        # does not have) — hence the CREATE ROLE ahead of it.
+        env:
+          PGPASSWORD: plantops
+        run: |
+          psql -h localhost -U plantops -d plantops_iam -v ON_ERROR_STOP=1 -c \
+            "do \$\$ begin
+               if not exists (select 1 from pg_roles where rolname = 'plantops_app') then
+                 create role plantops_app login password 'plantops_app';
+               end if;
+             end \$\$;"
+          psql -h localhost -U plantops -d plantops_iam \
+            -v owner_role=plantops -v app_login_role=plantops_app \
+            -f tools/setup-db-roles.sql
+
+      - name: Generate a signing keypair
+        # RS256, ≥2048 bits (Doc 03 §1). Generated per run and thrown away with
+        # the runner: a committed key would be a committed secret, and a
+        # deployment's key comes from its secret store (Doc 08 §5).
+        run: |
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out ci-private.pem
+          openssl rsa -in ci-private.pem -pubout -out ci-public.pem
+          {
+            echo "JWT_PRIVATE_KEY<<PEM"; cat ci-private.pem; echo "PEM"
+            echo "JWT_PUBLIC_KEY<<PEM";  cat ci-public.pem;  echo "PEM"
+            echo "PLATFORM_BOOTSTRAP_SECRET=$(openssl rand -hex 32)"
+          } >> "$GITHUB_ENV"
+
+      - run: npx nx run-many -t lint --all
+
+      - run: npx nx run-many -t test --all
+
+      - name: Hardening battery
+        # Depends on `@plantops/iam-api:build` and `@plantops/db:migration:run`,
+        # so this one command migrates, builds, boots the bundle and runs
+        # everything (roadmap Session 38's Definition of Done).
+        run: npx nx run-many -t e2e
+
+      - name: Keep the API log from a failed battery
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: iam-api-e2e-log
+          path: apps/iam-api-e2e/test-output/e2e/api.log
+          if-no-files-found: ignore

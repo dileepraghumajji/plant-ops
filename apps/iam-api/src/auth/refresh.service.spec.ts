@@ -51,6 +51,8 @@ interface Harness {
   service: RefreshService;
   store: FakeStore;
   calls: RotateRefreshInput[];
+  /** Session ids handed to `publishRevocations`, in order. */
+  published: string[];
   /** What the fake database will answer, and with which stored secret. */
   outcome: RotationResult;
 }
@@ -58,9 +60,11 @@ interface Harness {
 function harnessFor(outcome: RotationResult): Harness {
   const store = new FakeStore();
   const calls: RotateRefreshInput[] = [];
+  const published: string[] = [];
   const state: Harness = {
     store,
     calls,
+    published,
     outcome,
     service: undefined as unknown as RefreshService,
   };
@@ -69,6 +73,9 @@ function harnessFor(outcome: RotationResult): Harness {
     rotateRefreshToken: async (input: RotateRefreshInput): Promise<RotationResult> => {
       calls.push(input);
       return state.outcome;
+    },
+    publishRevocations: async (sessionIds: readonly string[]): Promise<void> => {
+      published.push(...sessionIds);
     },
   } as unknown as SessionService;
 
@@ -291,6 +298,44 @@ describe('RefreshService', () => {
         { code: IamErrorCode.INVALID_CREDENTIALS },
       );
     });
+
+    /**
+     * The row's `revoked_at` is the authority, but it is not what `AuthGuard`
+     * reads: the hot path checks the revoked-`sid` cache (Doc 03 §6). Left
+     * unpublished, the *access* token that arrived alongside the stolen refresh
+     * token keeps working for the rest of its TTL — up to fifteen minutes of
+     * exactly the access reuse detection exists to end. Caught by the Session 38
+     * battery, where a real Redis made the gap visible.
+     */
+    it('publishes the revoked sid on reuse, so the live access token dies too', async () => {
+      const { service, published } = harnessFor({
+        outcome: 'reuse',
+        clientId: CLIENT_ID,
+        userId: USER_ID,
+      });
+      const token = tokenFor(mintRefreshSecret());
+
+      await expect(service.refresh(token)).rejects.toThrow(IamException);
+
+      expect(published).toEqual([SESSION_ID]);
+    });
+
+    it.each(['invalid', 'stale'] as const)(
+      'publishes nothing on %s — neither is a compromise',
+      async (outcome) => {
+        const { service, published } = harnessFor(
+          outcome === 'invalid'
+            ? { outcome: 'invalid' }
+            : { outcome, clientId: CLIENT_ID, userId: USER_ID },
+        );
+
+        await expect(
+          service.refresh(tokenFor(mintRefreshSecret())),
+        ).rejects.toThrow(IamException);
+
+        expect(published).toEqual([]);
+      },
+    );
 
     it('gives byte-identical refusals for every reason it has', async () => {
       const messages = new Set<string>();
