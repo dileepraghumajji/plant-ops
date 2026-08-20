@@ -1,8 +1,10 @@
 const { readFileSync } = require('fs');
 const { join } = require('path');
 
-// The served app reads the workspace `.env` too; loading it here keeps the
-// suite's PORT in step with the one `nx serve` binds.
+// The API this suite drives is started by `src/support/global-setup.ts`, which
+// reads the same workspace `.env` for its database and Redis URLs. Loading it
+// here too is what lets `support/database.ts` open its own connections from
+// inside a worker.
 require('dotenv').config({ path: join(__dirname, '..', '..', '.env') });
 
 // Reading the SWC compilation config for the spec files
@@ -32,5 +34,28 @@ module.exports = {
     '^.+\\.[tj]s$': ['@swc/jest', swcJestConfig],
   },
   moduleFileExtensions: ['ts', 'js', 'html'],
+
+  // Session 38's battery files are `*.e2e.ts`, which the Nx preset's default
+  // `testMatch` (spec/test only) does not pick up. Both patterns are listed so
+  // the Session 6 boot smoke test (`iam-api.spec.ts`) keeps running too.
+  testMatch: [
+    '<rootDir>/src/**/*.e2e.ts',
+    '<rootDir>/src/**/?(*.)+(spec|test).[jt]s?(x)',
+  ],
+
+  // **Serial, and not negotiable.** Every file in this battery seeds tenants in
+  // one shared Postgres and drives one shared API process. Two workers would
+  // interleave their fixtures' purges, and the failures would be
+  // non-deterministic — the worst kind for a suite whose job is to be a
+  // regression wall. Each file still uses its own slug prefix, so the
+  // serialisation is belt-and-braces rather than the only thing keeping them
+  // apart.
+  maxWorkers: 1,
+
+  // Seeding two tenants over HTTP costs a handful of argon2id hashes, and the
+  // load smoke deliberately runs hundreds of requests. The default 5 s would
+  // fail on the fixture rather than on anything under test.
+  testTimeout: 180_000,
+
   coverageDirectory: 'test-output/jest/coverage',
 };

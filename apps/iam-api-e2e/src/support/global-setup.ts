@@ -1,16 +1,30 @@
-import { waitForPortOpen } from '@nx/node/utils';
+/**
+ * Brings up the one API instance the whole battery drives.
+ *
+ * The instance's coordinates travel to the workers two ways, because Jest
+ * offers no single reliable one: `process.env` (which workers inherit, and
+ * which `test-setup.ts` reads) and a JSON file (which survives a worker that
+ * was started before this ran, and which is also what makes a failed run
+ * debuggable afterwards — the log path is in it).
+ *
+ * See `api-process.ts` for why the suite starts the app itself rather than
+ * waiting on `nx serve`.
+ */
 
-/* eslint-disable */
-var __TEARDOWN_MESSAGE__: string;
+import { writeFileSync } from 'node:fs';
+import { RUNTIME_FILE, startApi } from './api-process';
+
+declare const globalThis: { __E2E_API_PID__?: number } & typeof global;
 
 module.exports = async function () {
-  // Start services that that the app needs to run (e.g. database, docker-compose, etc.).
-  console.log('\nSetting up...\n');
+  const { runtime } = await startApi();
 
-  const host = process.env.HOST ?? 'localhost';
-  const port = process.env.PORT ? Number(process.env.PORT) : 3000;
-  await waitForPortOpen(port, { host });
+  writeFileSync(RUNTIME_FILE, JSON.stringify(runtime, null, 2));
+  process.env['E2E_BASE_URL'] = runtime.baseUrl;
+  process.env['E2E_API_LOG'] = runtime.logPath;
 
-  // Hint: Use `globalThis` to pass variables to global teardown.
-  globalThis.__TEARDOWN_MESSAGE__ = '\nTearing down...\n';
+  // Teardown runs in this same process, so the handle can simply be parked.
+  globalThis.__E2E_API_PID__ = runtime.pid;
+
+  console.log(`\niam-api under test: ${runtime.baseUrl} (log: ${runtime.logPath})\n`);
 };

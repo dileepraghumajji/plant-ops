@@ -6,6 +6,10 @@
     "implicitDependencies": [
       "@plantops/iam-api"
     ],
+    "tags": [
+      "type:app",
+      "app:iam-api-e2e"
+    ],
     "targets": {
       "e2e": {
         "executor": "@nx/jest:jest",
@@ -14,13 +18,21 @@
         ],
         "dependsOn": [
           "@plantops/iam-api:build",
-          "@plantops/iam-api:serve"
+          "@plantops/db:migration:run"
         ],
         "options": {
           "jestConfig": "apps/iam-api-e2e/jest.config.js",
-          "passWithNoTests": true
+          "passWithNoTests": false
         }
       }
     }
+  },
+  "dependencies": {
+    "@plantops/contracts": "0.0.1",
+    "pg": "^8.23.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.21.0",
+    "eslint": "^9.8.0"
   }
 }

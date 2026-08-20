@@ -244,6 +244,50 @@ by the server (Doc 05).
 
 ---
 
+## 4.5 Running the hardening battery
+
+The Session 38 suite in `apps/iam-api-e2e` is the cross-cutting proof of the
+system's security properties: RLS isolation, the whole auth lifecycle, the
+resolution matrix, the authorization matrix, cache invalidation, the resolve
+load smoke, and the module boundaries. One command:
+
+```sh
+npx nx run-many -t e2e
+```
+
+It needs Postgres and Redis up (section 1) and nothing else. The target migrates
+the database, builds `iam-api`, **starts the built bundle itself** on a free port
+with a configuration of its own, runs the battery, and stops it again — so it
+does not care whether you have `nx serve` running, and it will not fight your dev
+server for port 3000.
+
+Three things worth knowing before the first run:
+
+- **It creates and destroys its own tenants.** Every client it makes is slugged
+  `e2e-<file>-…` and is purged and rebuilt at the start of each file. Nothing
+  else in the database is touched, but point it at a scratch database anyway.
+- **It runs with rate limiting off.** The lockout case alone spends five of
+  `/auth/login`'s ten-per-minute budget. The 429 path keeps its own coverage in
+  `apps/iam-api`.
+- **The API's output is kept**, at
+  `apps/iam-api-e2e/test-output/e2e/api.log`. That is the first place to look
+  when a case fails, and it is also where the suite reads password-reset tokens
+  from — the same line a developer reads, because v1 binds no mail transport.
+
+A single file, when you are working on one:
+
+```sh
+npx nx e2e @plantops/iam-api-e2e --testPathPatterns=rls-isolation
+```
+
+And the load smoke on its own, against any deployment:
+
+```sh
+npm run load:smoke -- --base-url http://localhost:3000   --client-slug acme --email admin@acme.test --password 'Acme-Admin-Pass-1'
+```
+
+---
+
 ## 5. Things you will run into
 
 **"This account is locked."** Five failed sign-ins lock an account

@@ -53,7 +53,36 @@ npx nx graph                    # visualize projects & dependencies
 npx nx run-many -t build --all  # build everything
 npx nx run-many -t test --all   # run all unit tests
 npx nx run-many -t lint --all   # lint incl. module-boundary rules (Doc 08 §2)
+npx nx run-many -t e2e          # the hardening battery — see below
 ```
+
+## The hardening battery
+
+[`apps/iam-api-e2e`](apps/iam-api-e2e) is the regression wall for the properties
+that are expensive to get wrong: cross-tenant isolation at the database, the auth
+lifecycle end to end, resolution correctness, who may call what, cache
+invalidation, and the module boundaries. It is the one suite that runs against
+the **built bundle over a real socket**, with a real Postgres and a real Redis —
+everything else in the workspace tests the code in-process, with fakes.
+
+```sh
+docker compose up -d postgres redis   # or see docs/local-testing.md §1
+npx nx run-many -t e2e                # migrates, builds, boots, runs, stops
+```
+
+| File | Proves |
+|---|---|
+| [`rls-isolation.e2e.ts`](apps/iam-api-e2e/src/rls-isolation.e2e.ts) | a deliberately unfiltered query still returns one tenant's rows (Doc 07 §5–6) |
+| [`auth-flows.e2e.ts`](apps/iam-api-e2e/src/auth-flows.e2e.ts) | login, lockout, revocation, refresh rotation and reuse, reset, service tokens (Doc 03) |
+| [`resolution-matrix.e2e.ts`](apps/iam-api-e2e/src/resolution-matrix.e2e.ts) | ancestor coverage, minimisation, expiry, disabled apps, deny-by-default (Doc 04 §4–6) |
+| [`authorization-matrix.e2e.ts`](apps/iam-api-e2e/src/authorization-matrix.e2e.ts) | every subject class × endpoint class, and denials audited (Doc 04 §8–9, Doc 10 §3) |
+| [`invalidation.e2e.ts`](apps/iam-api-e2e/src/invalidation.e2e.ts) | every row of the Doc 04 §7 table takes effect immediately, not via TTL |
+| [`load-smoke.e2e.ts`](apps/iam-api-e2e/src/load-smoke.e2e.ts) | a cached resolve never reads the resolution tables, under concurrent load |
+| [`boundary-lint.e2e.ts`](apps/iam-api-e2e/src/boundary-lint.e2e.ts) | Doc 08 §2's boundaries refuse the imports they are supposed to |
+
+Running notes — the tenants it creates, the configuration it deviates on, and
+where the API's log goes — are in
+[`docs/local-testing.md`](docs/local-testing.md) §4.5.
 
 Module boundaries (e.g. only `iam-api` may import `libs/db`) are enforced by
 `@nx/enforce-module-boundaries` in [eslint.config.mjs](eslint.config.mjs) — see
