@@ -310,6 +310,41 @@ integration needs instant kill, issue it a session-backed token instead.
 grants without honoring invalidation, or trust anything a client sends about
 identity or tenancy.
 
+### 8.1 If the product lives outside this repository
+
+Everything above assumes `apps/gatepass-api` — a workspace sibling. That is right
+for PlantOps modules, which share this IAM's contracts and ship on its cadence
+(Doc 00 §7). It is **not** right for an unrelated product with its own release
+schedule, which should consume the IAM as a versioned dependency instead.
+
+The mechanism is unchanged and already domain-neutral: `resolver.service.ts`
+never reads `scope_node.kind`, coverage is `ltree` containment on `path` alone,
+and `unique(application_id, key)` keeps two products' permission catalogues from
+colliding. A CRM's *Region → Branch → Team* resolves through the identical code
+as *Group → Plant → Gate*.
+
+Two things block it today, both packaging rather than capability:
+
+- **`auth-kit` is Nest-only.** `@nestjs/common` and `@nestjs/core` are hard
+  dependencies, so a Next.js route handler gets nothing from the module that
+  enforces `@RequirePermission`. Session 50 splits it into a framework-free core
+  plus adapters — and the package boundary is the part that cannot be changed
+  later without breaking every consumer, which is why it precedes publishing.
+- **The libs are not installable.** All five are `"private": true` at `0.0.1`,
+  and `web-kit`/`ui` set `main: ./src/index.ts` — they ship source, relying on the
+  consumer's bundler and tsconfig paths. Session 51 fixes this.
+
+`libs/web-kit` imports nothing from `next`, by design — its header says redirects
+are callbacks precisely so no consumer is pinned to one router. So the React side
+already works anywhere once it is installable.
+
+**Decide deliberately: one IAM instance or several.** Tokens carry no `aud`
+claim (Doc 03 §2), so a token issued by an instance is valid at *every*
+application registered on it. For products serving the same people that is real
+SSO for free; for unrelated products it means a token minted for one is accepted
+by the other, and one outage takes down everything. [Doc
+12 §5](../12-consuming-the-iam.md) has the trade-off in full.
+
 ---
 
 ## 9. Testing
@@ -359,8 +394,9 @@ the error envelope — a probe consumes status codes.
 
 | Gap | Detail |
 |---|---|
-| **Session 38 — hardening & security battery** | Not run. Do it before any real tenant |
 | **Session 39 — deployment, CI, environments** | No containers, no pipeline, no staging. `iam-api` is intended to run containerized with a dedicated migration step on the **direct** URL; `admin-web` on Vercel or Railway |
+| **Phase 8 — single-tenant delivery** (40–49) | No installable artifact. `admin-web` bakes its API URL in at build time (`api-config.ts`), so one build cannot serve two hostnames; there is no single-tenant mode, no entitlements, and no upgrade or restore runbook. See [Doc 11](../11-deployment-models.md) |
+| **Phase 9 — consumability** (50–52) | `auth-kit` hard-depends on `@nestjs/*`, so nothing outside Nest can use the guard; all five libs are `private: true`, and `web-kit`/`ui` publish source rather than a build. See [Doc 12](../12-consuming-the-iam.md) |
 | **Password-reset delivery** | `PASSWORD_RESET_DELIVERY` is a port with a dev-only logging binding. Production logs an error and sends nothing. Bind a real channel |
 | **Human platform admin** | Two-step (create user in `platform`, then bind the Platform Admin role). Worth an endpoint or a seed flag |
 | **Integration-suite fixtures** | Some insert `role_binding` rows in raw SQL and skip invalidation, so they fail when Redis is up. Fix the fixtures, not the product |
@@ -381,6 +417,8 @@ the error envelope — a probe consumes status codes.
 | Boundaries, tags, deploy shape | [08](../08-nx-workspace-structure.md) |
 | Screen-by-screen intent | [09](../09-admin-ui-spec.md) |
 | What is audited, and retention | [10](../10-audit-governance.md) |
+| Dedicated vs self-hosted, licensing | [11](../11-deployment-models.md) — §6 for which console a client gets |
+| Using the IAM from another repository | [12](../12-consuming-the-iam.md) |
 | Running it on this machine | [local-testing.md](../local-testing.md) |
 | Session-by-session build history | [implementation-roadmap.md](../implementation-roadmap.md) |
 | Decisions with reasoning | [docs/adr/](../adr/) |

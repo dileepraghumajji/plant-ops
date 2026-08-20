@@ -330,4 +330,56 @@ After that everything else is done through the screens in this manual.
 
 ---
 
+## 11. When the customer runs it themselves
+
+Everything above assumes the arrangement that exists today: one system, run by
+you, with every customer inside it. Two other arrangements are planned, and they
+change your job rather than the software. The detail is in [Deployment
+Models](../11-deployment-models.md); what matters to you is this.
+
+**A dedicated instance** — a private copy on your infrastructure, for one
+customer — changes nothing about your role. You hold the only platform account.
+The customer's administrator has their own tier and never sees the Platform
+menu, exactly as now.
+
+**An installation on the customer's own servers** is the one that changes things,
+and it is worth understanding *why* rather than just what.
+
+On their hardware, the customer holds the database, the master setup secret and
+the machine itself. **You cannot technically withhold anything from them**, and a
+design that pretended otherwise would give you false confidence. So the approach
+is not to lock the Platform console away — it is to make it unnecessary:
+
+- **Applications are registered by the release, not by you.** The catalogue of
+  abilities and menus ships inside the installed software and is re-applied on
+  every upgrade. Nobody uploads a manifest by hand, and if anyone edits the
+  catalogue directly the next upgrade quietly puts it back. This also means the
+  system on their site is always the one that was tested.
+- **The customer already exists.** There is exactly one, created at installation.
+  The system refuses to create a second, because the whole installation is tied
+  to that one customer and a second would be unreachable.
+- **Their modules come from the licence**, not from a toggle you flip.
+- **Their integrations do not need your tier.** An ERP or a gate device
+  authenticates through a *client* service account, which their own administrator
+  creates on their own screen (§5 covers the equivalent on your side).
+
+What they do get is a **read-only view** — they can see which applications are
+installed, which modules are enabled, and their own audit trail — plus one
+recovery path. If they lock out their only administrator on a site with no
+internet access and cannot reach you, there is a command their IT runs on the
+server itself to restore access. It is deliberately a server-side command rather
+than a permission sitting in a role, and it records itself in the audit trail
+distinctly from ordinary work.
+
+**The practical consequence for you:** for a self-hosted customer you are not the
+platform administrator any more — the release is. Your involvement moves from
+running screens to shipping versions, and to reading the diagnostic bundle they
+send you when something goes wrong, because you can no longer look for yourself.
+
+None of this is built yet (Phase 8 of the roadmap). It is here so that the first
+time a customer asks "will we get the Platform console?", the answer is ready and
+it is honest.
+
+---
+
 Next: what your customer sees, in the [Client Admin Manual](client-admin-manual.md).

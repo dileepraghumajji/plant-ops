@@ -2,7 +2,7 @@
 
 **Who this is for:** you — the person who owns this product. No engineering
 background is assumed. Where a technical word is unavoidable it is explained the
-first time and repeated in the [glossary](#12-glossary) at the end.
+first time and repeated in the [glossary](#13-glossary) at the end.
 
 **What you will get out of it:** the ability to explain PlantOps to a customer, a
 partner or a new employee; a clear picture of what exists today and what does
@@ -222,8 +222,14 @@ that it works.
 
 ## 7. What exists today, honestly
 
-The system was built in 39 planned sessions. **Sessions 1–37 are complete and
-merged**: the entire back end, and every screen in both consoles.
+The plan now runs to 52 sessions. **Sessions 1–38 are complete and merged**: the
+entire back end, every screen in both consoles, and the security test battery
+that proves the parts that are expensive to get wrong.
+
+The thirteen sessions added since answer two questions the original plan never
+asked — *how do we put this on a customer's own servers* (Phase 8) and *how does
+a product built outside this repository use it* (Phase 9). Neither is a fix.
+Both are new ground, and both are described in §8 below.
 
 **Working today:**
 
@@ -243,38 +249,131 @@ merged**: the entire back end, and every screen in both consoles.
 
 | Gap | What it means in practice | Whose call |
 |---|---|---|
-| **Session 38 — hardening & security test battery** | The security properties are implemented and unit-tested, but the deliberate end-to-end attack battery has not been run | Engineering; do this before the first paying customer |
 | **Session 39 — deployment, CI, environments** | It runs on a developer's machine. There is no production deployment, no automated build pipeline, no staging environment | Engineering; this is the gap between "built" and "live" |
+| **Putting it on a customer's own servers** (Phase 8, sessions 40–49) | There is no installer. Today the only way to run it is the way a developer runs it. A customer who says "it must live inside our network" cannot be served yet | Engineering, but §8 is **your** decision first |
+| **Using it from a product outside this repository** (Phase 9, sessions 50–52) | The shared building blocks exist but cannot be installed from another codebase, and the authorization helper only works if that product is built with the same framework the IAM uses | Engineering; needed for your own next products too |
 | **Password-reset emails** | The reset flow works, but nothing sends the email — no mail provider is connected. Outside production the code writes the reset link to the log so developers can test it; in production it refuses and logs an error rather than failing silently | **Yours** — pick a mail provider (SMTP, Amazon SES, or the WhatsApp route the design already reserves) |
 | **Single sign-on, Microsoft/Google login, two-factor** | Deliberately out of v1. The data model already has room for them, so they are additions rather than rewrites | Yours — most likely the first thing a large manufacturer asks for |
 | **Creating a human platform admin** | Still a two-step process through the API rather than one button. It affects only your own team, once per environment | Engineering; small |
 
-Nothing on that list is a design flaw. The first two are the planned last two
-steps; the rest are choices that were consciously deferred.
+Nothing on that list is a design flaw. The first is the planned next step; the
+two middle rows are new ground rather than unfinished work; the rest are choices
+that were consciously deferred.
+
+One thing worth saying plainly, because it is the question a large customer asks
+first: **single sign-on is the feature most likely to decide an enterprise deal.**
+A manufacturer with five thousand employees will not let a supplier hold their
+passwords — they will want their staff to sign in with the Microsoft or Google
+account they already use. It is deliberately not built, the data model already
+accommodates it, and if your first serious customer runs Microsoft Entra it
+outranks most of Phase 8.
 
 ---
 
-## 8. The decisions that are yours, not your developers'
+## 8. How you will actually deliver this to a customer
 
-1. **A mail provider**, so password resets reach people. Nothing else blocks a
+There are three ways to put this product in a customer's hands. They are the same
+software — the difference is who runs the computers, who holds the keys, and who
+gets woken up when something breaks.
+
+| | **Hosted by you** | **Dedicated instance** | **On their servers** |
+|---|---|---|---|
+| Where it runs | Your cloud, shared | Your cloud, theirs alone | Their building or their cloud account |
+| Who operates it | You | You | Them |
+| Who can read their data | You, technically | You, technically | **Only them** |
+| Their objection it answers | — | "Not on a machine shared with my competitor" | "Our data never leaves our premises" |
+| Time to set up | Hours | Hours | Days to weeks — their IT, their process |
+| Money | Monthly subscription | Subscription + setup fee | Annual licence + support |
+| Your cost per customer | Small, shared | Real and recurring | Almost nothing after handover |
+| Your support burden | Low — you can see everything | Low | **High — you can see nothing** |
+
+The last row is the one people underestimate. Installing on a customer's own
+servers looks cheaper because there is no hosting bill, but you pay for it in
+support calls where you are debugging a system you cannot look at, and in keeping
+three-year-old versions working because that customer never upgraded.
+
+**The important engineering fact:** all three are the same product. There is no
+special version for any customer. What changes is configuration — which is why
+adding the other two models costs ten sessions rather than a second product.
+
+### What to expect in an Indian manufacturing sale
+
+Many groups will say "on-premise" when what they actually mean is *"not on a
+server shared with my competitor."* That is the **dedicated instance**, and it is
+much easier for both sides: you keep the operational control, they get the
+isolation they asked for, and nobody has to train their IT team. Worth asking
+which one they mean before quoting.
+
+### Pricing shape
+
+Do **not** price per user. Your users include gate guards and floor supervisors
+numbering in the thousands; charging per head either loses the deal or pushes the
+customer to buy too few licences and work around the system.
+
+Charge **per site, plus the modules they switch on.** That matches how a
+manufacturer thinks about their own business, and the system already counts both.
+
+```
+Base platform (IAM + one module)   →  per site, per month
+Each additional module             →  per site, per month
+Administrator accounts             →  included, in bands
+Everyone else (guards, staff)      →  unlimited
+On their own servers               →  roughly 2.5–3× the annual subscription,
+                                      plus 18–22% a year for support
+```
+
+For a customer on their own servers, prefer a **licence that renews annually**
+over one they buy outright. A perpetual licence with optional support produces
+exactly the customer you cannot help: an old version, unsupported, still your
+reputation when it breaks.
+
+### One thing to be realistic about
+
+On a customer's own servers you cannot technically enforce anything. They hold
+the machine and the database. The licence file the system checks is there to make
+the honest path easy and to make an expiry visible — not to stop someone
+determined. That is normal for this kind of software, and the answer is a contract
+with an audit clause, not more engineering. Your developers have been told
+explicitly not to build copy-protection; it is expensive, it does not work, and
+the way it fails is by locking out a paying customer's night shift.
+
+The full detail is in [Deployment Models](../11-deployment-models.md).
+
+---
+
+## 9. The decisions that are yours, not your developers'
+
+1. **Which delivery model the first customer gets** (§8). This is now the biggest
+   one, because it decides what your developers build next. If "dedicated
+   instance" satisfies them, roughly half of Phase 8 can wait. If they genuinely
+   need it inside their own network, the installer is the critical path. Ask the
+   customer which they mean — the words are used interchangeably and they are not
+   the same thing.
+2. **What a customer is charged *per*.** Per site is the recommendation (§8), and
+   your developers need the answer before they build the licence checks, because
+   the wrong choice is awkward to change once customers are signed. One
+   specific instruction has already been given to them: do not meter on the
+   *label* a customer gives their sites, because that is a field the customer
+   controls.
+3. **A mail provider**, so password resets reach people. Nothing else blocks a
    customer trial.
-2. **How long the register is kept.** The default is forever, which is the safe
+4. **How long the register is kept.** The default is forever, which is the safe
    answer for access-control events and the one a manufacturer's compliance team
    will want to hear. If a customer demands something shorter, that becomes a
    contractual term.
-3. **Whether tamper-evidence is needed.** The register cannot be edited today. A
+5. **Whether tamper-evidence is needed.** The register cannot be edited today. A
    stronger version exists in the design — each entry sealed against the previous
    one, so any interference is detectable — and is worth switching on if you sell
    into a regulated customer. Ask for it by name: *audit hash chain*.
-4. **Single sign-on**, and when. Large manufacturers will ask. It is a feature,
+6. **Single sign-on**, and when. Large manufacturers will ask. It is a feature,
    not a fix, and it is cheaper to quote once you know whether they use Microsoft
    Entra or Google Workspace.
-5. **How many platform administrators your team has.** Answer: more than one, in
+7. **How many platform administrators your team has.** Answer: more than one, in
    every environment — see the risk below.
 
 ---
 
-## 9. Risks worth having on your radar
+## 10. Risks worth having on your radar
 
 **Locking yourself out.** Five wrong passwords locks an account, and only
 *another administrator in the same company* can unlock it. If a customer has
@@ -299,7 +398,7 @@ accurately in a security review.
 
 ---
 
-## 10. Does it scale, and what does it cost to run?
+## 11. Does it scale, and what does it cost to run?
 
 The moving parts are a standard PostgreSQL database and a Redis cache — both
 boring, both cheap, both available as managed services for tens of dollars a
@@ -316,7 +415,7 @@ degrades performance rather than causing an outage.
 
 ---
 
-## 11. Questions to ask your developers
+## 12. Questions to ask your developers
 
 Use these to check the system is still what this guide describes. Each has a
 short right answer.
@@ -333,7 +432,7 @@ short right answer.
 
 ---
 
-## 12. Glossary
+## 13. Glossary
 
 **Access token** — the short-lived digital pass (15 minutes) a signed-in person
 carries with every request. Short-lived on purpose: a stolen one expires fast.
