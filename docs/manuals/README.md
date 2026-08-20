@@ -48,6 +48,16 @@ dependencies, no build step.
 
 These manuals are the *how-to*. The specification suite in [`docs/`](../) is the
 *why* and the *contract* — [00](../00-system-overview.md) through
-[10](../10-audit-governance.md), plus [local-testing.md](../local-testing.md) for
+[12](../12-consuming-the-iam.md), plus [local-testing.md](../local-testing.md) for
 running everything on a developer machine. Where a manual and the spec disagree,
 the spec is right and the manual needs fixing.
+
+Two of those documents postdate the four manuals and cover ground none of them
+did: [11 — Deployment Models](../11-deployment-models.md) (how the product is
+delivered — hosted by us, a dedicated instance, or installed on a customer's own
+servers) and [12 — Consuming the IAM](../12-consuming-the-iam.md) (using it from
+a product built outside this repository). The Founder's Guide and the Developer
+Manual carry the plain-English summary of each; the specs carry the detail.
+
+Decisions with their reasoning live in [`docs/adr/`](../adr/) — including the two
+that are still open and deliberately so.

@@ -99,7 +99,7 @@ Self-referencing tree per client: Group → Plant → Department → Gate. **The
 | id | uuid PK | |
 | client_id | uuid FK → client | |
 | parent_id | uuid FK → scope_node (nullable) | null = client root/group |
-| kind | enum(`group`,`plant`,`department`,`gate`) | extensible |
+| kind | enum(`group`,`plant`,`department`,`gate`) | extensible — see `docs/adr/0002-scope-node-kind.md` |
 | name | text | |
 | path | ltree | materialized path for fast subtree queries (see label rule below) |
 | metadata | jsonb | |

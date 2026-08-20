@@ -118,6 +118,8 @@ after editing any manual.
 | [08](08-nx-workspace-structure.md) | Nx Workspace & Structure | monorepo layout, shared libs |
 | [09](09-admin-ui-spec.md) | Admin UI Spec | the two consoles |
 | [10](10-audit-governance.md) | Audit & Governance | append-only trail, retention |
+| [11](11-deployment-models.md) | Deployment Models | dedicated vs self-hosted, console tiering, licensing |
+| [12](12-consuming-the-iam.md) | Consuming the IAM | using it from products outside this repo |
 
 ## Suggested build order
 
