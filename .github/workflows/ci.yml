@@ -220,15 +220,18 @@ jobs:
     # Never from a pull request: a fork's PR must not be able to reach a
     # database, and `secrets` are not available to one anyway.
     #
-    # And dormant until an environment actually exists. `RAILWAY_SERVICE` is
-    # the switch: with no target configured this job skips rather than failing,
-    # so merging the pipeline does not turn `main` red on a repository that has
-    # nothing to deploy to yet. Setting the variable arms it — see
-    # `docs/ops-runbook.md` §5.
-    if: >-
-      github.event_name == 'push'
-      && github.ref == 'refs/heads/main'
-      && vars.RAILWAY_SERVICE != ''
+    # This condition deliberately does **not** test whether the deploy target is
+    # configured, and that is worth stating because the obvious version is
+    # broken. A job's `environment:` is resolved *after* its `if:` is evaluated,
+    # so `vars` here sees only **repository**-level variables — an
+    # environment-scoped `RAILWAY_SERVICE` reads as the empty string no matter
+    # how correctly it is set. The guard that used to live here therefore
+    # skipped this job silently on every push, with a green tick and no deploy,
+    # which is the worst way for a pipeline to do nothing.
+    #
+    # Configuration is checked in the first step below instead, where the
+    # environment exists and a missing value can say so out loud.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [verify, image]
     runs-on: ubuntu-latest
 
@@ -245,6 +248,27 @@ jobs:
       cancel-in-progress: false
 
     steps:
+      - name: Check the deploy target is configured
+        # Fails loudly and names what is missing, rather than deploying half a
+        # release or skipping in silence. Values are only tested for presence —
+        # nothing is echoed, because two of them are secrets.
+        env:
+          RAILWAY_SERVICE: ${{ vars.RAILWAY_SERVICE }}
+          RAILWAY_ENVIRONMENT: ${{ vars.RAILWAY_ENVIRONMENT }}
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          DATABASE_DIRECT_URL: ${{ secrets.STAGING_DATABASE_DIRECT_URL }}
+        run: |
+          missing=()
+          for name in RAILWAY_SERVICE RAILWAY_ENVIRONMENT RAILWAY_TOKEN DATABASE_DIRECT_URL; do
+            [ -n "${!name}" ] || missing+=("$name")
+          done
+          if [ ${#missing[@]} -ne 0 ]; then
+            echo "::error::Release environment incomplete — missing: ${missing[*]}."
+            echo "Set them on the GitHub Environment named by this job (docs/ops-runbook.md §2)."
+            exit 1
+          fi
+          echo "Deploying to service '$RAILWAY_SERVICE' in environment '$RAILWAY_ENVIRONMENT'."
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
