@@ -1,6 +1,14 @@
--- Database role provisioning — run ONCE per database, by an administrator,
--- BEFORE the first migration (Doc 07 §5.1).
+-- Database role provisioning — run ONCE per database, BEFORE the first
+-- migration (Doc 07 §5.1).
 --
+-- Three callers, one file, and that is the point of it: the most consequential
+-- statement in the deployment must not have three slightly different versions.
+--
+--   installer: `deploy/bootstrap.sh` pipes this into the stack's own psql on
+--              first boot. An operator on a plant server never runs it by hand
+--              and never sees it — but it is the same bytes, and it ships in
+--              the bundle beside the compose file so that it can be run against
+--              a database the bundle did not create.
 --   local:     psql -U postgres -d plantops_iam \
 --                -v owner_role=plantops -v app_login_role=plantops_app \
 --                -f tools/setup-db-roles.sql

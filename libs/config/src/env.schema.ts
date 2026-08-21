@@ -547,13 +547,43 @@ export const envSchema = z.object({
    * Secret for the very first platform identity (Doc 07 §8). Supplied
    * out-of-band, never committed, rotated immediately after first use — and
    * never logged (see `redactEnv`).
+   *
+   * **Optional, and that is the point of it.** No code in the API reads this
+   * value: migration 0011 hashes it into the platform service account, off
+   * `process.env` directly, and nothing else in the system ever looks at it
+   * again. Requiring it here would mean every deployment kept a live credential
+   * in the application's environment forever, for the sake of a single
+   * statement that ran once and will never run again — which is the opposite of
+   * "consumed once, rotated immediately".
+   *
+   * So a running API may have it and may not, and a deployment that has
+   * finished installing should not. What still refuses to proceed without it is
+   * the one thing that genuinely needs it: `tools/release-migrate.ts` checks
+   * for it up front whenever 0011 is still pending, and fails before applying
+   * anything rather than eight migrations in.
+   *
+   * Present but too short is still an error. An operator who set it meant to
+   * set it, and a 12-character bootstrap secret is a weaker credential than the
+   * one it creates — silently accepting it would be the worst of the three
+   * outcomes.
    */
-  PLATFORM_BOOTSTRAP_SECRET: z
-    .string()
-    .min(
-      BOOTSTRAP_SECRET_MIN_LENGTH,
-      `PLATFORM_BOOTSTRAP_SECRET must be at least ${BOOTSTRAP_SECRET_MIN_LENGTH} characters`,
-    ),
+  PLATFORM_BOOTSTRAP_SECRET: z.preprocess(
+    // Blank means absent, for the same reason `DATABASE_CA_CERT` does — and for
+    // one more that is specific to this variable. `deploy/docker-compose.prod.yml`
+    // sets it to the empty string on the API service *on purpose*, so that the
+    // container serving requests never holds the credential even while the
+    // migration container beside it still needs one from the same `.env`. Read
+    // literally, that would be a 32-character check against a string of length
+    // zero and the application would refuse to start.
+    (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+    z
+      .string()
+      .min(
+        BOOTSTRAP_SECRET_MIN_LENGTH,
+        `PLATFORM_BOOTSTRAP_SECRET must be at least ${BOOTSTRAP_SECRET_MIN_LENGTH} characters`,
+      )
+      .optional(),
+  ),
 })
   /**
    * Both exemptions have to be exemptions. Configured the other way round

@@ -264,7 +264,9 @@ The honest gap list as of today. None of it is hard; all of it is unbuilt.
 
 **1. ~~There is no *complete* release artifact.~~ Delivered — the images exist; the *bundle* does not.** Session 41 added the console image (`apps/admin-web/Dockerfile`, Next standalone output), the reverse proxy (`deploy/proxy/`), and the one-shot migration runner (`deploy/migrate/`, built from the API image so the runner and the app cannot disagree about what a migration is). All four carry `APP_VERSION` as an OCI label and in the environment, and `/health` reports it — CI builds the set, asserts the label matches the tag it built, brings `deploy/docker-compose.yml` up and logs in through the proxy under two hostnames. The root `docker-compose.yml` is still local-development-only and stays that way.
 
-What remains is turning those images into something a client can *receive*: `docker save` of pinned digests, a `.env.template`, an install script, and a first boot on a machine with no egress. That is Session 42, and until it exists the images are reproducible but not deliverable.
+Session 42 turned them into something a client can *receive*. `tools/build-bundle.mjs` produces one `plantops-<version>.tar.gz` holding the six images, `docker-compose.prod.yml` with `pull_policy: never` on every service, a `.env.template` documenting every variable `libs/config` validates, `deploy/bootstrap.sh`, and the runbooks. The installer asks nothing of the host but Docker and a POSIX shell — no Node, no curl, no package manager, no egress — because everything that needs a runtime runs inside a container from the bundle. CI deletes the four images from the daemon and installs from the archive, so "offline" is asserted rather than asserted-to.
+
+What is still missing is §10's licence file and the backup / restore / upgrade runbooks (Sessions 48 and 49). The kit installs and upgrades; it is not yet the complete handover.
 
 **2. ~~`admin-web` baked the API URL in at build time.~~ Closed.** Session 40 did the console's half: `apps/admin-web/src/lib/api-config.ts` defaults to the same-origin path `/api`, so a build made without `NEXT_PUBLIC_IAM_API_URL` carries no hostname at all and one bundle serves any origin. An absolute value still overrides it, which is what local development and the managed platform use, since neither has the console and the API on one origin.
 
@@ -278,7 +280,7 @@ Session 41 did the other half: `deploy/proxy/` serves the console at `/` and the
 
 **6. Password-reset delivery has no transport bound.** `apps/iam-api/src/auth/password-reset.delivery.ts` is deliberately a port whose logging default refuses to print tokens in production. That design is right, but no real binding exists. A self-hosted client needs to point it at their own SMTP relay, and that must be configuration rather than code.
 
-**7. There is no backup, restore, or upgrade runbook,** and no test proving a migration sequence applies cleanly across a version gap.
+**7. There is no backup or restore runbook,** and no test proving a migration sequence applies cleanly across a version gap. The *upgrade* path itself exists — Session 42's `deploy/README.md` §5 is load, retag, `docker compose up -d`, with the migration container a prerequisite of the API so the ordering cannot be got wrong — but the runbook that says what to do when one goes badly is Session 49.
 
 **8. There is no diagnostic bundle command** (§5.5). The version half is done: Session 41 stamps `APP_VERSION` into every image from one build argument — as an OCI label a stopped container still carries, and in the environment `/health` reports — so "what version are you on" is answered by `curl <host>/api/health` with no credential and no dashboard. CI fails if the tag and the reported version diverge. The bundle itself — logs, configuration with secrets redacted, migration ledger, readiness — is Session 49.
 

@@ -8,10 +8,16 @@ out-tsc
 # dependencies
 node_modules
 
-# environment — secrets never enter the repo (Doc 08 §5); the template does
+# environment — secrets never enter the repo (Doc 08 §5); the templates do
+#
+# `.env.example` is the developer's; `deploy/.env.template` is the one that
+# ships in an installation bundle and is what an operator fills in on a machine
+# we cannot reach. Both are documentation with no value in them, and
+# `libs/config` has a test per file asserting they stay honest.
 .env
 .env.*
 !.env.example
+!deploy/.env.template
 
 # IDEs and editors
 /.idea
