@@ -68,6 +68,10 @@ const OPERATOR_ANSWERS: EnvSource = {
   PLANTOPS_ADMIN_NAME: 'Test Admin',
   PLANTOPS_ADMIN_PASSWORD: 'a-long-enough-password',
   PLANTOPS_VERSION: '1.0.0-test',
+  // The same slug the installer is told to create, which is the pairing
+  // `bootstrap.sh` asserts. A template that shipped these two disagreeing would
+  // produce a stack that installs and then refuses to start.
+  SINGLE_TENANT_CLIENT_SLUG: 'test-manufacturing',
 };
 
 /** `KEY=value` lines, quotes stripped, comments and blanks skipped. */
@@ -172,6 +176,16 @@ describe('deploy/.env.template', () => {
     ]) {
       expect(assigned[key]).toBe('');
     }
+  });
+
+  it('names the same organisation twice, and blank in both places', () => {
+    // `PLANTOPS_CLIENT_SLUG` tells the installer which organisation to create;
+    // `SINGLE_TENANT_CLIENT_SLUG` tells the application which one it serves.
+    // The installer refuses to proceed if they disagree, and that check is only
+    // meaningful while both are the operator's to fill in — a template that
+    // pre-filled either would make the disagreement the default.
+    expect(assigned['PLANTOPS_CLIENT_SLUG']).toBe('');
+    expect(assigned['SINGLE_TENANT_CLIENT_SLUG']).toBe('');
   });
 });
 

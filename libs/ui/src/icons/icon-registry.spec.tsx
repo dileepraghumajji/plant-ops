@@ -36,7 +36,7 @@ describe('icon registry', () => {
    * and obvious to nobody.
    */
   it('maps every icon key the IAM’s own manifest uses', () => {
-    const manifestPath = join(__dirname, '../../../../tools/iam-manifest.json');
+    const manifestPath = join(__dirname, '../../../../deploy/manifests/iam.manifest.json');
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8')) as {
       nav: NavEntry[];
     };

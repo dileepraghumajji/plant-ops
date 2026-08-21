@@ -134,6 +134,24 @@ fi
 [ -z "$missing" ] || die "these values are empty in .env:$missing
 Each one is described in .env.template."
 
+# A pinned deployment names its organisation twice — once for the installer,
+# once for the application — and the two must agree. Caught here, this is one
+# line of the file to fix; caught at boot it is an API that will not start, on a
+# stack that installed perfectly, with a message about a slug the operator
+# believes they set correctly.
+DEPLOYMENT_MODE=$(env_value DEPLOYMENT_MODE)
+PINNED_SLUG=$(env_value SINGLE_TENANT_CLIENT_SLUG)
+CLIENT_SLUG=$(env_value PLANTOPS_CLIENT_SLUG)
+if [ "${DEPLOYMENT_MODE:-saas}" = 'single_tenant' ]; then
+  [ -n "$PINNED_SLUG" ] || die "DEPLOYMENT_MODE=single_tenant but SINGLE_TENANT_CLIENT_SLUG is empty.
+It names the organisation this installation serves, and must be the same value
+as PLANTOPS_CLIENT_SLUG (\"$CLIENT_SLUG\")."
+  [ "$PINNED_SLUG" = "$CLIENT_SLUG" ] || die "the two organisation slugs in .env disagree:
+  PLANTOPS_CLIENT_SLUG        $CLIENT_SLUG   (the organisation the installer creates)
+  SINGLE_TENANT_CLIENT_SLUG   $PINNED_SLUG   (the organisation the application serves)
+Set both to the same value."
+fi
+
 # ── Verify / rotate: no installation steps, just the container call ─────────
 
 run_installer() {
@@ -302,6 +320,33 @@ apply_manifests || die 'the application catalog could not be applied.'
 
 step 'Provisioning your organisation'
 run_installer provision || die 'provisioning did not complete. Nothing was left half-created; fix the cause above and run this script again.'
+
+# ── 5. Pin the deployment to the organisation that now exists ───────────────
+#
+# A single-tenant API resolves its organisation once, at boot — which on a
+# *first* install is before the organisation exists, because the organisation is
+# created through that very API. It starts anyway in that one case, refuses
+# every login while unprovisioned, and says so in its log.
+#
+# Restarting here closes the loop, and it is the moment the strict check becomes
+# real: from now on a slug that names no organisation stops this service from
+# starting at all, rather than letting it serve 401s nobody can explain.
+if [ "${DEPLOYMENT_MODE:-saas}" = 'single_tenant' ]; then
+  step 'Pinning the deployment to your organisation'
+  dc restart iam-api >/dev/null
+
+  deadline=$(( $(date +%s) + 120 ))
+  until dc exec -T proxy wget -q -O /dev/null http://127.0.0.1/api/ready 2>/dev/null; do
+    [ "$(date +%s)" -lt "$deadline" ] || die "the API did not come back after being pinned to \"$PINNED_SLUG\".
+Its log says which organisation it looked for and what it found:
+  docker compose logs iam-api"
+    sleep 3
+  done
+  say "Pinned to \"$PINNED_SLUG\"."
+fi
+
+step 'Verifying'
+run_installer verify || die 'the installation did not verify. The failures above say which check.'
 
 # ── Done ────────────────────────────────────────────────────────────────────
 

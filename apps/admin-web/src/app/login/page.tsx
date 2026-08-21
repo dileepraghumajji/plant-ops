@@ -37,6 +37,7 @@ import { Suspense, useEffect, useState, type ReactElement } from 'react';
 
 import { IAM_API_LABEL } from '../../lib/api-config';
 import { RETURN_TO_PARAM, safeReturnTo } from '../../lib/auth-context';
+import { useDeployment } from '../../lib/deployment';
 
 export default function LoginPage(): ReactElement {
   // `useSearchParams` opts the subtree into client-side rendering; the boundary
@@ -58,6 +59,7 @@ function LoginScreen(): ReactElement {
   const router = useRouter();
   const params = useSearchParams();
   const { status, login, endedReason, lastClientSlug } = useAuth();
+  const { deployment, loading: resolvingDeployment } = useDeployment();
 
   const [submitting, setSubmitting] = useState(false);
   const [failure, setFailure] = useState<DescribedError | null>(null);
@@ -83,11 +85,29 @@ function LoginScreen(): ReactElement {
     }
   };
 
+  const pinned = deployment.mode === 'single_tenant';
+
+  // Waiting rather than rendering the multi-tenant form and swapping the field
+  // out a moment later. One round trip to the origin that just served this
+  // page, against a form that would otherwise rearrange itself under somebody
+  // who has started typing.
+  if (resolvingDeployment) {
+    return (
+      <AuthLayout product="IAM" title="Sign in">
+        <Skeleton active paragraph={{ rows: 4 }} title={false} />
+      </AuthLayout>
+    );
+  }
+
   return (
     <AuthLayout
       product="IAM"
       title="Sign in"
-      subtitle="Administer identities, roles and access for your organisation."
+      subtitle={
+        pinned && deployment.clientName !== null
+          ? `Administer identities, roles and access for ${deployment.clientName}.`
+          : 'Administer identities, roles and access for your organisation.'
+      }
       footer={IAM_API_LABEL}
     >
       {endedReason === 'refresh_failed' && failure === null && (
@@ -107,7 +127,13 @@ function LoginScreen(): ReactElement {
         // The server's own sentence, under the copy. Never shown *instead* of
         // it — that is how a 423 turns back into "sign-in failed".
         errorDetail={failure?.detail ?? null}
-        defaultClientSlug={lastClientSlug ?? ''}
+        // Pinned: the deployment's own slug, submitted from a hidden field.
+        // Otherwise the last one that worked, which is a convenience and
+        // nothing more.
+        defaultClientSlug={
+          pinned ? (deployment.clientSlug ?? '') : (lastClientSlug ?? '')
+        }
+        hideClientField={pinned}
         footer={
           <Typography.Paragraph type="secondary" style={{ fontSize: 12, margin: 0 }}>
             Forgotten your password, or locked out? Your organisation&rsquo;s

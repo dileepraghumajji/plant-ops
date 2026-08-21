@@ -71,7 +71,7 @@ import {
   type PasswordResetDelivery,
   type PasswordResetMessage,
 } from '../auth/password-reset.delivery';
-import { ENV } from '../config/config.module';
+import { ENV } from '../config/env.token';
 import { createTestApplication } from '../testing/app-harness';
 import { grantIamClientAdmin } from '../testing/authorization.fixture';
 

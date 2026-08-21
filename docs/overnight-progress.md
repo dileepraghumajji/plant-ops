@@ -136,3 +136,75 @@ Then the real path: the rebuilt `plantops/migrate` image applied the catalog thr
 1. **Applying manifests needs platform authority, and a finished install deliberately has none.** So an upgrade puts `PLATFORM_BOOTSTRAP_SECRET` back into `.env` for the length of the upgrade (documented in `deploy/README.md` §5). It works, and it is the weakest part of this session. The better answer is a dedicated release identity holding only `iam.platform.application.*` — created at bootstrap, secret stored in `.env`, useless for anything else. That belongs with Session 45's restricted platform role; worth deciding whether to fold it in there.
 2. **Nothing forces the upgrade to re-apply.** `bootstrap.sh --apply-manifests` is a documented step, not an automatic one, so an operator who skips it keeps the previous release's catalog. Making it automatic requires solving (1) first.
 3. **The set has exactly one manifest today.** `apply-manifests.ts` creates applications it does not find (except `iam`, which migration 0017 owns), so adding Gatepass or Visitor to the release is a matter of dropping a file in `deploy/manifests/` — but that path has never been exercised with a second manifest.
+
+---
+
+## Session 44 — Single-tenant deployment mode
+
+**Branch:** `session-44-single-tenant-mode`
+**Status:** complete. This is the session the roadmap flagged as high-risk — it touches the login path — so the safety property was tested first and directly.
+
+### What shipped
+
+| Thing | Where |
+|---|---|
+| `DEPLOYMENT_MODE`, `SINGLE_TENANT_CLIENT_SLUG`, with cross-field refinements | `libs/config/src/env.schema.ts` |
+| Boot-time resolution of the pinned client, and a loud refusal if it is missing | `apps/iam-api/src/config/deployment-mode.ts` |
+| A `security definer` lookup, because there is no RLS context at boot | `libs/db/src/migrations/0018-pinned-client-lookup.ts` |
+| The control: `client_slug` supplied from config, a different one **refused** | `apps/iam-api/src/auth/single-tenant.middleware.ts` |
+| Client creation refused as a coherence rule | `apps/iam-api/src/clients/clients.controller.ts` |
+| `GET /iam/deployment`, public, for the origin-agnostic console | `apps/iam-api/src/config/deployment.controller.ts` |
+| The slugless login form | `libs/ui/.../credentials-form.tsx`, `apps/admin-web/src/lib/deployment.ts`, `login/page.tsx` |
+| Both modes, asserted | `apps/iam-api-e2e/src/single-tenant.e2e.ts` |
+
+### The safety argument, and how it was tested
+
+The roadmap's governing criterion is that **`saas` behaviour is identical to today**. So the login path was not modified at all: `loginSchema` still requires `client_slug`, the validation pipe still produces the same envelope, `AuthService.login` is untouched. A middleware on `POST /auth/login` — one branch, taken never in `saas` — supplies the slug from configuration and refuses a request that names a different tenant.
+
+- **The full existing e2e battery passes unmodified** against a `saas` instance: 8 suites, 176 tests.
+- **The new suite passes**: 8 assertions against a *second* API process started in `single_tenant` mode on the same database. It proves the slugless login lands in the pinned tenant (`whoami.clientId`), that naming another tenant is refused with `VALIDATION_FAILED`, that a real user of that other tenant cannot get in either way, and that client creation is refused there while succeeding on the SaaS instance in the same run — a control, so the refusal cannot pass by being broken for everyone.
+
+`nx run-many -t lint test build` green; `openapi:check` green.
+
+### Decisions worth knowing about
+
+- **Refused, not overwritten.** A mismatched `client_slug` could have been silently replaced. Refusing is the honest answer: overwriting tells a caller their choice was honoured, and the one thing this deployment must never suggest is that the tenant was theirs to choose.
+- **Migration 0018 was taken by this session.** The lookup needs a `security definer` function because `client` reads as empty with no RLS context, and the lint gate rightly refuses a raw `set_config('app.…')` outside `rls-context.ts`. The roadmap's Session 45 entry has been corrected to say 0019.
+- **`onApplicationBootstrap`, not `onModuleInit`.** The global `ConfigModule` initializes before `DatabaseModule`, so an `onModuleInit` lookup failed with "Driver not Connected". The later hook still runs before the server accepts a connection.
+- **`ENV` moved to `config/env.token.ts`.** Adding a controller to `ConfigModule` created an import cycle that CommonJS turns into a `ReferenceError` at import time. All 34 consumers now import the token from its own file and the module no longer re-exports it, so the cycle cannot come back through a convenience alias.
+- **The sidebar needed no change**, contrary to the roadmap's file list. It renders the nav tree the API computes, and platform nodes are already pruned for a subject without the permissions — adding mode-based hiding would have been a second, untested code path for the same outcome.
+
+### Two chicken-and-eggs the first CI run found, and how they were resolved
+
+Both were real design faults in the boot check, not CI wiring, and both would
+have broken every genuine first install.
+
+1. **The API refused to start because the pinned client did not exist — and the
+   client is created *through* that API.** Resolved by telling the two
+   situations apart: a database with no tenants at all (only the platform
+   identity migration 0011 seeds) is a fresh installation, so the API warns,
+   starts, and refuses logins with a message saying so. A database that *has*
+   tenants and still cannot find the pinned slug is a misconfiguration, and it
+   refuses to start. `bootstrap.sh` restarts the API once the organisation
+   exists, which is the moment the strict check becomes meaningful and every
+   start after the first.
+2. **The installer could never create the first client**, because the
+   single-tenant refusal returned the same 409 the unique-slug conflict does.
+   Resolved by making the rule say what it means: only the organisation this
+   deployment is *for* may be created. Any other slug is refused; a repeat of
+   the pinned one meets the ordinary unique-slug 409 from the database. That is
+   also more honest than the original — there is no second code path that
+   writes a `client` row, so the installer uses the same endpoint everything
+   else does.
+
+Verified afterwards by a full install from a rebuilt bundle on a clean volume:
+slugless login through the proxy returns 200, a login naming another
+organisation returns 400, `GET /api/iam/deployment` reports the pinned tenant,
+and a second `./bootstrap.sh` changes nothing and re-verifies green.
+
+### Open questions for review — Session 44
+
+1. **A stray `SINGLE_TENANT_CLIENT_SLUG` in `saas` mode is a boot failure, not a warning.** The argument is that a setting nothing reads is one somebody will later believe did something. It does mean an operator switching a bundle to `saas` must also clear the slug. If that turns out to annoy more than it protects, relaxing the second refine is a one-line change.
+2. **The organisation slug is written twice in `.env`** — once for the installer, once for the application — and `bootstrap.sh` refuses to proceed if they disagree. Deriving one from the other inside the compose file would remove the duplication and also remove the boot check that catches a genuinely wrong value. The duplication was chosen deliberately; worth confirming.
+3. **`GET /iam/deployment` is a new public endpoint.** It returns the mode and, in single-tenant mode, the pinned organisation's slug and display name — its own name, on its own login page. Doc 06 has not been amended to describe it; that belongs with the next docs pass.
+4. **A Session 43 miss surfaced here.** `libs/ui`'s icon-registry test reads the IAM manifest by path, and moving the manifest did not mark `libs/ui` as affected — so it passed CI on a file that no longer existed. Fixed. Worth deciding whether tests that read files outside their own project should declare them as Nx inputs.

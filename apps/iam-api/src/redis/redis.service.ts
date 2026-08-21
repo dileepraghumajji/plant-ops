@@ -26,7 +26,7 @@ import {
 } from '@nestjs/common';
 import type { EnvConfig } from '@plantops/config';
 import { Redis } from 'ioredis';
-import { ENV } from '../config/config.module';
+import { ENV } from '../config/env.token';
 import { withTimeout } from '../common/with-timeout';
 
 @Injectable()

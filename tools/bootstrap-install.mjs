@@ -498,9 +498,15 @@ async function main() {
   }
 
   if (mode === 'provision') {
+    // Deliberately *not* followed by `verify` here. In a single-tenant
+    // installation the API resolved its organisation at boot, which on a first
+    // install was before this step created it — so it is still refusing logins
+    // until `bootstrap.sh` restarts it. The installer runs `verify` after that
+    // restart, which is the first moment the answer means anything.
     await provision(config);
-    console.log('\nVerifying:');
+    return;
   }
+
   await verify(config);
 }
 

@@ -44,7 +44,7 @@ import {
 } from '@plantops/contracts';
 import { randomUUID } from 'node:crypto';
 import type { KeyObject } from 'node:crypto';
-import { ENV } from '../config/config.module';
+import { ENV } from '../config/env.token';
 
 export { JWKS_CACHE_MAX_AGE_SECONDS };
 

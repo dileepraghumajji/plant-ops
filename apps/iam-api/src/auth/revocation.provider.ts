@@ -17,7 +17,7 @@ import { RevocationCache, type RevocationStore } from '@plantops/auth-kit';
 import { CLOCK_SKEW_LEEWAY_SECONDS } from '@plantops/contracts';
 import type { EnvConfig } from '@plantops/config';
 import type { Provider } from '@nestjs/common';
-import { ENV } from '../config/config.module';
+import { ENV } from '../config/env.token';
 import { RedisService } from '../redis/redis.service';
 
 export const REVOCATION_CACHE = Symbol('REVOCATION_CACHE');

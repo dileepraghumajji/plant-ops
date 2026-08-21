@@ -67,7 +67,7 @@ import type { AddressInfo } from 'node:net';
 import type { DataSource } from 'typeorm';
 import { AppModule } from '../app/app.module';
 import { runInTransactionContext } from '../common/transaction-context';
-import { ENV } from '../config/config.module';
+import { ENV } from '../config/env.token';
 import { DatabaseService } from '../database/database.service';
 import { createTestApplication } from '../testing/app-harness';
 import { AccountStateService } from './account-state.service';

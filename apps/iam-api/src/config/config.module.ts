@@ -9,13 +9,20 @@
 
 import { Global, Module } from '@nestjs/common';
 import { type EnvConfig, loadEnv } from '@plantops/config';
-
-/** Injection token for {@link EnvConfig}. */
-export const ENV = Symbol('ENV');
+import { DeploymentController } from './deployment.controller';
+import { DeploymentModeService } from './deployment-mode';
+import { ENV } from './env.token';
 
 @Global()
 @Module({
-  providers: [{ provide: ENV, useFactory: (): EnvConfig => loadEnv() }],
-  exports: [ENV],
+  // `@Global()` applies to providers, not controllers; this one is registered
+  // here because it sits next to the service it exposes, and because a module
+  // of its own for one route would be a file to open on the way to nothing.
+  controllers: [DeploymentController],
+  providers: [
+    { provide: ENV, useFactory: (): EnvConfig => loadEnv() },
+    DeploymentModeService,
+  ],
+  exports: [ENV, DeploymentModeService],
 })
 export class ConfigModule {}

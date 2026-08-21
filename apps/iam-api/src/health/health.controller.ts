@@ -38,7 +38,7 @@ import type { EnvConfig } from '@plantops/config';
 import type { Response } from 'express';
 import { SkipRateLimit } from '../common/rate-limit.decorator';
 import { SkipTransaction } from '../common/transaction-context';
-import { ENV } from '../config/config.module';
+import { ENV } from '../config/env.token';
 import { HealthService, type ReadinessReport } from './health.service';
 
 /**

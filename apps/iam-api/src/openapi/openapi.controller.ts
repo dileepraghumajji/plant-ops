@@ -33,7 +33,7 @@ import type { EnvConfig } from '@plantops/config';
 import { IamException } from '../common/iam.exception';
 import { SkipRateLimit } from '../common/rate-limit.decorator';
 import { SkipTransaction } from '../common/transaction-context';
-import { ENV } from '../config/config.module';
+import { ENV } from '../config/env.token';
 import { type OpenApiDocument, buildOpenApiDocument } from './openapi';
 
 @Controller()

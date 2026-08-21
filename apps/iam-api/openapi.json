@@ -2033,6 +2033,44 @@
         ],
         "additionalProperties": false
       },
+      "DeploymentDescription": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "saas",
+              "single_tenant"
+            ]
+          },
+          "client_slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "client_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "mode",
+          "client_slug",
+          "client_name"
+        ],
+        "additionalProperties": false
+      },
       "LivenessReport": {
         "type": "object",
         "properties": {
@@ -6198,6 +6236,57 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/UpdateClientApplicationDto"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/iam/deployment": {
+      "get": {
+        "operationId": "Deployment_describe",
+        "summary": "GET /iam/deployment",
+        "tags": [
+          "Deployment"
+        ],
+        "responses": {
+          "200": {
+            "description": "What kind of deployment this is",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeploymentDescription"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED — the request failed validation, or exceeded the body limit (§1)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IamErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IamErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "INTERNAL_ERROR — the message is fixed; correlate with `requestId`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IamErrorResponse"
+                }
               }
             }
           }

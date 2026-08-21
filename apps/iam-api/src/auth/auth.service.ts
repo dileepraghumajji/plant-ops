@@ -63,7 +63,7 @@ import {
   type TokenPairResponse,
 } from '@plantops/contracts';
 import { IAM_SCHEMA, type LoginFailureReason, type VerifiedClaims } from '@plantops/db';
-import { ENV } from '../config/config.module';
+import { ENV } from '../config/env.token';
 import { AUDIT_ACTIONS } from '../audit/audit-actions';
 import { IamException } from '../common/iam.exception';
 import { entityManager } from '../common/transaction-context';

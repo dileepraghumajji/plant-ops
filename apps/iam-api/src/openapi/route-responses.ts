@@ -33,6 +33,7 @@ import { JwksController } from '../auth/jwks.controller';
 import { AuthzController } from '../authz/authz.controller';
 import { BindingsController } from '../bindings/bindings.controller';
 import { ClientsController } from '../clients/clients.controller';
+import { DeploymentController } from '../config/deployment.controller';
 import { HealthController } from '../health/health.controller';
 import { WhoAmIController } from '../iam/whoami.controller';
 import { NavigationController } from '../navigation/navigation.controller';
@@ -50,6 +51,7 @@ import {
   clientSchema,
   introspectSchema,
   jwksSchema,
+  deploymentSchema,
   livenessSchema,
   manifestUpsertSchema,
   navCatalogSchema,
@@ -225,6 +227,15 @@ export const ROUTE_RESPONSES: ReadonlyMap<
       ...ok(jwksSchema, 'The public keys tokens are verified against'),
       mediaType: 'application/jwk-set+json',
     },
+  }),
+
+  routes(DeploymentController, {
+    // Enveloped like every other `/iam` route, unlike the two probes. It is
+    // read before anyone has a credential, but it is still part of the API
+    // surface rather than an orchestrator's probe — so a caller that meets a
+    // 429 or a 500 here should get the same `{ error: { code, … } }` it gets
+    // everywhere else, and the login screen has one error shape to handle.
+    describe: ok(deploymentSchema, 'What kind of deployment this is'),
   }),
 
   routes(HealthController, {

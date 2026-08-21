@@ -49,7 +49,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { EnvConfig } from '@plantops/config';
 import { IamErrorCode } from '@plantops/contracts';
 import { IAM_SCHEMA, hashSecret, type PasswordResetOutcome } from '@plantops/db';
-import { ENV } from '../config/config.module';
+import { ENV } from '../config/env.token';
 import { IamException } from '../common/iam.exception';
 import { DatabaseService } from '../database/database.service';
 import {

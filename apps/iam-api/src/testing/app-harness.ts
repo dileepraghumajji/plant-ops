@@ -28,7 +28,7 @@ import type { AddressInfo } from 'node:net';
 import { AppModule } from '../app/app.module';
 import { NEST_APP_OPTIONS, hardenExpress } from '../app/http-hardening';
 import { TokenService } from '../auth/token.service';
-import { ENV } from '../config/config.module';
+import { ENV } from '../config/env.token';
 import { DatabaseService } from '../database/database.service';
 import { RedisService } from '../redis/redis.service';
 

@@ -11,6 +11,7 @@ import { config as loadDotenv } from 'dotenv';
 import { AppModule } from './app/app.module';
 import { NEST_APP_OPTIONS, hardenExpress } from './app/http-hardening';
 import { KeyConfigurationError, KeysService } from './auth/keys.service';
+import { DeploymentModeError } from './config/deployment-mode';
 
 /**
  * Local `.env` support. A no-op when the file is absent, and it never
@@ -109,7 +110,8 @@ bootstrap().catch((error: unknown) => {
     Logger.error(error.message, undefined, 'Bootstrap');
   } else if (
     error instanceof RlsStartupCheckError ||
-    error instanceof KeyConfigurationError
+    error instanceof KeyConfigurationError ||
+    error instanceof DeploymentModeError
   ) {
     // Likewise: the operator needs the failed assertions and the fix, not a
     // stack through NestFactory.

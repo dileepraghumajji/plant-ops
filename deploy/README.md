@@ -66,9 +66,17 @@ application unescapes them; a real multi-line value will not survive the file.
 
 `bootstrap.sh` then, in order: loads the images, starts PostgreSQL, creates the
 two database roles, applies the migrations, starts the rest of the stack, waits
-for it to report ready, and creates your organisation and its first
-administrator. It prints what it did at each step, and it is safe to run again
-if it stops partway — nothing it creates would be duplicated by a second run.
+for it to report ready, applies the release's application catalog, and creates
+your organisation and its first administrator. It prints what it did at each
+step, and it is safe to run again if it stops partway — nothing it creates would
+be duplicated by a second run.
+
+**Your users sign in with an email and a password, and nothing else.** This
+installation is pinned to one organisation (`DEPLOYMENT_MODE=single_tenant`), so
+the login screen does not ask which one — and a sign-in that names a different
+organisation is refused rather than quietly redirected. That is why
+`SINGLE_TENANT_CLIENT_SLUG` and `PLANTOPS_CLIENT_SLUG` must be the same value,
+and why the installer stops if they are not.
 
 When it finishes it prints three things to do immediately. Do them before you
 close the terminal; the first one in particular.

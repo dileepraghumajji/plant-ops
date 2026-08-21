@@ -136,6 +136,30 @@ export const MAX_EXPIRY_SWEEP_BATCH_SIZE = 5_000;
 const NODE_ENVS = ['development', 'test', 'production'] as const;
 export type NodeEnv = (typeof NODE_ENVS)[number];
 
+/**
+ * How many tenants this process serves (Doc 11 §6.5, §8 gap 4).
+ *
+ * `saas` is the multi-tenant platform: many clients in one database, the tenant
+ * chosen per login by the slug the user types, every screen and every policy
+ * written around that.
+ *
+ * `single_tenant` is a dedicated or self-hosted installation. There is exactly
+ * one client, named here in configuration, and a user types an email and a
+ * password and nothing else. The slug does not disappear — it is still the
+ * tenant half of the credential, still resolved to a client, still the value
+ * `app.current_client_id` is set from. What changes is *who supplies it*: the
+ * deployment, at boot, instead of the browser.
+ *
+ * That distinction is the whole of the security argument. Removing the field
+ * from the login form would be theatre; refusing a browser-supplied slug that
+ * disagrees with the pinned one is the control.
+ */
+const DEPLOYMENT_MODES = ['saas', 'single_tenant'] as const;
+export type DeploymentMode = (typeof DEPLOYMENT_MODES)[number];
+
+/** Lowercase slug, the same shape `client.slug` is stored in (migration 0003). */
+const CLIENT_SLUG_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+
 const LOG_LEVELS = ['error', 'warn', 'log', 'debug', 'verbose'] as const;
 export type LogLevel = (typeof LOG_LEVELS)[number];
 
@@ -385,6 +409,40 @@ export const envSchema = z.object({
    */
   REDIS_KEY_PREFIX: z.string().trim().default('plantops:'),
 
+  /** How many tenants this process serves. See {@link DEPLOYMENT_MODES}. */
+  DEPLOYMENT_MODE: z.enum(DEPLOYMENT_MODES).default('saas'),
+
+  /**
+   * The one client a `single_tenant` deployment serves, by slug.
+   *
+   * Required in that mode and refused in `saas`, both enforced below. Refused
+   * rather than ignored because the realistic way a value gets here is a
+   * template copied from a single-tenant install into a multi-tenant one, and a
+   * setting that silently does nothing is a setting somebody will later believe
+   * did something.
+   *
+   * Resolved to a client id at boot, once, by
+   * `apps/iam-api/src/config/deployment-mode.ts` — which refuses to start if no
+   * client has this slug. A deployment pinned to a tenant that does not exist
+   * would otherwise accept logins right up to the point of answering 401 to
+   * every one of them.
+   */
+  SINGLE_TENANT_CLIENT_SLUG: z.preprocess(
+    // Blank means unset, for the reason `DATABASE_CA_CERT` gives: a template
+    // line copied but never filled in, and a CI expression that resolved to
+    // nothing, both arrive as the empty string.
+    (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+    z
+      .string()
+      .trim()
+      .max(64)
+      .regex(
+        CLIENT_SLUG_PATTERN,
+        'SINGLE_TENANT_CLIENT_SLUG must be a lowercase client slug (letters, digits and hyphens)',
+      )
+      .optional(),
+  ),
+
   /**
    * Trust `X-Forwarded-For` when resolving the client IP.
    *
@@ -605,6 +663,32 @@ export const envSchema = z.object({
     {
       message:
         'DATABASE_CA_CERT is set but DATABASE_SSL is false — the certificate would be ignored and the connection sent in cleartext. Set DATABASE_SSL=true, or remove the certificate.',
+    },
+  )
+  /**
+   * The two halves of a single-tenant deployment have to arrive together.
+   *
+   * A mode with no slug is a process that cannot resolve the tenant it exists
+   * to serve; a slug with no mode is a value nothing reads. Both are the same
+   * failure — a configuration that was half-applied — and both are far cheaper
+   * to meet at boot than as a login that answers 401 for reasons nobody can see.
+   */
+  .refine(
+    (env) =>
+      env.DEPLOYMENT_MODE !== 'single_tenant' ||
+      env.SINGLE_TENANT_CLIENT_SLUG !== undefined,
+    {
+      message:
+        'DEPLOYMENT_MODE=single_tenant requires SINGLE_TENANT_CLIENT_SLUG — the one client this deployment serves, by slug.',
+    },
+  )
+  .refine(
+    (env) =>
+      env.DEPLOYMENT_MODE === 'single_tenant' ||
+      env.SINGLE_TENANT_CLIENT_SLUG === undefined,
+    {
+      message:
+        'SINGLE_TENANT_CLIENT_SLUG is set but DEPLOYMENT_MODE is not single_tenant — nothing would read it. Set the mode, or remove the slug.',
     },
   )
   .refine(

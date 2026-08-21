@@ -22,7 +22,7 @@ import {
 import type { EnvConfig } from '@plantops/config';
 import { createAppDataSource } from '@plantops/db';
 import type { DataSource } from 'typeorm';
-import { ENV } from '../config/config.module';
+import { ENV } from '../config/env.token';
 import { withTimeout } from '../common/with-timeout';
 
 @Injectable()

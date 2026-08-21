@@ -50,9 +50,9 @@
 
 import { Inject, Injectable, type NestMiddleware } from '@nestjs/common';
 import type { EnvConfig } from '@plantops/config';
-import { IAM_ROUTE_PREFIX, IamErrorCode } from '@plantops/contracts';
+import { AUTH_ROUTE_PREFIX, IAM_ROUTE_PREFIX, IamErrorCode } from '@plantops/contracts';
 import { type NextFunction, type Request, type Response, json } from 'express';
-import { ENV } from '../config/config.module';
+import { ENV } from '../config/env.token';
 import { IamException } from './iam.exception';
 
 /**
@@ -76,6 +76,15 @@ export const MANIFEST_ROUTE_PATH = `${IAM_ROUTE_PREFIX}/applications/:id/manifes
  * two still describe the same route.
  */
 export const BULK_USER_UPLOAD_ROUTE_PATH = `${IAM_ROUTE_PREFIX}/users/bulk`;
+
+/**
+ * `POST /auth/login`, as a middleware route.
+ *
+ * Here rather than in the auth module because this file is already where route
+ * paths are stated for `AppModule.configure`, and a second place to look for
+ * "which path does that middleware match" is how one of them ends up wrong.
+ */
+export const LOGIN_ROUTE_PATH = `${AUTH_ROUTE_PREFIX}/login`;
 
 /**
  * `body-parser`'s error taxonomy, as far as this file cares.

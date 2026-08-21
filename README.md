@@ -120,9 +120,29 @@ Two ordering rules carry the whole thing, and both are easy to break by accident
   deploys the app without waiting for the migration job, and the rule above
   stops holding silently.
 
-Single-tenant delivery — a dedicated instance, or an install a client runs
-themselves — is [Doc 11](docs/11-deployment-models.md) and Phase 8, not this
-path.
+### Single-tenant delivery
+
+A dedicated instance, or an install a client runs themselves, is
+[Doc 11](docs/11-deployment-models.md) — the same codebase, the same images, a
+different shape of deployment. [`deploy/README.md`](deploy/README.md) is the
+install guide; the short version is one tarball, one `.env`, one
+`./bootstrap.sh`, on a machine that has never had a route to the internet.
+
+Two settings decide which shape a process is:
+
+| Variable | `saas` | `single_tenant` |
+|---|---|---|
+| `DEPLOYMENT_MODE` | many organisations, tenant chosen at login | one organisation, chosen by the deployment |
+| `SINGLE_TENANT_CLIENT_SLUG` | must not be set | names the organisation; resolved to a client **at boot**, and the API refuses to start if it names nothing |
+
+The difference is confined to *who supplies the tenant*, and that is worth being
+precise about: the slug is still the tenant half of the credential, still
+resolved to a client row, and still what `app.current_client_id` and every
+row-level policy are keyed on. In single-tenant mode the deployment supplies it
+and a login naming a different one is **refused** — the empty field on the login
+form is a consequence of that rule, not the rule. Everything below the login
+screen is one code path in both modes, which is why the whole e2e battery runs
+against `saas` unmodified and proves it.
 
 ## Manuals (start here if you are not writing code)
 

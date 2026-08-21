@@ -47,7 +47,7 @@ import {
   SubjectType,
   type JwtClaims,
 } from '@plantops/contracts';
-import { ENV } from '../config/config.module';
+import { ENV } from '../config/env.token';
 import { KeysService } from './keys.service';
 
 /**

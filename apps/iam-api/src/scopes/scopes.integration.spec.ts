@@ -65,7 +65,7 @@ import { AUDIT_ACTIONS } from '../audit/audit-actions';
 import { GrantsCacheService } from '../authz/grants-cache.service';
 import { GrantInvalidationService } from '../authz/invalidation.service';
 import { forgetFixtureGrants } from '../testing/authorization.fixture';
-import { ENV } from '../config/config.module';
+import { ENV } from '../config/env.token';
 import { createTestApplication } from '../testing/app-harness';
 import {
   grantIamClientAdmin,

@@ -71,7 +71,7 @@ import { randomUUID } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import type { DataSource } from 'typeorm';
 import { AppModule } from '../app/app.module';
-import { ENV } from '../config/config.module';
+import { ENV } from '../config/env.token';
 import { createTestApplication } from '../testing/app-harness';
 import { GrantsCacheService } from './grants-cache.service';
 import type { SubjectRef } from './resolver.service';
