@@ -31,14 +31,26 @@
 # `.env`, no keys, and no customer-specific value, which is what lets one build
 # serve staging, production, and — from Session 41 — a client's own server.
 
-ARG NODE_VERSION=22.16.0
-
 # Debian slim rather than Alpine, deliberately. `@node-rs/argon2` (the password
 # hasher, Doc 03 §2) ships prebuilt native bindings per platform, and the glibc
 # build is the well-trodden one; musl works but is the variant that breaks
 # quietly on an upgrade. The size difference does not pay for that risk in the
 # one image where a hashing failure means nobody can log in.
-FROM node:${NODE_VERSION}-bookworm-slim AS build
+#
+# **Pinned by digest, not by tag** (roadmap Session 41). A tag is a moving
+# pointer: `node:22.16.0-bookworm-slim` is rebuilt whenever Debian patches a
+# base package, so two builds of the same commit can ship different bytes. That
+# is tolerable on a platform we can redeploy in a minute and is not tolerable
+# for an artifact handed to a client's IT team, who will reproduce it months
+# later on a machine we cannot reach (Doc 11 §5.3 — "digest-pinned"). The tag
+# stays in front of the digest because it is the only human-readable part; the
+# digest is what Docker resolves.
+#
+# To move it: `docker buildx imagetools inspect node:<version>-bookworm-slim`
+# and paste the new digest here, in the same commit as the version bump.
+ARG NODE_IMAGE=node:22.16.0-bookworm-slim@sha256:048ed02c5fd52e86fda6fbd2f6a76cf0d4492fd6c6fee9e2c463ed5108da0e34
+
+FROM ${NODE_IMAGE} AS build
 
 WORKDIR /workspace
 
@@ -95,7 +107,7 @@ RUN npx nx run @plantops/iam-api:prune
 # A separate stage so the production `node_modules` is resolved from the pruned
 # lockfile in isolation. Installing here rather than in the final stage keeps
 # npm itself — and its cache — out of the shipped image.
-FROM node:${NODE_VERSION}-bookworm-slim AS deps
+FROM ${NODE_IMAGE} AS deps
 
 WORKDIR /app
 
@@ -127,14 +139,33 @@ RUN npm install --package-lock-only --omit=dev --no-audit --no-fund && \
     npm ci --omit=dev --no-audit --no-fund
 
 # ── Runtime ────────────────────────────────────────────────────────────────
-FROM node:${NODE_VERSION}-bookworm-slim AS runtime
+FROM ${NODE_IMAGE} AS runtime
+
+# The build being shipped, stamped in two places from one argument
+# (Doc 11 §8, gap 8):
+#
+#   * the OCI `version` label, which `docker image inspect` reads without
+#     starting anything — what you use when the container will not boot;
+#   * `APP_VERSION` in the environment, which `libs/config` validates and
+#     `/health` reports — what you use when it is running and someone on the
+#     phone needs to say which build they are on.
+#
+# One `ARG`, so the two cannot disagree. CI passes the tag it is about to push
+# and then asserts the running container reports the same string, which is what
+# makes the label trustworthy rather than decorative.
+#
+# The default matches the schema's: an unstamped image is honest about being
+# unstamped rather than claiming a release number nobody cut.
+ARG APP_VERSION=0.0.0-dev
 
 LABEL org.opencontainers.image.title="plantops-iam-api" \
       org.opencontainers.image.description="PlantOps IAM/RBAC service" \
-      org.opencontainers.image.source="https://github.com/dileepraghumajji/plant-ops"
+      org.opencontainers.image.source="https://github.com/dileepraghumajji/plant-ops" \
+      org.opencontainers.image.version="${APP_VERSION}"
 
 ENV NODE_ENV=production \
-    PORT=3000
+    PORT=3000 \
+    APP_VERSION=${APP_VERSION}
 
 WORKDIR /app
 

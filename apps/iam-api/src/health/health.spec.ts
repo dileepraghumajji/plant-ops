@@ -29,6 +29,7 @@ describe('/health — liveness', () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
       status: 'ok',
+      version: expect.any(String),
       uptimeSeconds: expect.any(Number),
     });
   });

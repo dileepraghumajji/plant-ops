@@ -307,6 +307,33 @@ export const envSchema = z.object({
   LOG_LEVEL: z.enum(LOG_LEVELS).default('log'),
 
   /**
+   * The build this process *is*, reported by `/health` (Doc 11 §8, gap 8).
+   *
+   * Support for any install begins with "what version are you on", and for a
+   * self-hosted one there is nobody else to ask: no dashboard we can open, no
+   * deploy log we can read, often no network between us and the machine at all.
+   * The answer has to come from the running process, over an endpoint that
+   * needs no credential — which is what `/health` already is.
+   *
+   * **Stamped at build, not chosen at run.** Every image sets it from the
+   * `APP_VERSION` build argument and labels itself with the same string, so the
+   * version travels with the bytes and CI can assert that the tag it pushed and
+   * the version the container reports are one value (`.github/workflows/ci.yml`,
+   * the `images` job). Overriding it at run time is possible and never useful:
+   * it changes what support is told, not what is deployed.
+   *
+   * The default names the situation rather than guessing a number. A developer
+   * running `nx serve` has no build to report and `0.0.0-dev` says exactly that,
+   * where `unknown` would read as a stamping failure and the package version
+   * would read as a release that was never cut.
+   */
+  APP_VERSION: z
+    .string()
+    .trim()
+    .min(1, 'APP_VERSION must not be empty')
+    .default('0.0.0-dev'),
+
+  /**
    * Application connection — the Supabase **pooler** endpoint. TypeORM must
    * disable prepared statements against PgBouncer transaction mode (Doc 07 §2).
    */

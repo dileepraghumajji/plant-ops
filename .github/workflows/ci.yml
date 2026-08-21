@@ -4,12 +4,15 @@
 #
 #   verify   every push and pull request — `nx affected` lint/test/build plus
 #            the hardening battery against a real Postgres and Redis.
-#   image    every push and pull request — proves `apps/iam-api/Dockerfile`
-#            still builds. It does not publish: Railway builds the image it
-#            deploys from `railway.json`, and CI publishing a *second* image to
-#            a registry would create two artifacts with one version number.
-#            Session 41 is where images become the published artifact, because
-#            that is when a self-hosted install needs one it can pull.
+#   images   every push and pull request — builds all four release images, tags
+#            them with one computed version, asserts each carries that version
+#            as an OCI label, then assembles them into the single-tenant stack
+#            and logs in through it (roadmap Session 41, Doc 11 §5.1).
+#            It does not push. Railway builds the image it deploys from
+#            `railway.json`, and CI publishing a *second* image to a registry
+#            would create two artifacts with one version number; the artifact a
+#            self-hosted install actually receives is the offline tarball of
+#            Session 42, produced from exactly these builds.
 #   release  pushes to `main` only — migrations first, over the **direct** URL,
 #            then the app swap. Never on a pull request, and never in parallel
 #            with itself.
@@ -193,27 +196,211 @@ jobs:
           path: apps/iam-api-e2e/test-output/e2e/api.log
           if-no-files-found: ignore
 
-  image:
-    name: Image builds
+  images:
+    name: Images and stack
     runs-on: ubuntu-latest
+
+    # Everything the stack needs that is not baked into an image. The two
+    # passwords and the bootstrap secret are throwaway values for a database
+    # that lives and dies with this runner; the signing keypair is generated
+    # below, per run, for the same reason the `verify` job generates one.
+    env:
+      POSTGRES_PASSWORD: ci-owner-password
+      PLANTOPS_APP_PASSWORD: ci-app-password
+      JWT_SIGNING_KEY_ID: ci-stack-key-1
+      PLANTOPS_HTTP_PORT: '8080'
+
     steps:
       - uses: actions/checkout@v4
+        with:
+          # `git describe` needs tags and history; a shallow checkout has
+          # neither, and the version would silently degrade to a bare sha.
+          fetch-depth: 0
+
+      - name: Compute the release version
+        id: version
+        # One string for four images. Everything downstream — the tag, the OCI
+        # label, `APP_VERSION` inside the container, and what `/health` reports
+        # — is this value, which is what lets the smoke assert they agree
+        # instead of asserting that each is individually non-empty.
+        #
+        # A tag when there is one, `<tag>-<n>-g<sha>` when the branch has moved
+        # past it, and `0.0.0-<sha>` when the repository has no tags at all.
+        # The last case is today's: it says "not a release" without pretending
+        # to a number nobody cut.
+        run: |
+          if version=$(git describe --tags --dirty 2>/dev/null); then
+            :
+          else
+            version="0.0.0-$(git rev-parse --short=12 HEAD)"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "PLANTOPS_VERSION=$version" >> "$GITHUB_ENV"
+          echo "Building version $version"
+
+      - name: Base images are digest-pinned
+        # Doc 11 §5.3 requires it, and a tag that drifts is invisible until a
+        # client cannot reproduce the build we told them to reproduce. Cheaper
+        # to assert here than to discover from a support ticket: every `FROM`
+        # that names a registry image must carry a `@sha256:` digest.
+        #
+        # `${...}` FROMs are the indirection through an `ARG`, and the ARG's own
+        # default is what this checks — which is where the digests actually live.
+        run: |
+          offenders=$(grep -rhnE '^(FROM|ARG [A-Z_]*IMAGE=)' \
+            apps/iam-api/Dockerfile apps/admin-web/Dockerfile \
+            deploy/proxy/Dockerfile deploy/migrate/Dockerfile \
+            | grep -vE '@sha256:[0-9a-f]{64}' \
+            | grep -vE 'FROM \$\{[A-Z_]+\}' \
+            | grep -vE 'ARG IAM_API_IMAGE=' || true)
+          if [ -n "$offenders" ]; then
+            echo "::error::Base images must be pinned by digest (Doc 11 §5.3):"
+            echo "$offenders"
+            exit 1
+          fi
+          echo "All base images are digest-pinned."
+
+      - name: Generate a signing keypair and bootstrap secret
+        # Per run, thrown away with the runner. A committed key would be a
+        # committed secret, and a deployment's key comes from its own secret
+        # store (Doc 08 §5).
+        #
+        # Ahead of the builds rather than beside the stack it is for, so that
+        # every later step — including the failure-only ones — has a complete
+        # environment. `deploy/docker-compose.yml` marks these variables
+        # required, so a `docker compose logs` run to diagnose a *build* failure
+        # would otherwise fail on interpolation and print nothing, which is the
+        # least helpful moment for it to do that.
+        run: |
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out stack-private.pem
+          openssl rsa -in stack-private.pem -pubout -out stack-public.pem
+          {
+            echo "JWT_PRIVATE_KEY<<PEM"; cat stack-private.pem; echo "PEM"
+            echo "JWT_PUBLIC_KEY<<PEM";  cat stack-public.pem;  echo "PEM"
+            echo "PLATFORM_BOOTSTRAP_SECRET=$(openssl rand -hex 32)"
+          } >> "$GITHUB_ENV"
 
       - uses: docker/setup-buildx-action@v3
 
+      # ── Build ──────────────────────────────────────────────────────────────
+      #
+      # `load: true` on all four, unlike before: they are not merely proved to
+      # build, they are run. A separate cache scope per image so one Dockerfile's
+      # churn does not evict another's layers.
       - name: Build iam-api image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: apps/iam-api/Dockerfile
-          # Not pushed — see the header. The point of this job is that the
-          # Dockerfile is never allowed to rot: it is the only place the
-          # production dependency set is resolved, and a break here is
+          # Not pushed — see the header. What this job guarantees is that the
+          # Dockerfiles are never allowed to rot: they are the only place the
+          # production dependency set is resolved, and a break there is
           # invisible to every other job in this workflow.
           push: false
-          load: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          load: true
+          tags: plantops/iam-api:${{ steps.version.outputs.version }}
+          build-args: APP_VERSION=${{ steps.version.outputs.version }}
+          cache-from: type=gha,scope=iam-api
+          cache-to: type=gha,mode=max,scope=iam-api
+
+      - name: Build admin-web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/admin-web/Dockerfile
+          push: false
+          load: true
+          tags: plantops/admin-web:${{ steps.version.outputs.version }}
+          build-args: APP_VERSION=${{ steps.version.outputs.version }}
+          cache-from: type=gha,scope=admin-web
+          cache-to: type=gha,mode=max,scope=admin-web
+
+      - name: Build proxy image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/proxy/Dockerfile
+          push: false
+          load: true
+          tags: plantops/proxy:${{ steps.version.outputs.version }}
+          build-args: APP_VERSION=${{ steps.version.outputs.version }}
+          cache-from: type=gha,scope=proxy
+          cache-to: type=gha,mode=max,scope=proxy
+
+      - name: Build migration-runner image
+        # Built last and from the API image just built, which is what makes the
+        # runner and the app structurally incapable of disagreeing about what a
+        # migration is (`deploy/migrate/Dockerfile` explains the choice).
+        #
+        # **`--builder default`, and it is not optional.** The three builds above
+        # run on the `docker-container` builder that `setup-buildx-action`
+        # creates, which is what makes the `type=gha` cache possible — and which
+        # has its own image store, entirely separate from the daemon's. A
+        # `FROM plantops/iam-api:<tag>` there does not find the image the step
+        # above just `load`ed into the daemon; it tries to *pull* it from Docker
+        # Hub and fails with "pull access denied" on an image that was never
+        # meant to be published. The `default` builder is the daemon's own, so
+        # it resolves the local tag.
+        #
+        # The cost is no registry-backed layer cache for this one image, which
+        # buys nothing anyway: it is two thin layers on a base that is already
+        # local, and the expensive part — building that base — is cached above.
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          docker buildx build \
+            --builder default \
+            --file deploy/migrate/Dockerfile \
+            --build-arg "APP_VERSION=${VERSION}" \
+            --build-arg "IAM_API_IMAGE=plantops/iam-api:${VERSION}" \
+            --tag "plantops/migrate:${VERSION}" \
+            --load \
+            .
+
+      - name: Every image carries the version it was tagged with
+        # The label half of the stamp, readable without starting anything —
+        # which is the half you need when a container will not boot. The other
+        # half, what the running process reports, is asserted by the smoke below.
+        run: |
+          version='${{ steps.version.outputs.version }}'
+          failed=0
+          for image in iam-api admin-web proxy migrate; do
+            label=$(docker image inspect "plantops/${image}:${version}" \
+              --format '{{ index .Config.Labels "org.opencontainers.image.version" }}')
+            if [ "$label" != "$version" ]; then
+              echo "::error::plantops/${image} is labelled '${label}' but tagged '${version}'"
+              failed=1
+            fi
+          done
+          [ "$failed" = '0' ] || exit 1
+          echo "All four images are labelled ${version}."
+
+      # ── Assemble and prove it works ────────────────────────────────────────
+      - name: Bring the stack up
+        # No `--wait`: `migrate` is a one-shot container that exits 0 when it is
+        # done, and `up --wait` reports a service that exited as a failure.
+        # The smoke script polls `/api/ready` through the proxy instead, which
+        # is the condition that actually matters and the only one a client can
+        # check from outside the stack.
+        run: docker compose -f deploy/docker-compose.yml up -d
+
+      - name: Stack smoke — login end-to-end through the proxy
+        run: bash deploy/stack-smoke.sh "http://127.0.0.1:${PLANTOPS_HTTP_PORT}"
+
+      - name: Stack logs
+        # On failure only, and every service: a stack that will not serve is
+        # almost always one container refusing to start for a stated reason, and
+        # that reason is otherwise thrown away with the runner.
+        if: failure()
+        run: docker compose -f deploy/docker-compose.yml logs --no-color --tail=200
+
+      - name: Tear the stack down
+        # `always()`, and never able to turn a green run red: there is nothing
+        # useful a failed cleanup can tell you about a runner that is about to
+        # be destroyed anyway.
+        if: always()
+        continue-on-error: true
+        run: docker compose -f deploy/docker-compose.yml down --volumes --remove-orphans
 
   release:
     name: Release (staging)
@@ -232,7 +419,7 @@ jobs:
     # Configuration is checked in the first step below instead, where the
     # environment exists and a missing value can say so out loud.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [verify, image]
+    needs: [verify, images]
     runs-on: ubuntu-latest
 
     # The GitHub Environment holds the secrets below and is where a required

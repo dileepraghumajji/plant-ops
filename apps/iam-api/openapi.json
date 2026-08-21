@@ -2040,6 +2040,9 @@
             "type": "string",
             "const": "ok"
           },
+          "version": {
+            "type": "string"
+          },
           "uptimeSeconds": {
             "type": "integer",
             "minimum": -9007199254740991,
@@ -2048,6 +2051,7 @@
         },
         "required": [
           "status",
+          "version",
           "uptimeSeconds"
         ],
         "additionalProperties": false

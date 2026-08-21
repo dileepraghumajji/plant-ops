@@ -28,8 +28,9 @@
  * cannot (Doc 06 §2, note).
  */
 
-import { Controller, Get, Res } from '@nestjs/common';
+import { Controller, Get, Inject, Res } from '@nestjs/common';
 import { Public } from '@plantops/auth-kit';
+import type { EnvConfig } from '@plantops/config';
 // The one platform-typed import left in a controller: `/ready` sets its own
 // status code and a cache header on the raw response, which no return value can
 // express. Everything that only needed the *claims* off the request now takes
@@ -37,11 +38,29 @@ import { Public } from '@plantops/auth-kit';
 import type { Response } from 'express';
 import { SkipRateLimit } from '../common/rate-limit.decorator';
 import { SkipTransaction } from '../common/transaction-context';
+import { ENV } from '../config/config.module';
 import { HealthService, type ReadinessReport } from './health.service';
 
-/** Liveness answer. Deliberately says nothing about dependencies. */
+/**
+ * Liveness answer. Deliberately says nothing about dependencies — and one thing
+ * that is not about liveness at all.
+ *
+ * `version` rides here because of where it has to be readable from, not because
+ * it belongs to the same question. Doc 11 §8, gap 8: support for a self-hosted
+ * install starts with "what version are you on", and the person who can answer
+ * has no dashboard, possibly no network to us, and no credential for anything
+ * behind the guard. `/health` is the only endpoint that is already
+ * unauthenticated, unthrottled and reachable from inside the client's own
+ * network, so it is where the answer costs nothing to reach.
+ *
+ * It leaks nothing an attacker cannot get more reliably elsewhere: a version
+ * string is not a secret, and hiding it buys obscurity while costing every
+ * legitimate support conversation an hour.
+ */
 export interface LivenessReport {
   status: 'ok';
+  /** The build, stamped into the image at build time (`APP_VERSION`). */
+  version: string;
   uptimeSeconds: number;
 }
 
@@ -50,11 +69,22 @@ export interface LivenessReport {
 @SkipRateLimit()
 @SkipTransaction()
 export class HealthController {
-  constructor(private readonly health: HealthService) {}
+  constructor(
+    private readonly health: HealthService,
+    @Inject(ENV) private readonly env: EnvConfig,
+  ) {}
 
   @Get('health')
   live(): LivenessReport {
-    return { status: 'ok', uptimeSeconds: Math.round(process.uptime()) };
+    return {
+      status: 'ok',
+      // Read off the validated environment, never off `process.env` or a
+      // `package.json` bundled beside the code: the first is what every other
+      // setting in this app is read from, and the second reports the version of
+      // the *workspace at build time*, which is 0.0.0 and always has been.
+      version: this.env.APP_VERSION,
+      uptimeSeconds: Math.round(process.uptime()),
+    };
   }
 
   @Get('ready')

@@ -1,0 +1,17 @@
+# Shell scripts must reach a container with Unix line endings.
+#
+# Several of the scripts in this repository are executed inside Linux images —
+# `deploy/postgres-init/10-roles.sh` by Postgres's entrypoint,
+# `deploy/proxy/40-real-ip.sh` by nginx's, `deploy/stack-smoke.sh` by CI. A
+# CRLF checkout on Windows turns the shebang into `#!/usr/bin/env bash\r` and
+# every line into a command with a stray carriage return, which fails as
+# `'\r': command not found` — a message that names nothing an operator can act
+# on. Normalising here means the file is the same bytes wherever it is checked
+# out, which is what a deployment artifact has to be.
+*.sh text eol=lf
+
+# Same argument, different consumer: these are read by Docker, nginx and
+# Compose inside Linux images.
+Dockerfile text eol=lf
+*.conf text eol=lf
+docker-compose*.yml text eol=lf
