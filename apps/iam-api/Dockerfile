@@ -64,14 +64,24 @@ COPY libs/iam-client/package.json        libs/iam-client/
 COPY libs/ui/package.json                libs/ui/
 COPY libs/web-kit/package.json           libs/web-kit/
 
-# `id=` is written out rather than left to default. BuildKit derives it from
-# `target` when omitted, which is why this builds locally and in the `image` CI
-# job — but Railway's Metal builder rejects the mount outright with "is missing
-# an id argument", and does so *after* `railway up --detach` has already
-# returned success. Naming it costs nothing and keeps one Dockerfile valid for
-# both builders. The id is shared with the prune stage below on purpose: same
-# npm cache, so the first stage warms it for the second.
-RUN --mount=type=cache,id=npm,target=/root/.npm npm ci
+# No BuildKit cache mount here, deliberately, and it is worth saying why so the
+# obvious optimisation is not reintroduced.
+#
+# `--mount=type=cache,target=/root/.npm` is valid BuildKit and builds fine
+# locally and in the `image` CI job. Railway's Metal builder rejects it twice
+# over: first for having no `id`, then — once named — for an id lacking its
+# `cacheKey` prefix. Railway's accepted form is
+# `id=s/<service id>-<target path>`, the literal service UUID, and variable
+# expansion is not supported, so satisfying it means hardcoding one
+# environment's service identifier into the image definition every other
+# environment also builds from. Session 41 publishes this image as the artifact
+# a self-hosted install pulls; a Railway UUID baked into it would be nonsense
+# there, and would break here the moment the service is recreated.
+#
+# The cost of dropping it is small. Layer caching already skips this whole step
+# whenever `package.json` and `package-lock.json` are unchanged, which is most
+# builds; the mount only ever helped on the builds where the lockfile moved.
+RUN npm ci
 
 COPY . .
 
@@ -112,8 +122,8 @@ COPY --from=build /workspace/apps/iam-api/dist ./
 # `npm install --omit=dev` alone would also work, and would be worse: it would
 # resolve every range against the registry on every build, which is precisely
 # the reproducibility this two-step keeps.
-RUN --mount=type=cache,id=npm,target=/root/.npm \
-    npm install --package-lock-only --omit=dev --no-audit --no-fund && \
+# No cache mount, for the reason given at the `npm ci` in the deps stage.
+RUN npm install --package-lock-only --omit=dev --no-audit --no-fund && \
     npm ci --omit=dev --no-audit --no-fund
 
 # ── Runtime ────────────────────────────────────────────────────────────────
