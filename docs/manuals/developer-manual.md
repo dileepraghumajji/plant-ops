@@ -394,7 +394,8 @@ the error envelope — a probe consumes status codes.
 
 | Gap | Detail |
 |---|---|
-| **Session 39 — deployment, CI, environments** | No containers, no pipeline, no staging. `iam-api` is intended to run containerized with a dedicated migration step on the **direct** URL; `admin-web` on Vercel or Railway |
+| **No live environment yet** | The deploy path exists and is documented — [`apps/iam-api/Dockerfile`](../../apps/iam-api/Dockerfile), the three-job pipeline in [`ci.yml`](../../.github/workflows/ci.yml), the migration release step in [`release-migrate.ts`](../../tools/release-migrate.ts), and [`ops-runbook.md`](../ops-runbook.md) — but nothing has been stood up against real Supabase and Redis. §5 of the runbook is the checklist |
+| **CI does not publish images** | The image job proves the Dockerfile builds; Railway builds what it deploys, and no version is reported at runtime. Session 41 |
 | **Phase 8 — single-tenant delivery** (40–49) | No installable artifact. `admin-web` bakes its API URL in at build time (`api-config.ts`), so one build cannot serve two hostnames; there is no single-tenant mode, no entitlements, and no upgrade or restore runbook. See [Doc 11](../11-deployment-models.md) |
 | **Phase 9 — consumability** (50–52) | `auth-kit` hard-depends on `@nestjs/*`, so nothing outside Nest can use the guard; all five libs are `private: true`, and `web-kit`/`ui` publish source rather than a build. See [Doc 12](../12-consuming-the-iam.md) |
 | **Password-reset delivery** | `PASSWORD_RESET_DELIVERY` is a port with a dev-only logging binding. Production logs an error and sends nothing. Bind a real channel |

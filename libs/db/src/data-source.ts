@@ -22,16 +22,30 @@ import { entities } from './entities/index.js';
 import { migrations } from './migrations/index.js';
 
 /**
- * The slice of the validated environment this module needs. `EnvConfig` from
- * `@plantops/config` is structurally assignable to it.
+ * The slice of the validated environment the **migration** connection needs.
+ *
+ * Split out from {@link DbConnectionSettings} rather than folded into it,
+ * because the release step legitimately has no `DATABASE_URL`: Doc 07 §5.1
+ * requires the two URLs to carry different roles, so a migrator that cannot
+ * reach the app's credentials is the design working. `MigrationEnvConfig` from
+ * `@plantops/config` is structurally assignable to this.
  */
-export interface DbConnectionSettings {
-  /** Pooler endpoint — the application's connection (Doc 07 §2). */
-  DATABASE_URL: string;
+export interface MigrationConnectionSettings {
   /** Direct, non-pooled endpoint — migrations only (Doc 07 §2). */
   DATABASE_DIRECT_URL: string;
   DATABASE_SSL: boolean;
+  /** PEM trust anchor for the server's certificate; see {@link tlsOptions}. */
+  DATABASE_CA_CERT?: string;
   NODE_ENV?: 'development' | 'test' | 'production';
+}
+
+/**
+ * The slice of the validated environment this module needs. `EnvConfig` from
+ * `@plantops/config` is structurally assignable to it.
+ */
+export interface DbConnectionSettings extends MigrationConnectionSettings {
+  /** Pooler endpoint — the application's connection (Doc 07 §2). */
+  DATABASE_URL: string;
 }
 
 /**
@@ -50,12 +64,44 @@ export const APP_POOL_SIZE = 10;
 export type PostgresDataSourceOptions = Extract<DataSourceOptions, { type: 'postgres' }>;
 
 /**
+ * The TLS decision, in one place because both connections must make it
+ * identically — a migration that verifies the server and an application that
+ * does not is a split-brain trust model, and the weaker half is the one that
+ * matters.
+ *
+ * `rejectUnauthorized` is `true` whenever TLS is on, and there is no
+ * configuration that turns it off. That is deliberate: the usual escape hatch
+ * encrypts the connection while authenticating nothing, which against a managed
+ * database on the public internet leaves an active attacker able to sit in the
+ * middle of the one component Doc 07 §5.1 treats as the last line of defence.
+ *
+ * `DATABASE_CA_CERT` is the supported answer instead. Managed Postgres commonly
+ * presents a chain rooted in the provider's own CA rather than a public one —
+ * Supabase's pooler, measured, serves `CN=*.pooler.supabase.com` under a
+ * self-signed `Supabase Root 2021 CA`, which Node rejects with
+ * `SELF_SIGNED_CERT_IN_CHAIN`. Supplying that root keeps verification on and
+ * simply points it at the correct anchor.
+ *
+ * Absent a certificate, the system store applies, which is right both for a
+ * host with a publicly-trusted chain and for a local Postgres speaking no TLS
+ * at all.
+ */
+function tlsOptions(
+  settings: MigrationConnectionSettings,
+): PostgresDataSourceOptions['ssl'] {
+  if (!settings.DATABASE_SSL) return false;
+  return settings.DATABASE_CA_CERT === undefined
+    ? { rejectUnauthorized: true }
+    : { rejectUnauthorized: true, ca: settings.DATABASE_CA_CERT };
+}
+
+/**
  * Options shared by both connections.
  *
  * `synchronize` is false and stays false — everywhere, in every environment
  * (Doc 07 §3). Schema changes are reviewed migrations or they do not happen.
  */
-function baseOptions(settings: DbConnectionSettings): PostgresDataSourceOptions {
+function baseOptions(settings: MigrationConnectionSettings): PostgresDataSourceOptions {
   return {
     type: 'postgres',
     entities: [...entities],
@@ -75,7 +121,7 @@ function baseOptions(settings: DbConnectionSettings): PostgresDataSourceOptions 
      * non-superuser by design (Doc 07 §5) and extensions are migration-owned.
      */
     installExtensions: false,
-    ssl: settings.DATABASE_SSL ? { rejectUnauthorized: true } : false,
+    ssl: tlsOptions(settings),
     logging:
       settings.NODE_ENV === 'development'
         ? ['error', 'warn', 'migration']
@@ -112,7 +158,7 @@ export function createAppDataSourceOptions(
  * migration rolls back on its own rather than leaving a half-applied chain.
  */
 export function createMigrationDataSourceOptions(
-  settings: DbConnectionSettings,
+  settings: MigrationConnectionSettings,
 ): PostgresDataSourceOptions {
   return {
     ...baseOptions(settings),
@@ -130,7 +176,7 @@ export function createAppDataSource(settings: DbConnectionSettings): DataSource 
 
 /** The migration data source, used by `tools/migrate.ts` and the release step. */
 export function createMigrationDataSource(
-  settings: DbConnectionSettings,
+  settings: MigrationConnectionSettings,
 ): DataSource {
   return new DataSource(createMigrationDataSourceOptions(settings));
 }

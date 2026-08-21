@@ -93,7 +93,11 @@ import { AppModule } from '../app/app.module';
 import { AUDIT_ACTIONS } from '../audit/audit-actions';
 import { ENV } from '../config/config.module';
 import { createTestApplication } from '../testing/app-harness';
-import { grantIamClientAdmin } from '../testing/authorization.fixture';
+import { GrantsCacheService } from './grants-cache.service';
+import {
+  forgetFixtureGrants,
+  grantIamClientAdmin,
+} from '../testing/authorization.fixture';
 import { ExpirySweepJob } from './expiry-sweep.job';
 import {
   GrantInvalidationService,
@@ -171,6 +175,7 @@ describeWithDb(
     let admin: DataSource;
     let fixture: Fixture;
     let invalidation: GrantInvalidationService;
+    let grantsCache: GrantsCacheService;
     let sweep: ExpirySweepJob;
     let bootstrapSecret: string;
     let announced: Announcement[];
@@ -204,6 +209,7 @@ describeWithDb(
       await app.listen(0);
       baseUrl = `http://127.0.0.1:${(app.getHttpServer().address() as AddressInfo).port}`;
       invalidation = app.get(GrantInvalidationService);
+      grantsCache = app.get(GrantsCacheService);
       sweep = app.get(ExpirySweepJob);
     });
 
@@ -219,17 +225,38 @@ describeWithDb(
     beforeEach(async () => {
       await resetTenant(admin, fixture.acme, fixture.catalog);
       await reactivateCatalog(admin, fixture.catalog);
+      // `resetTenant` rewrote bindings and role mappings in SQL, which announces
+      // nothing. Without this the cache carries the previous case's answer into
+      // this one — invisible with Redis down, wrong with it up.
+      await forgetFixtureGrants(grantsCache, [
+        { clientId: fixture.acme.clientId, userId: fixture.acme.adminUserId },
+        { clientId: fixture.acme.clientId, userId: fixture.acme.memberUserId },
+        { clientId: fixture.acme.clientId, serviceAccountId: fixture.acme.serviceAccountId },
+      ]);
 
       announced = [];
-      // Spying rather than mocking the body away: the real publish still runs,
-      // so a Redis that happens to be up is exercised, and a Redis that is down
-      // is swallowed exactly as it would be in production. The recording is the
-      // assertion; the publish's own behaviour is unit-tested elsewhere.
+      // Record the announcement, and still evict the cache.
+      //
+      // Recording alone is not enough, which is the trap this suite fell into:
+      // the real `publish` bumps the grants cache *before* it publishes (see
+      // `invalidation.service.ts`), so a mock that only records deletes the
+      // invalidation every case here exists to prove. With Redis down that is
+      // invisible — the resolver reads Postgres — and with Redis up half the
+      // file fails on grants nothing had evicted.
+      //
+      // Delegating to the real methods is the obvious repair and the wrong one:
+      // `publishAcrossTenants` calls `publish` internally, so the inner call
+      // lands on the other spy and every cross-tenant cause is recorded twice.
+      // So the substitute does the two things a caller depends on — record, and
+      // bump — and skips only the pub/sub fan-out to other processes, which no
+      // assertion here reads and which `invalidation.service.spec.ts` covers.
       jest
         .spyOn(invalidation, 'publish')
         .mockImplementation(async (clientId, subjects, reason) => {
           announced.push({ subjects: [...subjects], reason });
-          void clientId;
+          await grantsCache.bumpMany(
+            subjects.map(({ type, id }) => ({ clientId, type, id })),
+          );
         });
       jest
         .spyOn(invalidation, 'publishAcrossTenants')
@@ -238,6 +265,9 @@ describeWithDb(
             subjects: subjects.map(({ type, id }) => ({ type, id })),
             reason,
           });
+          await grantsCache.bumpMany(
+            subjects.map(({ clientId, type, id }) => ({ clientId, type, id })),
+          );
         });
     });
 
@@ -709,7 +739,6 @@ describeWithDb(
         await expire(admin, fixture.acme, binding.id, A_MOMENT_AGO());
 
         await expect(sweep.runOnce()).resolves.toEqual({ bindings: 1, subjects: 1 });
-
         expect(announced).toEqual([
           {
             subjects: [{ type: SubjectType.USER, id: fixture.acme.memberUserId }],

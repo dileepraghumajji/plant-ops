@@ -135,13 +135,24 @@ describe('resolve load smoke (Doc 04 §6)', () => {
     // The claim. `null` would mean the tool could not reach a database and
     // quietly checked nothing, which must fail rather than pass.
     expect(result.scanDelta).not.toBeNull();
-    for (const [table, delta] of Object.entries(result.scanDelta ?? {})) {
-      expect({ table, delta }).toEqual({
-        table,
-        delta: expect.any(Number),
-      });
-      expect(delta).toBeLessThanOrEqual(result.scanBudget);
-    }
+
+    // Asserted as one object rather than a loop of `toBeLessThanOrEqual`, so a
+    // failure prints *which* tables were read and by how much next to the
+    // budget. The loop's version reported a bare "expected <= 30, received 44"
+    // with no table named — enough to know something was wrong and not enough
+    // to tell whether the cache had failed or the meter had.
+    const overBudget = Object.entries(result.scanDelta ?? {}).filter(
+      ([, delta]) => delta > result.scanBudget,
+    );
+    expect({
+      overBudget,
+      scanDelta: result.scanDelta,
+      budget: result.scanBudget,
+    }).toEqual({
+      overBudget: [],
+      scanDelta: result.scanDelta,
+      budget: result.scanBudget,
+    });
 
     expect(result.passed).toBe(true);
     expect(code).toBe(0);

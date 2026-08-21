@@ -185,6 +185,25 @@ const pem = (label: string, marker: string) =>
       message: `${label} must be a PEM-encoded key containing "${marker}"`,
     });
 
+/**
+ * A PEM certificate bundle — one or more `CERTIFICATE` blocks.
+ *
+ * Separate from {@link pem} because the failure it guards against is different.
+ * `pem` protects key *material*; this protects a trust anchor, and the way that
+ * one goes wrong is being pasted as the wrong artefact entirely — a leaf
+ * certificate instead of a root, or a private key that happened to be next to
+ * it in the downloads folder. Requiring the `CERTIFICATE` marker catches the
+ * second immediately; the first surfaces at the first connection, which is
+ * where a trust decision belongs anyway.
+ */
+const certificateChain = (label: string) =>
+  z
+    .string()
+    .transform((value) => value.replace(/\\n/g, '\n').trim())
+    .refine((value) => value.includes('BEGIN CERTIFICATE'), {
+      message: `${label} must be a PEM-encoded certificate containing "BEGIN CERTIFICATE"`,
+    });
+
 /** `kid` → PEM map of public keys retained for rotation (Doc 03 §1). */
 const retiredPublicKeys = z
   .string()
@@ -295,6 +314,41 @@ export const envSchema = z.object({
   /** **Direct** (non-pooled) endpoint; migrations only (Doc 07 §2). */
   DATABASE_DIRECT_URL: postgresUrl('DATABASE_DIRECT_URL'),
   DATABASE_SSL: boolish(false),
+  /**
+   * Trust anchor for the database's TLS certificate, PEM.
+   *
+   * Needed whenever the server presents a chain the system CA store does not
+   * contain, which is the normal case on managed Postgres rather than the
+   * exception. Measured against this project's Supabase pooler
+   * (`aws-0-ap-south-1.pooler.supabase.com:5432`): the leaf is
+   * `CN=*.pooler.supabase.com`, issued by `Supabase Intermediate 2021 CA`
+   * under a self-signed `Supabase Root 2021 CA`. Node rejects that chain with
+   * `SELF_SIGNED_CERT_IN_CHAIN`, so without this variable there is no working
+   * value for `DATABASE_SSL` at all: `true` cannot connect, and `false` would
+   * send the password in cleartext.
+   *
+   * Supplying the CA is the third option, and the only good one — verification
+   * stays **on** (`rejectUnauthorized: true`), it is simply performed against
+   * the right root. The usual `rejectUnauthorized: false` workaround encrypts
+   * the connection while authenticating nothing, which in a system whose whole
+   * premise is that the database is the last line of defence (Doc 07 §5.1) is
+   * the wrong trade.
+   *
+   * Optional: a local docker-compose Postgres speaks no TLS, and a host whose
+   * certificate chains to a public root needs no extra anchor.
+   */
+  DATABASE_CA_CERT: z.preprocess(
+    // An empty string means "unset", not "a certificate of length zero".
+    //
+    // This is not defensiveness for its own sake. GitHub Actions resolves an
+    // undefined `${{ vars.X }}` to the empty string rather than omitting the
+    // variable, so a release job written to pass the anchor through would hand
+    // this schema `''` in every environment that does not need one — and the
+    // `BEGIN CERTIFICATE` check would then refuse to boot an environment whose
+    // configuration is entirely correct.
+    (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+    certificateChain('DATABASE_CA_CERT').optional(),
+  ),
 
   REDIS_URL: redisUrl,
   /**
@@ -481,6 +535,21 @@ export const envSchema = z.object({
    * failure this trio can produce. The defaults already satisfy both; only an
    * operator who has changed one of them can trip either.
    */
+  /**
+   * A trust anchor with TLS switched off is not a smaller configuration — it is
+   * a cleartext connection wearing the paperwork of an encrypted one. The
+   * realistic way to arrive here is a `DATABASE_SSL` that was flipped to
+   * `false` while debugging something else and never flipped back, next to a CA
+   * someone deliberately pasted in. Refusing to boot says so; connecting anyway
+   * says nothing at all.
+   */
+  .refine(
+    (env) => env.DATABASE_CA_CERT === undefined || env.DATABASE_SSL,
+    {
+      message:
+        'DATABASE_CA_CERT is set but DATABASE_SSL is false — the certificate would be ignored and the connection sent in cleartext. Set DATABASE_SSL=true, or remove the certificate.',
+    },
+  )
   .refine(
     (env) => env.MANIFEST_BODY_LIMIT_BYTES >= env.REQUEST_BODY_LIMIT_BYTES,
     {
@@ -501,6 +570,47 @@ export type EnvConfig = z.infer<typeof envSchema>;
 
 /** Every variable the schema reads — used by the `.env.example` drift test. */
 export const ENV_KEYS = Object.keys(envSchema.shape) as Array<keyof EnvConfig>;
+
+/**
+ * The environment a **migration** needs, and nothing else (Doc 08 §5–6).
+ *
+ * The release step is not the application. It opens one connection to the
+ * direct endpoint, applies DDL, and exits — it never signs a token, never
+ * reaches Redis, and never reads the bootstrap secret. Booting it through
+ * `envSchema` would nonetheless demand all three, which means the CI job that
+ * runs migrations has to be handed `JWT_PRIVATE_KEY` and
+ * `PLATFORM_BOOTSTRAP_SECRET` in order to do something neither is involved in.
+ *
+ * That is a blast radius bought for nothing, so the release step validates this
+ * subset instead (`tools/release-migrate.ts`). The three fields are the *same*
+ * declarations `envSchema` uses, not parallel ones, so a change to how a
+ * connection string is validated cannot apply to the app and miss the migrator.
+ *
+ * `DATABASE_URL` is deliberately absent. Doc 07 §5.1 requires the two URLs to
+ * carry different **roles** — the owner migrates, the app serves — so the
+ * migrator having no way to reach the app's credentials is the arrangement
+ * working, not a gap in it.
+ */
+export const migrationEnvSchema = z.object({
+  NODE_ENV: envSchema.shape.NODE_ENV,
+  DATABASE_DIRECT_URL: envSchema.shape.DATABASE_DIRECT_URL,
+  DATABASE_SSL: envSchema.shape.DATABASE_SSL,
+  /**
+   * Present here even though it is not a credential: the release step opens a
+   * TLS connection like any other, so a managed host that needs a trust anchor
+   * needs it in the migration job too. Leaving it out would make the migration
+   * the one connection in the system that could not verify the server.
+   */
+  DATABASE_CA_CERT: envSchema.shape.DATABASE_CA_CERT,
+});
+
+/** The validated environment of the migration release step. */
+export type MigrationEnvConfig = z.infer<typeof migrationEnvSchema>;
+
+/** Every variable the release step reads. A strict subset of {@link ENV_KEYS}. */
+export const MIGRATION_ENV_KEYS = Object.keys(
+  migrationEnvSchema.shape,
+) as Array<keyof MigrationEnvConfig>;
 
 /**
  * Values that must never reach a log line, an audit payload, or an error

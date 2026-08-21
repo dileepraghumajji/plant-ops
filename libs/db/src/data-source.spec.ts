@@ -10,6 +10,9 @@ import {
 import { entities } from './entities/index.js';
 import { migrations } from './migrations/index.js';
 
+/** Stand-in trust anchor. Only its identity matters here, never its contents. */
+const CA_PEM = '-----BEGIN CERTIFICATE-----\nnot-a-real-ca\n-----END CERTIFICATE-----';
+
 const settings: DbConnectionSettings = {
   DATABASE_URL: 'postgresql://app:pw@pooler.example:6543/iam',
   DATABASE_DIRECT_URL: 'postgresql://app:pw@direct.example:5432/iam',
@@ -97,6 +100,25 @@ describe('data source options', () => {
         rejectUnauthorized: true,
       });
       expect(build({ ...settings, DATABASE_SSL: false }).ssl).toBe(false);
+    });
+
+    it('verifies against DATABASE_CA_CERT when the chain is not publicly rooted', () => {
+      // The managed-Postgres case: Supabase's pooler serves a chain under its
+      // own self-signed root, which Node refuses with SELF_SIGNED_CERT_IN_CHAIN
+      // against the system store.
+      expect(
+        build({ ...settings, DATABASE_SSL: true, DATABASE_CA_CERT: CA_PEM }).ssl,
+      ).toEqual({ rejectUnauthorized: true, ca: CA_PEM });
+    });
+
+    it('never turns verification off, with a certificate or without one', () => {
+      // The property, not the arrangement: no combination of settings produces
+      // an encrypted-but-unauthenticated connection. `rejectUnauthorized:false`
+      // would satisfy every other assertion in this file.
+      for (const DATABASE_CA_CERT of [undefined, CA_PEM]) {
+        const ssl = build({ ...settings, DATABASE_SSL: true, DATABASE_CA_CERT }).ssl;
+        expect(ssl).toMatchObject({ rejectUnauthorized: true });
+      }
     });
   });
 });

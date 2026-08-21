@@ -6,6 +6,7 @@
     "migration:run": "nx run @plantops/db:migration:run",
     "migration:revert": "nx run @plantops/db:migration:revert",
     "migration:show": "nx run @plantops/db:migration:show",
+    "release:migrate": "tsx --tsconfig libs/db/tsconfig.lib.json --conditions=@plantops/source tools/release-migrate.ts",
     "keys:rotate": "tsx --conditions=@plantops/source tools/rotate-keys.ts",
     "openapi": "node --conditions=@plantops/source tools/emit-openapi.cjs",
     "manifest:upload": "tsx --conditions=@plantops/source tools/upload-manifest.ts",

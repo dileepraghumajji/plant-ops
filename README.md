@@ -88,6 +88,34 @@ Module boundaries (e.g. only `iam-api` may import `libs/db`) are enforced by
 `@nx/enforce-module-boundaries` in [eslint.config.mjs](eslint.config.mjs) — see
 [docs/fixtures/boundary-lint-check.md](docs/fixtures/boundary-lint-check.md).
 
+## Deploying
+
+The managed platform is `iam-api` on Railway, `admin-web` on Vercel, Postgres on
+Supabase and a managed Redis (Doc 08 §6).
+[`docs/ops-runbook.md`](docs/ops-runbook.md) is the operational authority —
+standing up an environment, the release ordering, key rotation, and what to
+check when paged. The short version:
+
+| Piece | Where | What it does |
+|---|---|---|
+| [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | GitHub Actions | `nx affected` lint/test/build, the hardening battery against a real Postgres and Redis, an image build, then — on `main` only — migrations followed by the app swap |
+| [`apps/iam-api/Dockerfile`](apps/iam-api/Dockerfile) | Railway | Builds the workspace, prunes it to the bundle plus its runtime dependencies, and ships that. No `.env`, no keys, no customer-specific value |
+| [`tools/release-migrate.ts`](tools/release-migrate.ts) | the release job | Applies migrations over the **direct** URL under an advisory lock, validating only the three variables a migration actually uses |
+| [`railway.json`](railway.json) / [`vercel.json`](vercel.json) | both platforms | Deploy configuration as code — Dockerfile builder, `/ready` health check, `nx`-aware console builds |
+
+Two ordering rules carry the whole thing, and both are easy to break by accident:
+
+- **Migrations run before the app swaps**, so during a deploy the *previous*
+  release runs against the *new* schema. Every migration must therefore be
+  backward-compatible with the release before it — expand now, contract later.
+- **Railway's own GitHub auto-deploy must stay off.** If it is on, a push
+  deploys the app without waiting for the migration job, and the rule above
+  stops holding silently.
+
+Single-tenant delivery — a dedicated instance, or an install a client runs
+themselves — is [Doc 11](docs/11-deployment-models.md) and Phase 8, not this
+path.
+
 ## Manuals (start here if you are not writing code)
 
 [`docs/manuals/`](docs/manuals/README.md) holds four task-oriented guides, one

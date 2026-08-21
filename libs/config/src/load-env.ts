@@ -8,6 +8,7 @@
 
 import { z } from 'zod';
 import {
+  ENV_KEYS,
   type EnvConfig,
   SECRET_ENV_KEYS,
   type SecretEnvKey,
@@ -86,17 +87,25 @@ const REDACTED = '[redacted]';
  */
 export function redactEnv(env: EnvConfig): Record<string, unknown> {
   const secrets = new Set<string>(SECRET_ENV_KEYS);
+  // Driven by `ENV_KEYS` rather than by the object's own entries, so an
+  // *unset optional* variable is reported as `undefined` instead of vanishing.
+  // The difference is not cosmetic: "DATABASE_CA_CERT: undefined" in a boot log
+  // is the answer to a `SELF_SIGNED_CERT_IN_CHAIN` failure, and an absent line
+  // is indistinguishable from a variable nobody thought to look for.
   return Object.fromEntries(
-    Object.entries(env).map(([key, value]) => [
+    ENV_KEYS.map((key) => [
       key,
-      secrets.has(key) ? REDACTED : redactNonSecret(key, value),
+      secrets.has(key) ? REDACTED : redactNonSecret(key, env[key]),
     ]),
   );
 }
 
 /** Key *material* is masked even when the key itself is public. */
 function redactNonSecret(key: string, value: unknown): unknown {
-  if (key === 'JWT_PUBLIC_KEY') return '[pem]';
+  if (value === undefined) return undefined;
+  // Public, but pages long — the fact that one is configured is the whole
+  // signal; the bytes are noise that pushes the useful lines off the screen.
+  if (key === 'JWT_PUBLIC_KEY' || key === 'DATABASE_CA_CERT') return '[pem]';
   if (key === 'JWT_RETIRED_PUBLIC_KEYS') {
     return Object.keys(value as Record<string, string>);
   }

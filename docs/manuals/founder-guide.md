@@ -249,7 +249,7 @@ Both are new ground, and both are described in §8 below.
 
 | Gap | What it means in practice | Whose call |
 |---|---|---|
-| **Session 39 — deployment, CI, environments** | It runs on a developer's machine. There is no production deployment, no automated build pipeline, no staging environment | Engineering; this is the gap between "built" and "live" |
+| **Nothing is live yet** | The build pipeline and the deployment recipe now exist — every change is tested automatically, and there is a written, repeatable procedure for putting it on real servers. What has not happened is someone running that procedure: no staging site, no production site. It is a day's work, not a project | Engineering, once you say where it should live |
 | **Putting it on a customer's own servers** (Phase 8, sessions 40–49) | There is no installer. Today the only way to run it is the way a developer runs it. A customer who says "it must live inside our network" cannot be served yet | Engineering, but §8 is **your** decision first |
 | **Using it from a product outside this repository** (Phase 9, sessions 50–52) | The shared building blocks exist but cannot be installed from another codebase, and the authorization helper only works if that product is built with the same framework the IAM uses | Engineering; needed for your own next products too |
 | **Password-reset emails** | The reset flow works, but nothing sends the email — no mail provider is connected. Outside production the code writes the reset link to the log so developers can test it; in production it refuses and logs an error rather than failing silently | **Yours** — pick a mail provider (SMTP, Amazon SES, or the WhatsApp route the design already reserves) |

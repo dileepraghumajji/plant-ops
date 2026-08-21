@@ -55,6 +55,28 @@ $$;
 alter role :"app_login_role" inherit;
 grant iam_app to :"app_login_role" with inherit true;
 
+-- The owner role must be able to create schema `iam` (migration 0001).
+--
+-- Locally this is a no-op — the owner already owns the database. On a managed
+-- host it is not: measured on Supabase (PostgreSQL 17.6), the database ACL is
+-- `{=Tc/postgres,postgres=CTc/postgres,...}`, so PUBLIC holds CONNECT and TEMP
+-- but *not* CREATE. Without this grant the very first migration fails at
+-- `create schema iam` with "permission denied for database", after the roles
+-- have been set up and everything looks correct.
+--
+-- `format` with `%I` rather than psql interpolation: GRANT will not take
+-- `current_database()` as an expression, and the database name is not one of
+-- this script's parameters — it is wherever you connected.
+select set_config('plantops.owner_role', :'owner_role', false);
+
+do $$
+declare
+  _owner text := current_setting('plantops.owner_role', true);
+begin
+  execute format('grant create on database %I to %I', current_database(), _owner);
+end
+$$;
+
 -- Guard rails. These are the properties the startup check re-asserts at boot
 -- (Doc 07 §5.1); failing here is far cheaper than failing in production.
 --

@@ -62,7 +62,9 @@ import type { AddressInfo } from 'node:net';
 import type { DataSource } from 'typeorm';
 import { AppModule } from '../app/app.module';
 import { AUDIT_ACTIONS } from '../audit/audit-actions';
+import { GrantsCacheService } from '../authz/grants-cache.service';
 import { GrantInvalidationService } from '../authz/invalidation.service';
+import { forgetFixtureGrants } from '../testing/authorization.fixture';
 import { ENV } from '../config/config.module';
 import { createTestApplication } from '../testing/app-harness';
 import {
@@ -135,6 +137,7 @@ describeWithDb(
     let admin: DataSource;
     let fixture: Fixture;
     let invalidation: GrantInvalidationService;
+    let grantsCache: GrantsCacheService;
 
     jest.setTimeout(180_000);
 
@@ -162,6 +165,7 @@ describeWithDb(
       await app.listen(0);
       baseUrl = `http://127.0.0.1:${(app.getHttpServer().address() as AddressInfo).port}`;
       invalidation = app.get(GrantInvalidationService);
+      grantsCache = app.get(GrantsCacheService);
     });
 
     afterAll(async () => {
@@ -178,6 +182,17 @@ describeWithDb(
       // A clean tree before every case. The tenants themselves are seeded once:
       // logging in is the slowest thing here (argon2id, by design).
       await clearTrees(admin, [fixture.acme, fixture.other]);
+      // `clearTrees` rewrote the bindings in SQL, so nothing announced the
+      // change and the cache still answers from the previous case's root
+      // `scope_node` — which the new one is not under. See
+      // `forgetFixtureGrants` for why this is invisible without Redis.
+      await forgetFixtureGrants(
+        grantsCache,
+        [fixture.acme, fixture.other].map((tenant) => ({
+          clientId: tenant.clientId,
+          userId: tenant.adminUserId,
+        })),
+      );
     });
 
     // ── the wire ──────────────────────────────────────────────────────────

@@ -2,7 +2,7 @@ name: plantops
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:17
     container_name: plantops-postgres
     environment:
       POSTGRES_USER: plantops
@@ -21,7 +21,7 @@ services:
       retries: 10
 
   redis:
-    image: redis:7-alpine
+    image: redis:7
     container_name: plantops-redis
     ports:
       - '6379:6379'
