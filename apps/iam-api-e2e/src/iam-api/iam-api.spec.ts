@@ -25,6 +25,12 @@ describe('iam-api — a served instance', () => {
     expect(response.status).toBe(200);
     expect(response.data).toEqual({
       status: 'ok',
+      // Whatever stamped this build — `0.0.0-dev` from the schema default here,
+      // an image tag in a deployment. The value is asserted against the tag by
+      // `deploy/stack-smoke.sh`; what matters to a *served instance* is that
+      // the field is present at all, since support's first question cannot be
+      // answered by an endpoint that omits it (Doc 11 §8, gap 8).
+      version: expect.any(String),
       uptimeSeconds: expect.any(Number),
     });
   });

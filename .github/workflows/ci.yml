@@ -260,6 +260,26 @@ jobs:
           fi
           echo "All base images are digest-pinned."
 
+      - name: Generate a signing keypair and bootstrap secret
+        # Per run, thrown away with the runner. A committed key would be a
+        # committed secret, and a deployment's key comes from its own secret
+        # store (Doc 08 §5).
+        #
+        # Ahead of the builds rather than beside the stack it is for, so that
+        # every later step — including the failure-only ones — has a complete
+        # environment. `deploy/docker-compose.yml` marks these variables
+        # required, so a `docker compose logs` run to diagnose a *build* failure
+        # would otherwise fail on interpolation and print nothing, which is the
+        # least helpful moment for it to do that.
+        run: |
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out stack-private.pem
+          openssl rsa -in stack-private.pem -pubout -out stack-public.pem
+          {
+            echo "JWT_PRIVATE_KEY<<PEM"; cat stack-private.pem; echo "PEM"
+            echo "JWT_PUBLIC_KEY<<PEM";  cat stack-public.pem;  echo "PEM"
+            echo "PLATFORM_BOOTSTRAP_SECRET=$(openssl rand -hex 32)"
+          } >> "$GITHUB_ENV"
+
       - uses: docker/setup-buildx-action@v3
 
       # ── Build ──────────────────────────────────────────────────────────────
@@ -311,18 +331,31 @@ jobs:
         # Built last and from the API image just built, which is what makes the
         # runner and the app structurally incapable of disagreeing about what a
         # migration is (`deploy/migrate/Dockerfile` explains the choice).
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: deploy/migrate/Dockerfile
-          push: false
-          load: true
-          tags: plantops/migrate:${{ steps.version.outputs.version }}
-          build-args: |
-            APP_VERSION=${{ steps.version.outputs.version }}
-            IAM_API_IMAGE=plantops/iam-api:${{ steps.version.outputs.version }}
-          cache-from: type=gha,scope=migrate
-          cache-to: type=gha,mode=max,scope=migrate
+        #
+        # **`--builder default`, and it is not optional.** The three builds above
+        # run on the `docker-container` builder that `setup-buildx-action`
+        # creates, which is what makes the `type=gha` cache possible — and which
+        # has its own image store, entirely separate from the daemon's. A
+        # `FROM plantops/iam-api:<tag>` there does not find the image the step
+        # above just `load`ed into the daemon; it tries to *pull* it from Docker
+        # Hub and fails with "pull access denied" on an image that was never
+        # meant to be published. The `default` builder is the daemon's own, so
+        # it resolves the local tag.
+        #
+        # The cost is no registry-backed layer cache for this one image, which
+        # buys nothing anyway: it is two thin layers on a base that is already
+        # local, and the expensive part — building that base — is cached above.
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          docker buildx build \
+            --builder default \
+            --file deploy/migrate/Dockerfile \
+            --build-arg "APP_VERSION=${VERSION}" \
+            --build-arg "IAM_API_IMAGE=plantops/iam-api:${VERSION}" \
+            --tag "plantops/migrate:${VERSION}" \
+            --load \
+            .
 
       - name: Every image carries the version it was tagged with
         # The label half of the stamp, readable without starting anything —
@@ -343,19 +376,6 @@ jobs:
           echo "All four images are labelled ${version}."
 
       # ── Assemble and prove it works ────────────────────────────────────────
-      - name: Generate a signing keypair and bootstrap secret
-        # Per run, thrown away with the runner. A committed key would be a
-        # committed secret, and a deployment's key comes from its own secret
-        # store (Doc 08 §5).
-        run: |
-          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out stack-private.pem
-          openssl rsa -in stack-private.pem -pubout -out stack-public.pem
-          {
-            echo "JWT_PRIVATE_KEY<<PEM"; cat stack-private.pem; echo "PEM"
-            echo "JWT_PUBLIC_KEY<<PEM";  cat stack-public.pem;  echo "PEM"
-            echo "PLATFORM_BOOTSTRAP_SECRET=$(openssl rand -hex 32)"
-          } >> "$GITHUB_ENV"
-
       - name: Bring the stack up
         # No `--wait`: `migrate` is a one-shot container that exits 0 when it is
         # done, and `up --wait` reports a service that exited as a failure.
@@ -375,7 +395,11 @@ jobs:
         run: docker compose -f deploy/docker-compose.yml logs --no-color --tail=200
 
       - name: Tear the stack down
+        # `always()`, and never able to turn a green run red: there is nothing
+        # useful a failed cleanup can tell you about a runner that is about to
+        # be destroyed anyway.
         if: always()
+        continue-on-error: true
         run: docker compose -f deploy/docker-compose.yml down --volumes --remove-orphans
 
   release:
