@@ -42,11 +42,15 @@
 import type { MigrationInterface, QueryRunner } from 'typeorm';
 import { IAM_SCHEMA } from '../schema.js';
 import { APP_GROUP_ROLE } from './0007-rls-tenant.js';
+import { PLATFORM_CLIENT_SLUG } from './0011-bootstrap-seed.js';
 
 const S = `"${IAM_SCHEMA}"`;
 
-/** Signature, for the grant and the drop. */
-const FUNCTION_SIGNATURE = 'deployment_lookup_client(text)';
+/** Signatures, for the grants and the drops. */
+const FUNCTION_SIGNATURES = [
+  'deployment_lookup_client(text)',
+  'deployment_has_tenants()',
+] as const;
 
 export class PinnedClientLookup1786406400018 implements MigrationInterface {
   name = 'PinnedClientLookup1786406400018';
@@ -80,18 +84,56 @@ export class PinnedClientLookup1786406400018 implements MigrationInterface {
       $fn$;
     `);
 
+    // ── "Has this installation been provisioned yet?" ──────────────────────
+    //
+    // Needed because the pinned client is created *through the API*, by the
+    // installer, after the API is running — so on a first boot the slug
+    // legitimately names nothing yet, and refusing to start would be a deadlock
+    // rather than a safety check (`deploy/bootstrap.sh` restarts the API once
+    // the tenant exists, which is when the strict check becomes meaningful).
+    //
+    // The two situations have to be told apart, and this is what tells them:
+    // an empty installation has exactly one client, the platform identity
+    // migration 0011 seeds. Any *other* client means this database has been
+    // provisioned, and a pinned slug that names nothing in it is a
+    // misconfiguration rather than a not-yet.
+    await queryRunner.query(`
+      create or replace function ${S}.deployment_has_tenants()
+      returns boolean
+      language plpgsql
+      security definer
+      set search_path = ${IAM_SCHEMA}, pg_temp
+      as $fn$
+      declare
+        _prev_platform text := coalesce(current_setting('app.is_platform_admin', true), '');
+        _any boolean;
+      begin
+        perform set_config('app.is_platform_admin', 'true', true);
+
+        select exists (
+          select 1 from ${S}."client" c where c.slug <> '${PLATFORM_CLIENT_SLUG}'
+        ) into _any;
+
+        perform set_config('app.is_platform_admin', _prev_platform, true);
+        return _any;
+      end;
+      $fn$;
+    `);
+
     // Strip the implicit `execute to public` every new function comes with.
-    // Left in place, a SECURITY DEFINER function hands this path to every role
+    // Left in place, a SECURITY DEFINER function hands these paths to every role
     // in the cluster (Doc 07 §6).
-    await queryRunner.query(
-      `revoke all on function ${S}.${FUNCTION_SIGNATURE} from public;`,
-    );
-    await queryRunner.query(
-      `grant execute on function ${S}.${FUNCTION_SIGNATURE} to ${APP_GROUP_ROLE};`,
-    );
+    for (const signature of FUNCTION_SIGNATURES) {
+      await queryRunner.query(`revoke all on function ${S}.${signature} from public;`);
+      await queryRunner.query(
+        `grant execute on function ${S}.${signature} to ${APP_GROUP_ROLE};`,
+      );
+    }
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`drop function if exists ${S}.${FUNCTION_SIGNATURE};`);
+    for (const signature of [...FUNCTION_SIGNATURES].reverse()) {
+      await queryRunner.query(`drop function if exists ${S}.${signature};`);
+    }
   }
 }

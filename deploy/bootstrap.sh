@@ -321,6 +321,33 @@ apply_manifests || die 'the application catalog could not be applied.'
 step 'Provisioning your organisation'
 run_installer provision || die 'provisioning did not complete. Nothing was left half-created; fix the cause above and run this script again.'
 
+# ── 5. Pin the deployment to the organisation that now exists ───────────────
+#
+# A single-tenant API resolves its organisation once, at boot — which on a
+# *first* install is before the organisation exists, because the organisation is
+# created through that very API. It starts anyway in that one case, refuses
+# every login while unprovisioned, and says so in its log.
+#
+# Restarting here closes the loop, and it is the moment the strict check becomes
+# real: from now on a slug that names no organisation stops this service from
+# starting at all, rather than letting it serve 401s nobody can explain.
+if [ "${DEPLOYMENT_MODE:-saas}" = 'single_tenant' ]; then
+  step 'Pinning the deployment to your organisation'
+  dc restart iam-api >/dev/null
+
+  deadline=$(( $(date +%s) + 120 ))
+  until dc exec -T proxy wget -q -O /dev/null http://127.0.0.1/api/ready 2>/dev/null; do
+    [ "$(date +%s)" -lt "$deadline" ] || die "the API did not come back after being pinned to \"$PINNED_SLUG\".
+Its log says which organisation it looked for and what it found:
+  docker compose logs iam-api"
+    sleep 3
+  done
+  say "Pinned to \"$PINNED_SLUG\"."
+fi
+
+step 'Verifying'
+run_installer verify || die 'the installation did not verify. The failures above say which check.'
+
 # ── Done ────────────────────────────────────────────────────────────────────
 
 PORT=$(env_value PLANTOPS_HTTP_PORT)

@@ -95,6 +95,20 @@ export class DeploymentModeService implements OnApplicationBootstrap {
   }
 
   /**
+   * The slug this deployment is configured for, whether or not a client with it
+   * exists yet.
+   *
+   * Distinct from {@link client}, and the distinction matters exactly once: on a
+   * first install the organisation is created *through this API*, so between
+   * boot and provisioning the deployment knows which slug it is for and there
+   * is no row to point at. `POST /iam/clients` reads this one, so it can allow
+   * the organisation the deployment exists to serve and refuse every other.
+   */
+  get pinnedSlug(): string | undefined {
+    return this.isSingleTenant ? this.env.SINGLE_TENANT_CLIENT_SLUG : undefined;
+  }
+
+  /**
    * The pinned tenant, or `undefined` in `saas` mode.
    *
    * Reading this before `onModuleInit` has run is a programming error rather
@@ -142,14 +156,40 @@ export class DeploymentModeService implements OnApplicationBootstrap {
 
     const found = rows[0];
     if (found === undefined) {
-      throw new DeploymentModeError(
-        `DEPLOYMENT_MODE=single_tenant names SINGLE_TENANT_CLIENT_SLUG="${slug}", ` +
-          'but no client with that slug exists in this database.\n\n' +
-          'On a new installation the client is created by the installer ' +
-          '(deploy/bootstrap.sh) — check that PLANTOPS_CLIENT_SLUG in .env and ' +
-          'SINGLE_TENANT_CLIENT_SLUG name the same tenant. Starting anyway would ' +
-          'mean every login answers 401 for a reason visible nowhere.',
+      // Two situations, and conflating them would make one of them a deadlock.
+      //
+      // On a **first boot** the slug legitimately names nothing: the client is
+      // created through this very API, by the installer, after it is running.
+      // Refusing to start there would mean an installation that can never be
+      // installed. `deploy/bootstrap.sh` restarts the API once the tenant
+      // exists, and the check below is what runs then.
+      //
+      // On an installation that already has tenants, a slug naming none of them
+      // is a misconfiguration, and starting would mean every login answering
+      // 401 for a reason visible nowhere.
+      const [provisioned] = (await this.database.dataSource.query(
+        `select "${IAM_SCHEMA}".deployment_has_tenants() as provisioned`,
+      )) as { provisioned: boolean }[];
+
+      if (provisioned?.provisioned === true) {
+        throw new DeploymentModeError(
+          `DEPLOYMENT_MODE=single_tenant names SINGLE_TENANT_CLIENT_SLUG="${slug}", ` +
+            'but no client with that slug exists in this database — and this ' +
+            'database does have tenants, so this is not a fresh installation ' +
+            'waiting to be provisioned.\n\n' +
+            'Check that SINGLE_TENANT_CLIENT_SLUG names the organisation this ' +
+            'deployment serves. Starting anyway would mean every login answers ' +
+            '401 for a reason visible nowhere.',
+        );
+      }
+
+      this.logger.warn(
+        `No client with the slug "${slug}" exists yet, and this database has no ` +
+          'tenants — so this is a fresh installation. Logins are refused until ' +
+          'the installer has created the organisation and restarted this ' +
+          'service (deploy/bootstrap.sh does both).',
       );
+      return;
     }
 
     // A suspended tenant is a decision somebody made, and it is not this

@@ -174,6 +174,34 @@ The roadmap's governing criterion is that **`saas` behaviour is identical to tod
 - **`ENV` moved to `config/env.token.ts`.** Adding a controller to `ConfigModule` created an import cycle that CommonJS turns into a `ReferenceError` at import time. All 34 consumers now import the token from its own file and the module no longer re-exports it, so the cycle cannot come back through a convenience alias.
 - **The sidebar needed no change**, contrary to the roadmap's file list. It renders the nav tree the API computes, and platform nodes are already pruned for a subject without the permissions — adding mode-based hiding would have been a second, untested code path for the same outcome.
 
+### Two chicken-and-eggs the first CI run found, and how they were resolved
+
+Both were real design faults in the boot check, not CI wiring, and both would
+have broken every genuine first install.
+
+1. **The API refused to start because the pinned client did not exist — and the
+   client is created *through* that API.** Resolved by telling the two
+   situations apart: a database with no tenants at all (only the platform
+   identity migration 0011 seeds) is a fresh installation, so the API warns,
+   starts, and refuses logins with a message saying so. A database that *has*
+   tenants and still cannot find the pinned slug is a misconfiguration, and it
+   refuses to start. `bootstrap.sh` restarts the API once the organisation
+   exists, which is the moment the strict check becomes meaningful and every
+   start after the first.
+2. **The installer could never create the first client**, because the
+   single-tenant refusal returned the same 409 the unique-slug conflict does.
+   Resolved by making the rule say what it means: only the organisation this
+   deployment is *for* may be created. Any other slug is refused; a repeat of
+   the pinned one meets the ordinary unique-slug 409 from the database. That is
+   also more honest than the original — there is no second code path that
+   writes a `client` row, so the installer uses the same endpoint everything
+   else does.
+
+Verified afterwards by a full install from a rebuilt bundle on a clean volume:
+slugless login through the proxy returns 200, a login naming another
+organisation returns 400, `GET /api/iam/deployment` reports the pinned tenant,
+and a second `./bootstrap.sh` changes nothing and re-verifies green.
+
 ### Open questions for review — Session 44
 
 1. **A stray `SINGLE_TENANT_CLIENT_SLUG` in `saas` mode is a boot failure, not a warning.** The argument is that a setting nothing reads is one somebody will later believe did something. It does mean an operator switching a bundle to `saas` must also clear the slug. If that turns out to annoy more than it protects, relaxing the second refine is a one-line change.

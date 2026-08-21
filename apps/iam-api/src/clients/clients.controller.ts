@@ -99,17 +99,23 @@ export class ClientsController {
   // ── the tenant itself (Doc 02 §3 step 1) ──────────────────────────────────
 
   /**
-   * Refused outright in a single-tenant deployment, and the reason is coherence
-   * rather than licensing (Doc 11 §6.5).
+   * In a single-tenant deployment, only the organisation this deployment is for
+   * — and the reason is coherence rather than licensing (Doc 11 §6.5).
    *
-   * The process is pinned to one client at boot. A second `client` row would be
-   * a tenant no request this process serves can ever reach: nothing would log
-   * in to it, nothing would resolve to it, and it would sit in the database
-   * accumulating the appearance of being real. Better to say so at the call
-   * than to create it.
+   * The process serves one client, named in configuration. Any *other* client
+   * row would be a tenant no request this process serves can ever reach:
+   * nothing would log in to it, nothing would resolve to it, and it would sit
+   * in the database accumulating the appearance of being real.
    *
-   * The permission check still runs first and still means what it always did —
-   * this is a mode the deployment is in, not an authorization decision, and
+   * The pinned one is allowed through, and that is not a loophole — it is the
+   * call the installer makes. A single-tenant installation creates its
+   * organisation the same way every other organisation in this system is
+   * created, through this endpoint, with the platform credential; there is no
+   * second path that writes a `client` row. A repeat attempt meets the ordinary
+   * unique-slug 409 from the database, as it always did.
+   *
+   * The permission check still runs first and still means what it always did.
+   * This is a mode the deployment is in, not an authorization decision, and
    * mixing the two would make a 403 and this 409 indistinguishable to whoever
    * has to act on them.
    */
@@ -118,12 +124,12 @@ export class ClientsController {
   @RateLimit(CLIENTS_RATE_LIMIT)
   @RequirePermission(P.CLIENT_CREATE)
   create(@Body() body: CreateClientDto): Promise<ClientDTO> {
-    if (this.deployment.isSingleTenant) {
+    const pinned = this.deployment.pinnedSlug;
+    if (pinned !== undefined && body.slug !== pinned) {
       throw IamException.conflict(
-        'This deployment is pinned to a single organisation ' +
-          `("${this.deployment.client?.slug ?? 'unknown'}") and cannot hold a ` +
-          'second one. A client created here would be unreachable by every ' +
-          'request this process serves.',
+        `This deployment serves a single organisation ("${pinned}") and cannot ` +
+          `hold another. A client with the slug "${body.slug}" would be ` +
+          'unreachable by every request this process serves.',
       );
     }
     return this.clients.create(body);

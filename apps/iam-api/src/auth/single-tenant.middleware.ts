@@ -60,13 +60,14 @@ export class SingleTenantLoginMiddleware implements NestMiddleware {
     // refusal rather than a fallback because "carry on without a tenant" is not
     // an answer this route can give safely.
     if (pinned === undefined) {
-      // A plain Error, so the exception filter takes its 500 path and logs the
-      // message against the request id without returning it. There is no
-      // field-level complaint to hand a caller here: the fault is entirely this
-      // process's.
-      throw new Error(
-        'single-tenant mode is configured but no client is pinned — ' +
-          'DeploymentModeService did not initialize.',
+      // Reachable in exactly one window: a fresh installation, between the API
+      // starting and the installer creating the organisation. Nobody has an
+      // account yet, so refusing every login is correct — what matters is that
+      // it says why, rather than answering the generic 401 that "no such user"
+      // produces and sending somebody to look at their password.
+      throw IamException.conflict(
+        'This installation has not been provisioned yet: no organisation exists ' +
+          'for it to sign you in to. Run the installer (deploy/bootstrap.sh).',
       );
     }
 
