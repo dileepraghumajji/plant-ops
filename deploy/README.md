@@ -143,7 +143,11 @@ docker load -i plantops-<new version>/images/plantops-<new version>.tar
 sed -i 's/^PLANTOPS_VERSION=.*/PLANTOPS_VERSION=<new version>/' .env
 docker compose up -d
 
-# 4. Check.
+# 4. Re-apply the release's application catalog. Needs the current platform
+#    credential in .env for the length of the upgrade — see below.
+./bootstrap.sh --apply-manifests
+
+# 5. Check.
 ./bootstrap.sh --verify
 ```
 
@@ -154,6 +158,20 @@ never starts. You are never left with new code against an unmigrated schema.
 Migrations are forward-only and additive wherever possible. Skipping versions
 works — the runner applies everything outstanding in order — but take the backup
 anyway.
+
+**Step 4 needs a platform credential, and that is the one awkward part of an
+upgrade.** The permission and navigation catalog ships with the release, and
+re-applying it is what keeps this installation on the catalog we tested — an
+installation whose catalog has drifted is one where every support answer is a
+guess. Applying it needs platform authority, and a finished installation
+deliberately has none in `.env`. So put the current `PLATFORM_BOOTSTRAP_SECRET`
+back for the length of the upgrade and take it out again afterwards; that is the
+value `./bootstrap.sh --rotate-platform-secret` printed and told you to store.
+
+The step is safe to repeat and free when nothing changed: it reports "catalog
+already matches the release" and writes no audit record. Skipping it is not
+fatal — the new code runs — but the catalog stays where the previous release
+left it, so do not make a habit of it.
 
 ---
 

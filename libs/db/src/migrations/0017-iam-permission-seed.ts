@@ -35,7 +35,7 @@
  * *produces*, so it goes through the endpoint. The manifest is still the single
  * declaration of both — `apps/iam-api/src/registry/iam-manifest.spec.ts` asserts
  * that what is listed below is exactly the `permissions` half of
- * `tools/iam-manifest.json`, so the upload finds the rows already correct rather
+ * `deploy/manifests/iam.manifest.json`, so the upload finds the rows already correct rather
  * than creating a second set or deactivating these (Doc 02 §7's upsert).
  *
  * ## What each grant is, and to whom

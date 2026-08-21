@@ -95,6 +95,41 @@ services:
       DATABASE_DIRECT_URL: postgresql://${POSTGRES_USER:-plantops}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-plantops_iam}
       DATABASE_SSL: 'false'
 
+  # ── The release's application catalog ──────────────────────────────────────
+  #
+  # The second half of an upgrade (roadmap Session 43, Doc 11 §6.3). Manifests
+  # ship inside `plantops/migrate` and are applied through the ordinary
+  # `POST /iam/applications/:id/manifest`, so the permission and navigation
+  # catalog on this box is always the one this version was tested with, and
+  # re-converges if anyone has edited it by hand.
+  #
+  # A profile, so `docker compose up` never runs it implicitly. Unlike the
+  # migration it needs the **API** to be serving, and it needs a platform
+  # credential — so it is a step something explicit takes:
+  # `./bootstrap.sh --apply-manifests`.
+  #
+  # That credential is the one thing about this that is awkward, and it is
+  # awkward on purpose: Doc 11 §6.2 accepts that a self-hosted operator holds
+  # platform authority, but Doc 07 §8 still wants the value out of `.env` once
+  # the install is done. So an upgrade supplies it for the length of the
+  # upgrade — the same shape as the managed platform's first release — and the
+  # installer says so out loud when it is missing rather than skipping in
+  # silence.
+  manifests:
+    image: plantops/migrate:${PLANTOPS_VERSION}
+    pull_policy: never
+    profiles: ['tools']
+    restart: 'no'
+    entrypoint: ['tsx', 'apply-manifests.ts']
+    depends_on:
+      iam-api:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      IAM_API_URL: http://proxy/api
+
   # ── Application ────────────────────────────────────────────────────────────
   iam-api:
     image: plantops/iam-api:${PLANTOPS_VERSION}

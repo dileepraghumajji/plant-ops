@@ -177,7 +177,7 @@ Once per environment, in this order. Steps 1–3 cannot be done by the pipeline:
 7. **Seed the IAM's own manifest** so the console has navigation:
 
    ```sh
-   npm run manifest:seed-iam
+   npm run manifest:apply
    ```
 
 8. **Verify** per §3.4, then run the load smoke (`npm run load:smoke`) once to confirm a cached resolve stays off the database.

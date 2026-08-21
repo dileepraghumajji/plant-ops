@@ -32,12 +32,12 @@ function pageFor(route: string): string {
  * placeholder is gone, and the bar is now the real one: a page.
  *
  * The check runs against the manifest rather than against a list here, so
- * adding a menu to `tools/iam-manifest.json` without a screen fails a test
+ * adding a menu to `deploy/manifests/iam.manifest.json` without a screen fails a test
  * instead of shipping a dead link.
  */
 describe('the IAM manifest’s menu', () => {
   const manifest = JSON.parse(
-    readFileSync(join(__dirname, '../../../tools/iam-manifest.json'), 'utf-8'),
+    readFileSync(join(__dirname, '../../../deploy/manifests/iam.manifest.json'), 'utf-8'),
   ) as { nav: NavEntry[] };
 
   const routes = routesOf(manifest.nav);

@@ -86,6 +86,24 @@ RUN printf '{\n  "type": "module",\n  "private": true\n}\n' > package.json
 # what makes re-running an upgrade that already happened safe.
 COPY --chown=node:node tools/release-migrate.ts ./release-migrate.ts
 
+# The second step of an upgrade (roadmap Session 43, Doc 11 §6.3): the release's
+# application manifests, and the tool that applies them.
+#
+# They live in this image rather than in the API's because this is the
+# operations container — the one an install and an upgrade run explicitly — and
+# because the applier needs `tsx`, which only this image has. The compose files
+# give it its own service (`manifests`) with an entrypoint of its own; nothing
+# about the migration path changes.
+#
+# Manifests go under `./manifests` because `apply-manifests.ts` looks for a
+# sibling directory of that name when there is no repository layout around it.
+# `iam-api-client.ts` comes along because the applier imports it; both are
+# TypeScript and both are run by the same `tsx` the migration uses, so what runs
+# on a client's server is the same source CI ran.
+COPY --chown=node:node tools/apply-manifests.ts ./apply-manifests.ts
+COPY --chown=node:node tools/iam-api-client.ts ./iam-api-client.ts
+COPY --chown=node:node deploy/manifests/ ./manifests/
+
 USER node
 
 # `ENTRYPOINT` rather than `CMD`, so arguments passed to `docker run` land on

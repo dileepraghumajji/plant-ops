@@ -70,7 +70,8 @@ case "${1:-}" in
   '') ;;
   --verify) MODE=verify ;;
   --rotate-platform-secret) MODE=rotate ;;
-  *) die "unknown option '$1' — expected --verify or --rotate-platform-secret" ;;
+  --apply-manifests) MODE=manifests ;;
+  *) die "unknown option '$1' — expected --verify, --apply-manifests or --rotate-platform-secret" ;;
 esac
 
 command -v docker >/dev/null 2>&1 || die 'docker is not installed or not on PATH.'
@@ -153,9 +154,27 @@ if [ "$MODE" = 'verify' ]; then
   exit 0
 fi
 
+# Re-applies the release's application manifests through the ordinary API
+# endpoint. Idempotent: a catalog that already matches reports "no changes" and
+# writes no audit record, which is what makes running it on every upgrade free.
+apply_manifests() {
+  dc run --rm manifests
+}
+
 if [ "$MODE" = 'rotate' ]; then
   step 'Rotating the platform credential'
   run_installer rotate || die 'rotation failed.'
+  exit 0
+fi
+
+if [ "$MODE" = 'manifests' ]; then
+  step 'Applying the application catalog from this release'
+  apply_manifests || die "the catalog was not applied.
+
+The usual cause is the platform credential. PLATFORM_BOOTSTRAP_SECRET is
+deliberately absent from a finished installation (Doc 07 §8), and applying
+manifests needs platform authority — so an upgrade supplies the current value
+for the length of the upgrade and removes it again afterwards."
   exit 0
 fi
 
@@ -273,6 +292,13 @@ done
 say 'Ready.'
 
 # ── 4. The tenant and its first administrator ───────────────────────────────
+
+step 'Applying the application catalog from this release'
+# Before the tenant, because this is what gives the console a menu: navigation
+# is data, computed from the catalog per subject (Doc 05), so an administrator
+# created against an unregistered catalog logs in to an empty sidebar and a
+# support call. Idempotent, so an install that resumes here changes nothing.
+apply_manifests || die 'the application catalog could not be applied.'
 
 step 'Provisioning your organisation'
 run_installer provision || die 'provisioning did not complete. Nothing was left half-created; fix the cause above and run this script again.'

@@ -14,7 +14,7 @@
  *
  * So the console keeps its own spelling of the handful of keys it gates buttons
  * on, and `specs/iam-permissions.spec.ts` asserts every one of them exists in
- * `tools/iam-manifest.json` — the same drift guard the backend's
+ * `deploy/manifests/iam.manifest.json` — the same drift guard the backend's
  * `iam-manifest.spec.ts` applies to its copy. A key renamed in the manifest
  * fails a test rather than silently hiding a button.
  *

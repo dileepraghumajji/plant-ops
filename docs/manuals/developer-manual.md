@@ -107,7 +107,7 @@ works as written. Condensed:
 npm install
 # start Postgres and Redis (see local-testing.md §1)
 npm run migration:run                       # schema + bootstrap seed
-npm run manifest:seed-iam                   # the IAM's own catalog — no menu without it
+npm run manifest:apply                      # the release's catalogs — no menu without them
 cp apps/admin-web/.env.example apps/admin-web/.env.local
 
 npx nx run @plantops/iam-api:serve          # http://localhost:3000
@@ -254,8 +254,8 @@ is wrong or the spec needs amending first.
 2. DTOs as zod schemas; types into `libs/contracts` if any consumer needs them.
 3. Gate it: `@RequirePermission('iam.<tier>.<resource>.<action>')`, with
    `scopeFrom` where a tenant scope target exists.
-4. Add the permission to `tools/iam-manifest.json`, map it to a nav node if it
-   has a screen, and re-run `npm run manifest:seed-iam`. **The IAM dogfoods its
+4. Add the permission to `deploy/manifests/iam.manifest.json`, map it to a nav node if it
+   has a screen, and re-run `npm run manifest:apply`. **The IAM dogfoods its
    own registry** — a permission that is not in the manifest cannot be granted.
 5. Write the audit record in the same transaction, action from the Doc 10 §4
    catalog (extend the catalog if genuinely new).

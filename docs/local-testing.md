@@ -148,7 +148,7 @@ Without this the sidebar is empty — the console renders `/iam/navigation`, and
 the nav catalog is data:
 
 ```sh
-npm run manifest:seed-iam
+npm run manifest:apply
 ```
 
 ### 4.1 A token for the platform service account
@@ -303,7 +303,7 @@ curl -X PATCH "http://localhost:3000/iam/users/<user-id>" \
 Which is why it is worth having two admins per tenant while testing — if you
 lock the only one, you are locked out of that client.
 
-**Empty sidebar, "No screens granted".** Either `npm run manifest:seed-iam` has
+**Empty sidebar, "No screens granted".** Either `npm run manifest:apply` has
 not been run, or the client does not have the `iam` application enabled (step
 4.3.2). It is not a bug in the console: an unmapped menu is hidden by design
 (Doc 05 §3).
@@ -321,6 +321,6 @@ npx nx run @plantops/db:test -- --testPathPatterns "rls-isolation"
 ```
 
 **Starting over.** The schema is rebuilt from nothing by the db integration
-suites, so re-running them and then `npm run manifest:seed-iam` gives you a clean
+suites, so re-running them and then `npm run manifest:apply` gives you a clean
 database. Everything in section 4 then has to be redone — those users live only
 in that schema.

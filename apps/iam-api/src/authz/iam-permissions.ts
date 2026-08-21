@@ -16,7 +16,7 @@
  *
  * - **here**, because a controller decorator needs a compile-time constant and a
  *   typo in one must not compile;
- * - **`tools/iam-manifest.json`**, because Doc 02 §2 makes the manifest the unit
+ * - **`deploy/manifests/iam.manifest.json`**, because Doc 02 §2 makes the manifest the unit
  *   of registration and the console's navigation can only come from one;
  * - **migration 0017**, because the platform identity has to hold
  *   `iam.platform.*` *before* the manifest can be uploaded — uploading it is
