@@ -1,0 +1,177 @@
+# PlantOps — the installed stack (roadmap Session 42, Doc 11 §5.1, §5.3).
+#
+#   proxy  →  admin-web  +  iam-api  →  postgres  +  redis
+#
+# This is the file that ships in an installation bundle, as `docker-compose.yml`
+# beside a filled-in `.env`. It differs from `deploy/docker-compose.yml` — the
+# development stack CI asserts against — in the three ways an air-gapped install
+# needs:
+#
+#   1. **`pull_policy: never` on every service.** Nothing here may reach a
+#      registry, ever. On a plant network there is nothing to reach, and an
+#      install that *tries* fails after a DNS timeout with an error about the
+#      network rather than about the image it could not find. Everything comes
+#      from `docker load`; if an image is missing, compose says so immediately.
+#   2. **No bind mounts.** The development stack mounts `tools/setup-db-roles.sql`
+#      into Postgres's init directory, which needs a repository checkout. Here
+#      `bootstrap.sh` runs that script explicitly, which is also what lets it be
+#      run against a database this file did not create.
+#   3. **`env_file`.** Every setting an operator may change reaches the
+#      application from `.env` without editing this file — a file they should
+#      never have to edit, and one an upgrade replaces wholesale.
+#
+# `environment:` entries override `env_file` ones, so what is listed under a
+# service below is what the *stack* decides and an operator cannot accidentally
+# contradict from `.env`.
+name: plantops
+
+services:
+  # ── Data ───────────────────────────────────────────────────────────────────
+  postgres:
+    # Tag rather than digest, and deliberately: the digest is enforced where it
+    # can be, which is when the bundle is built. `tools/build-bundle.mjs` pulls
+    # the pinned digest, checks it, and saves *that* image into the tarball, so
+    # the bytes are fixed by the artifact you were given. A digest reference
+    # here would not survive `docker load` — digests are established by a
+    # registry pull, and there is no registry — so it would send an offline
+    # install looking for one.
+    image: postgres:17
+    pull_policy: never
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-plantops}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required — see .env.template}
+      POSTGRES_DB: ${POSTGRES_DB:-plantops_iam}
+      # Not read by PostgreSQL itself. `bootstrap.sh` creates the non-owning
+      # application role by piping SQL into this container's psql, and psql
+      # reads these two with `\getenv` — so the application's password is never
+      # an argument to anything and never appears in a process list on the host.
+      PLANTOPS_APP_ROLE: ${PLANTOPS_APP_ROLE:-plantops_app}
+      PLANTOPS_APP_PASSWORD: ${PLANTOPS_APP_PASSWORD:?PLANTOPS_APP_PASSWORD is required — see .env.template}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7
+    pull_policy: never
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # ── Schema ─────────────────────────────────────────────────────────────────
+  #
+  # Runs to completion and exits; nothing that serves traffic starts until it
+  # has. That makes an upgrade one command — `docker compose up -d` — with the
+  # ordering guaranteed rather than remembered: migrations land before the code
+  # that expects them, and a migration that fails means the new code never
+  # starts, rather than starting against a half-applied schema.
+  #
+  # Safe on every `up`, not only the first: the runner treats "nothing to apply"
+  # as success and holds an advisory lock so two of them cannot race.
+  migrate:
+    image: plantops/migrate:${PLANTOPS_VERSION:?PLANTOPS_VERSION is required — see .env.template}
+    pull_policy: never
+    restart: 'no'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # The one service that legitimately receives `PLATFORM_BOOTSTRAP_SECRET`:
+    # the migration that seeds the platform identity hashes it, once, on the
+    # first run against a new database (Doc 07 §8).
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      DATABASE_DIRECT_URL: postgresql://${POSTGRES_USER:-plantops}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-plantops_iam}
+      DATABASE_SSL: 'false'
+
+  # ── Application ────────────────────────────────────────────────────────────
+  iam-api:
+    image: plantops/iam-api:${PLANTOPS_VERSION}
+    pull_policy: never
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: '3000'
+      # Two roles, one server, and this is the line the whole tenant boundary
+      # rests on. The application connects as a role that owns nothing, so every
+      # row-level security policy applies to it. Pointing this at the owner
+      # would disable them all — silently — which is why the application asserts
+      # at boot that it is not the owner and refuses to start if it is.
+      DATABASE_URL: postgresql://${PLANTOPS_APP_ROLE:-plantops_app}:${PLANTOPS_APP_PASSWORD:?PLANTOPS_APP_PASSWORD is required — see .env.template}@postgres:5432/${POSTGRES_DB:-plantops_iam}
+      DATABASE_DIRECT_URL: postgresql://${POSTGRES_USER:-plantops}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-plantops_iam}
+      # The bundled PostgreSQL speaks no TLS and never leaves this host's
+      # private network. Fixed here rather than left to `.env` because the two
+      # halves have to agree: a `DATABASE_SSL=true` against a database that
+      # speaks plaintext fails at connect time with an error about the
+      # certificate. Session 46 is what makes pointing this stack at an external
+      # database server a configuration rather than an edit.
+      DATABASE_SSL: 'false'
+      REDIS_URL: redis://redis:6379
+      # Correct **because** of the proxy in front, and only because of it: it
+      # replaces `X-Forwarded-For` rather than appending to it, so the address
+      # the rate limiter buckets on is one nginx accepted rather than one a
+      # caller chose.
+      TRUST_PROXY: 'true'
+      # Empty, and correctly empty. The console reaches the API at `/api` on its
+      # own origin, so the browser sends no cross-origin request at all and
+      # there is nothing to allow.
+      CORS_ALLOWED_ORIGINS: ''
+      # **Blanked deliberately, and this is the acceptance criterion, not an
+      # oversight.** The bootstrap secret is consumed by one migration and by
+      # the install script; the API never reads it, and an application holding a
+      # live credential it has no use for is blast radius bought for nothing
+      # (Doc 07 §8 — "rotated immediately after first use"). The empty string is
+      # read as absent by `libs/config`, so this container starts without it
+      # whether or not the operator has got around to deleting the line.
+      PLATFORM_BOOTSTRAP_SECRET: ''
+      # Deliberately absent: APP_VERSION. It is baked into the image and
+      # reported by /api/health; setting it here would let the stack claim a
+      # version it is not running, which is the one thing the stamp prevents.
+
+  admin-web:
+    image: plantops/admin-web:${PLANTOPS_VERSION}
+    pull_policy: never
+    restart: unless-stopped
+    # No configuration at all, and that is the property rather than an omission.
+    # The console image holds no hostname, no API URL and no customer name — it
+    # asks its own origin for `/api` — which is what lets one image serve every
+    # installation. Anything added here would be a per-customer build.
+
+  # ── Front door ─────────────────────────────────────────────────────────────
+  proxy:
+    image: plantops/proxy:${PLANTOPS_VERSION}
+    pull_policy: never
+    restart: unless-stopped
+    depends_on:
+      - iam-api
+      - admin-web
+    ports:
+      # The only port this installation publishes. Terminate TLS in front of it
+      # with your own certificate.
+      - '${PLANTOPS_HTTP_PORT:-8080}:80'
+    environment:
+      TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:-}
+
+volumes:
+  postgres-data:
+  redis-data:

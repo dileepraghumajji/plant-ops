@@ -394,6 +394,146 @@ jobs:
         if: failure()
         run: docker compose -f deploy/docker-compose.yml logs --no-color --tail=200
 
+      - name: Tear the development stack down
+        # Before the bundle install rather than at the end of the job: the two
+        # stacks want the same host port, and the offline install below is the
+        # one that has to behave exactly like a customer's.
+        run: docker compose -f deploy/docker-compose.yml down --volumes --remove-orphans
+
+      # ── The offline bundle, installed the way a client installs it ──────────
+      #
+      # Roadmap Session 42's definition of done: a machine with the tarball and
+      # nothing else ends up with a working login. A CI runner is not an
+      # air-gapped plant server, so the part that cannot be simulated is
+      # simulated where it counts — the four PlantOps images are **deleted** from
+      # the daemon before the install, so everything the stack runs has to come
+      # out of the archive, and `pull_policy: never` in the production compose
+      # file means a registry is not an option even if one were reachable.
+      - name: Build the offline installation bundle
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: node tools/build-bundle.mjs "$VERSION"
+
+      - name: Delete the images, so the install can only use the archive
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          docker image rm \
+            "plantops/iam-api:$VERSION" "plantops/admin-web:$VERSION" \
+            "plantops/proxy:$VERSION" "plantops/migrate:$VERSION"
+          if docker image ls --format '{{.Repository}}' | grep -q '^plantops/'; then
+            echo '::error::a PlantOps image survived deletion — the install below would prove nothing'
+            exit 1
+          fi
+          echo 'No PlantOps images remain; the archive is the only source.'
+
+      - name: Install from the bundle
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          # A project name of its own: this runner has just had a development
+          # stack of the same name on it, and an installer that adopted those
+          # volumes would be testing the wrong thing.
+          PLANTOPS_COMPOSE_PROJECT: plantops-install
+        run: |
+          set -euo pipefail
+          workdir="$RUNNER_TEMP/install"
+          mkdir -p "$workdir"
+          tar -xzf "dist/bundle/plantops-$VERSION.tar.gz" -C "$workdir"
+          cd "$workdir/plantops-$VERSION"
+
+          # `.env` as an operator would write it: the shipped template with every
+          # REQUIRED blank filled, PEM keys on one line with their newlines
+          # escaped — which is what the template tells them to do and what every
+          # reader of the file accepts.
+          #
+          # Node rather than sed, for one specific reason: sed reads `\n` in a
+          # replacement as a newline, so a PEM escaped for `.env` would be
+          # un-escaped on the way through and the file would end up holding
+          # exactly the multi-line values the template warns against.
+          cat > fill-env.mjs <<'FILL'
+          import { readFileSync, writeFileSync } from 'node:fs';
+
+          const oneLine = (path) =>
+            readFileSync(path, 'utf-8').trim().split(/\r?\n/).join('\\n');
+
+          const workspace = process.env.GITHUB_WORKSPACE;
+          const answers = {
+            POSTGRES_PASSWORD: 'ci-owner-password',
+            PLANTOPS_APP_PASSWORD: 'ci-app-password',
+            JWT_SIGNING_KEY_ID: 'ci-install-key-1',
+            JWT_PRIVATE_KEY: oneLine(workspace + '/stack-private.pem'),
+            JWT_PUBLIC_KEY: oneLine(workspace + '/stack-public.pem'),
+            PLATFORM_BOOTSTRAP_SECRET: process.env.PLATFORM_BOOTSTRAP_SECRET,
+            PLANTOPS_CLIENT_NAME: 'Northgate Foods',
+            PLANTOPS_CLIENT_SLUG: 'northgate',
+            PLANTOPS_ADMIN_EMAIL: 'ops@northgate.example',
+            PLANTOPS_ADMIN_NAME: 'Northgate Operations',
+            PLANTOPS_ADMIN_PASSWORD: 'first-admin-password-1',
+            PLANTOPS_HTTP_PORT: '8081',
+          };
+
+          let env = readFileSync('.env.template', 'utf-8');
+          for (const [key, value] of Object.entries(answers)) {
+            const line = new RegExp('^' + key + '=.*$', 'm');
+            if (!line.test(env)) throw new Error(key + ' is not in .env.template');
+            env = env.replace(line, () => key + '=' + value);
+          }
+          writeFileSync('.env', env);
+          FILL
+          node fill-env.mjs
+          rm fill-env.mjs
+
+          ./bootstrap.sh
+
+      - name: The install is idempotent, and its credential can be retired
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          PLANTOPS_COMPOSE_PROJECT: plantops-install
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/install/plantops-$VERSION"
+
+          # Twice, changing nothing. The realistic reason to run an installer a
+          # second time is that the first attempt died after this point.
+          ./bootstrap.sh | tee second-run.log
+          grep -q 'already exists' second-run.log
+
+          # The one-time credential is retired by the installer itself, and the
+          # installation stays healthy without it — the state Doc 07 §8 asks
+          # every deployment to reach, and the one a real install is left in.
+          ./bootstrap.sh --rotate-platform-secret
+          sed -i 's|^PLATFORM_BOOTSTRAP_SECRET=.*|# PLATFORM_BOOTSTRAP_SECRET removed|' .env
+          ./bootstrap.sh --verify
+
+          # And the API never held it in the first place.
+          held=$(docker compose --project-name plantops-install --env-file .env \
+            exec -T iam-api printenv PLATFORM_BOOTSTRAP_SECRET || true)
+          if [ -n "$held" ]; then
+            echo '::error::the API container received PLATFORM_BOOTSTRAP_SECRET'
+            exit 1
+          fi
+          echo 'The API container holds no bootstrap secret.'
+
+      - name: Installation logs
+        if: failure()
+        continue-on-error: true
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          cd "$RUNNER_TEMP/install/plantops-$VERSION" || exit 0
+          docker compose --project-name plantops-install --env-file .env \
+            logs --no-color --tail=200
+
+      - name: Tear the installation down
+        if: always()
+        continue-on-error: true
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          cd "$RUNNER_TEMP/install/plantops-$VERSION" || exit 0
+          docker compose --project-name plantops-install --env-file .env \
+            down --volumes --remove-orphans
+
       - name: Tear the stack down
         # `always()`, and never able to turn a green run red: there is nothing
         # useful a failed cleanup can tell you about a runner that is about to

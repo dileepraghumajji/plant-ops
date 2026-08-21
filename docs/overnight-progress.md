@@ -44,8 +44,55 @@ All four images built; the stack came up from an empty volume; `deploy/stack-smo
 - **`deploy/docker-compose.yml` is not the production bundle.** It is the stack CI asserts against: tags rather than digests for our own images, a bundled Postgres, and a bind mount of `tools/setup-db-roles.sql` to provision the two database roles on first boot. Session 42's `docker-compose.prod.yml` + `bootstrap-install.mjs` is the deliverable version, and it is what should own role provisioning against a client's existing Postgres.
 - **CI does not push images.** Roadmap said "build and tag"; Railway builds what it deploys, and a second registry copy would mean two artifacts with one version number. The artifact a client receives is Session 42's offline tarball, produced from these builds.
 
-### Open questions for review
+### Open questions for review — Session 41
 
 1. **Versioning scheme.** The repository has no git tags, so CI computes `0.0.0-<12-char sha>` and that is what `/health` reports. That is honest but it is not a release number. Before a pilot, decide whether releases get annotated tags (`v0.1.0`) — `git describe --tags --dirty` already prefers them the moment one exists, so this is a `git tag` away and no code change.
 2. **`X-Forwarded-Proto` behind a client's own TLS terminator.** The proxy sends `$scheme`, which is `http` inside the stack even when the browser arrived over HTTPS. Nothing in the API branches on it today, so it is inert — but if something ever does (an absolute redirect, a secure-cookie decision), an operator with an outer terminator will need it pinned to `https`. Left as a documented comment rather than a config knob nobody needed yet.
 3. **Shared rate-limit bucket behind an outer proxy.** If the client fronts our proxy with their own load balancer and does not set `TRUSTED_PROXY_CIDRS`, every unauthenticated caller shares one bucket — safe, but it means the whole plant's *logins* share ten attempts a minute. Authenticated traffic is keyed by subject and unaffected. Worth a line in Session 49's install runbook; the mechanism to fix it already ships (`40-real-ip.sh`).
+
+---
+
+## Session 42 — Offline production bundle & first-boot bootstrap
+
+**Branch:** `session-42-offline-bundle`
+**Status:** complete; every acceptance criterion exercised by installing from a real tarball on this machine.
+
+### What shipped
+
+| Thing | Where |
+|---|---|
+| The installed stack, air-gapped (`pull_policy: never` throughout) | `deploy/docker-compose.prod.yml` |
+| Every variable `libs/config` validates, explained for an operator | `deploy/.env.template` |
+| Host-side installer — Docker and a POSIX shell, nothing else | `deploy/bootstrap.sh` |
+| API-side provisioning, verification and credential rotation | `tools/bootstrap-install.mjs` |
+| The tarball builder | `tools/build-bundle.mjs` |
+| Install guide | `deploy/README.md` |
+| Drift test: template + compose must assemble into a valid environment | `libs/config/src/env-template.spec.ts` |
+| `PLATFORM_BOOTSTRAP_SECRET` is now optional, and blank reads as absent | `libs/config/src/env.schema.ts` |
+| CI installs from the archive with the images deleted first | `.github/workflows/ci.yml` |
+
+### Verified locally, not assumed
+
+Bundle built (365 MB), the four PlantOps images deleted from the daemon, tarball extracted to a fresh directory, `.env` filled from the shipped template, `./bootstrap.sh` run:
+
+- images loaded from the archive; roles created; 17 migrations applied; stack reported ready;
+- client "Northgate Foods" and administrator created, then the bundled verification passed all four checks (API, dependencies, console, real login);
+- **re-run changed nothing** and re-reported the same state ("already exists — left as it is", password included);
+- `./bootstrap.sh --rotate-platform-secret` printed a new credential once; with `PLATFORM_BOOTSTRAP_SECRET` then deleted from `.env`, `--verify` still passed and a fresh install attempt refused with a precise message;
+- `printenv PLATFORM_BOOTSTRAP_SECRET` inside the API container is **empty** — the stack blanks it deliberately, so the process serving requests never holds it.
+
+`nx run-many -t lint test build` green; `openapi:check` green.
+
+### Decisions worth knowing about
+
+- **The installer is a shell script, not `bootstrap-install.mjs` as the roadmap named it.** The roadmap's own constraint (Doc 11 §5.1) is that a plant server may have no internet; it frequently also has no Node, no curl and no package manager. So the host-side driver is POSIX `sh`, and the part that genuinely needs a runtime — the API calls — runs *inside the API container* via `docker compose exec`, with `.env` piped in on stdin so no secret reaches an argument list. `tools/bootstrap-install.mjs` still exists and does exactly that job.
+- **`PLATFORM_BOOTSTRAP_SECRET` became optional in `libs/config`.** Nothing in the API ever read it; only migration 0011 does, off `process.env`. Requiring it meant every deployment kept a live platform credential in the application's environment forever, which contradicts "consumed once, rotated immediately". Blank now reads as absent too, so the production compose can hand the API an empty string while the migration container beside it still gets the real value from the same `.env`.
+- **Base images travel by tag, not by digest, inside the bundle** — `docker load` cannot restore a digest reference, so a digest in the compose file would send an offline install looking for a registry. The pin is enforced at *bundle build* time (pull by digest, then retag), and `MANIFEST.json` records which digest each image came from.
+- **`PLANTOPS_COMPOSE_PROJECT`** was added to `bootstrap.sh` so a host can hold two installations (and so CI can install beside a development stack of the same name).
+
+### Open questions for review — Session 42
+
+1. **The administrator's password lives in `.env`.** Bootstrap needs it to create the account and `--verify` needs it to prove login works. The install output tells the operator to change it after first login, but nothing enforces that, and `.env` is `chmod 600` at best. A "must change on first login" flag would be the real fix and belongs with Session 45's account work — worth deciding whether it is in scope there.
+2. **The bundle has no signature.** A tarball a client is told to trust should be verifiable — a detached signature and a published fingerprint. `MANIFEST.json` records image IDs but nothing signs the manifest. Session 48 introduces an offline-verifiable licence and will need a signing key anyway; the two probably want the same key and the same command.
+3. **Nothing yet applies the application manifests**, so a freshly installed console has the permission catalog migration 0017 seeds and nothing more — the navigation is sparse until Session 43 bundles the manifests and applies them at install and upgrade. Worth knowing before showing an install to anyone.
+4. **The install is single-client by convention, not by enforcement.** Bootstrap creates one client and the login screen still asks for the slug. Session 44 is what makes the slug invisible and refuses a second client; until then a demo will show `northgate` in the login form.

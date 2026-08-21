@@ -58,7 +58,6 @@ describe('parseEnv — required variables', () => {
     'JWT_SIGNING_KEY_ID',
     'JWT_PRIVATE_KEY',
     'JWT_PUBLIC_KEY',
-    'PLATFORM_BOOTSTRAP_SECRET',
   ] as const;
 
   it.each(REQUIRED)('aborts when %s is missing', (key) => {
@@ -243,10 +242,23 @@ describe('parseEnv — TTLs and spec bounds', () => {
 });
 
 describe('parseEnv — bootstrap secret and other defaults', () => {
-  it('requires a bootstrap secret of real length (Doc 07 §8)', () => {
+  it('requires a bootstrap secret of real length when one is supplied (Doc 07 §8)', () => {
     expect(
       issuesOf(validEnv({ PLATFORM_BOOTSTRAP_SECRET: 'short' }))[0],
     ).toContain('PLATFORM_BOOTSTRAP_SECRET');
+  });
+
+  it('boots without one at all — it is consumed once and then rotated away', () => {
+    // The end state a finished install is supposed to reach (Doc 07 §8, and
+    // roadmap Session 42's acceptance criteria). Nothing in the API reads the
+    // value; only migration 0011 does, and only on the one release that seeds
+    // the platform identity. An application that refused to start without it
+    // would force every deployment to keep a live credential it never uses.
+    const source = validEnv();
+    delete source.PLATFORM_BOOTSTRAP_SECRET;
+
+    expect(() => parseEnv(source)).not.toThrow();
+    expect(parseEnv(source).PLATFORM_BOOTSTRAP_SECRET).toBeUndefined();
   });
 
   it('applies operational defaults', () => {
