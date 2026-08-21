@@ -42,7 +42,7 @@ Three places hold configuration, and nothing is duplicated between them.
 |---|---|---|
 | Railway service variables | the API's full environment (`.env.example` is the list) | The only place `JWT_PRIVATE_KEY` and `DATABASE_URL` exist. |
 | GitHub Environment `staging` / `production` | secrets `STAGING_DATABASE_DIRECT_URL`, `RAILWAY_TOKEN`, and (first release only) `PLATFORM_BOOTSTRAP_SECRET`; variables `RAILWAY_SERVICE`, `RAILWAY_ENVIRONMENT`, `STAGING_DATABASE_CA_CERT` | Only what the release job needs — see §3. The job's first step checks all four deploy values are present and fails naming any that are missing. **Environment-scoped values are invisible to a job's `if:`** — a job's `environment:` resolves after its condition is evaluated, so `vars.X` there sees repository variables only. A guard written that way skips the job silently, with a green tick and no deploy. |
-| Vercel project | `NEXT_PUBLIC_IAM_API_URL` | The console's whole configuration. Public by construction: Next inlines it into the browser bundle. |
+| Vercel project | `NEXT_PUBLIC_IAM_API_URL` | The console's whole configuration, and needed here only because the console and the API sit on different origins. Public by construction: Next inlines it into the browser bundle. |
 
 Rules that are not negotiable:
 
@@ -128,7 +128,7 @@ Then the real check, which no probe can make for you — log in to the console, 
 
 `ignoreCommand` runs `nx-ignore`, so a push that does not affect `admin-web` does not spend a Vercel build.
 
-One caveat with a fix already scheduled: `NEXT_PUBLIC_IAM_API_URL` is substituted into the browser bundle **at build time**, so the deployed console is bound to one API origin. Changing it requires a rebuild, not a restart. Session 40 defaults the base to the same-origin path `/api` and removes this property.
+`NEXT_PUBLIC_IAM_API_URL` is substituted into the browser bundle **at build time**, so a console built with it is bound to that API origin: changing it requires a redeploy of the console, not a restart. On the managed platform that is the price of hosting the two halves separately — Vercel serves the console, Railway serves the API, and two origins cannot be bridged by a relative path. Unset, the console calls the same-origin path `/api` instead, which is what lets one image serve any hostname on a dedicated or self-hosted install (Doc 11 §3); a single-tenant deployment therefore sets nothing here and gets its proxy to map `/api` to the API.
 
 Whatever origin the console is served from must appear in the API's `CORS_ALLOWED_ORIGINS`, comma-separated. Vercel preview deployments get a new hostname per deploy and will therefore be blocked by CORS unless explicitly added — that is the allow-list working, not a bug.
 
