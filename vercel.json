@@ -3,6 +3,5 @@
   "framework": "nextjs",
   "installCommand": "npm ci",
   "buildCommand": "npx nx build @plantops/admin-web",
-  "outputDirectory": "apps/admin-web/.next",
-  "ignoreCommand": "npx --yes nx-ignore@19.8.0 @plantops/admin-web"
+  "outputDirectory": "apps/admin-web/.next"
 }
