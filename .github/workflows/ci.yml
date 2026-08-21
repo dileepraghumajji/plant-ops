@@ -239,6 +239,13 @@ jobs:
     # reviewer is configured when staging stops being a place to experiment.
     environment: staging
 
+    # A backstop, not a budget. The first real release applied its migrations in
+    # under a minute and then sat for twenty-three, because the tool had finished
+    # its work but the process would not exit — the deploy behind it never ran,
+    # and it took a human noticing to end it. `release-migrate` now bounds its
+    # own shutdown; this bounds everything else, including `railway up`.
+    timeout-minutes: 20
+
     # Deployments do not overlap, and a superseded one is *not* cancelled
     # mid-flight — `cancel-in-progress` here could kill a runner between the
     # migration and the app swap, which is the one window where stopping half

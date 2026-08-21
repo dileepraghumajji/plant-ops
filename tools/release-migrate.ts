@@ -82,6 +82,9 @@ const MIGRATION_LOCK_KEY = '4003920155071741';
 /** Exit code for `--check` when the database is behind the code. */
 const PENDING_EXIT_CODE = 1;
 
+/** How long to wait for a clean shutdown before exiting regardless. */
+const SHUTDOWN_GRACE_MS = 15_000;
+
 interface Options {
   /** Report pending migrations and exit; apply nothing. */
   check: boolean;
@@ -317,11 +320,46 @@ function describeFailure(error: unknown): string {
   return [headline, ...nested].join('\n');
 }
 
-main().catch((error: unknown) => {
-  // The operator needs the failure, not a stack through TypeORM's executor —
-  // and a stack from a release step tends to be pasted into a chat window.
-  console.error(describeFailure(error));
-  // Non-zero, always: a release must not proceed to the app swap on a failed
-  // migration (roadmap Session 39, and Session 41's runner inherits the rule).
-  process.exitCode = 1;
-});
+/**
+ * Exit even if something downstream refuses to let go.
+ *
+ * The work of this tool finishes when `main` resolves; the *process* finishes
+ * only when the event loop empties, and a database connection that never
+ * closes will hold it open forever. That is not theoretical — the first real
+ * release applied all seventeen migrations, printed its summary, and then sat
+ * for twenty-three minutes until a human cancelled the job. The schema was
+ * correct the whole time and the deploy behind it never ran.
+ *
+ * A release step that hangs *after* succeeding is worse than one that fails:
+ * nothing is wrong to find, the app swap simply never happens, and the only
+ * signal is somebody noticing a job that will not end.
+ *
+ * `unref()` is what makes this safe rather than a blunt kill. An unreferenced
+ * timer does not by itself keep the loop alive, so a clean run exits before it
+ * ever fires; it only fires when something *else* is holding the process open,
+ * which is precisely the case worth interrupting. The exit code is preserved,
+ * so a bounded shutdown never turns a failure into a pass.
+ */
+function exitEvenIfSomethingLingers(): void {
+  const bail = setTimeout(() => {
+    console.error(
+      `release-migrate finished its work but the process did not exit within ` +
+        `${SHUTDOWN_GRACE_MS / 1000}s — a database connection is still open. ` +
+        'Exiting anyway; the migration result above stands.',
+    );
+    process.exit(process.exitCode === undefined ? 0 : Number(process.exitCode));
+  }, SHUTDOWN_GRACE_MS);
+  bail.unref();
+}
+
+main()
+  .then(exitEvenIfSomethingLingers)
+  .catch((error: unknown) => {
+    // The operator needs the failure, not a stack through TypeORM's executor —
+    // and a stack from a release step tends to be pasted into a chat window.
+    console.error(describeFailure(error));
+    // Non-zero, always: a release must not proceed to the app swap on a failed
+    // migration (roadmap Session 39, and Session 41's runner inherits the rule).
+    process.exitCode = 1;
+    exitEvenIfSomethingLingers();
+  });

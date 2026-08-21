@@ -77,6 +77,34 @@ begin
 end
 $$;
 
+-- The owner role must also be able to create in schema `public`, which is not
+-- the same grant and is needed for a different table.
+--
+-- TypeORM writes its bookkeeping ledger — `MIGRATIONS_TABLE_NAME` in
+-- `libs/db/src/data-source.ts` — to the connection's *default* schema, and it
+-- stays there deliberately: migration 0001 is what creates `iam`, so the
+-- ledger cannot live in a schema that does not exist until the first migration
+-- it is meant to record has already run.
+--
+-- Locally this is a no-op for the same reason as the grant above, and that is
+-- exactly what makes it easy to miss. Since PostgreSQL 15 the `public` schema
+-- no longer grants CREATE to PUBLIC; it is owned by `pg_database_owner` and
+-- grants `UC` only to whoever owns the database. On a laptop the owner role
+-- created the database, so it inherits both and everything works. On a managed
+-- host it did not: measured on Supabase (PostgreSQL 17.6) the ACL is
+-- `{pg_database_owner=UC/pg_database_owner,=U/pg_database_owner,...}`, so
+-- `plantops` holds USAGE and nothing else. Without this grant the release job
+-- gets a working TLS connection, authenticates, and then fails on the very
+-- first statement with "permission denied for schema public" — before a single
+-- migration is even attempted.
+do $$
+declare
+  _owner text := current_setting('plantops.owner_role', true);
+begin
+  execute format('grant usage, create on schema public to %I', _owner);
+end
+$$;
+
 -- Guard rails. These are the properties the startup check re-asserts at boot
 -- (Doc 07 §5.1); failing here is far cheaper than failing in production.
 --
