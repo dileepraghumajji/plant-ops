@@ -35,10 +35,25 @@ docs/manuals/html
 apps/iam-api-e2e/test-output
 
 # ── Secrets and local configuration ────────────────────────────────────────
-.env
-.env.*
+#
+# Every `.env*`, at every depth — not just the root's. Session 41 turned this
+# from tidiness into a correctness rule, because `apps/admin-web/Dockerfile`
+# runs `next build` inside the context and Next **inlines** every
+# `NEXT_PUBLIC_*` it finds in `apps/admin-web/.env`, `.env.production` or
+# `.env.local` straight into the client bundle. A developer's local file naming
+# `http://localhost:3000` would therefore produce a console image hard-wired to
+# their laptop — with no warning at build time, and no symptom until a customer
+# opens a console that cannot reach its own API. The default the image is
+# supposed to carry is the same-origin `/api` of Doc 11 §8, and it only survives
+# if nothing is here to override it.
+#
+# The examples are kept. They hold no value, they are the documentation an
+# operator reads first, and `libs/config` has a test that keeps the root one
+# honest.
+**/.env
+**/.env.*
 !.env.example
-**/.env.local
+!**/.env.example
 *.pem
 *.key
 

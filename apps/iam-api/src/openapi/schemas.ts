@@ -753,7 +753,11 @@ export const whoAmISchema = named(
 
 export const livenessSchema = named(
   'LivenessReport',
-  z.object({ status: z.literal('ok'), uptimeSeconds: z.number().int() }),
+  z.object({
+    status: z.literal('ok'),
+    version: z.string(),
+    uptimeSeconds: z.number().int(),
+  }),
 );
 
 export const readinessSchema = named(

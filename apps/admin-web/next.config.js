@@ -10,6 +10,28 @@ const nextConfig = {
     root: join(__dirname, '../..'),
   },
 
+  // A self-contained server bundle in `.next/standalone`, which is what
+  // `apps/admin-web/Dockerfile` ships (roadmap Session 41, Doc 11 §5.3).
+  //
+  // Without it the only way to run a built console is `next start` inside a
+  // full workspace install — a gigabyte of `node_modules` and a monorepo
+  // checkout, in an image whose whole job is to serve a few megabytes of static
+  // assets. `standalone` traces what `server.js` actually imports and copies
+  // only that, so the runtime stage needs no npm install at all.
+  //
+  // Two consequences worth knowing before editing this file:
+  //
+  //   1. The trace root is the **workspace** root, inferred from the lockfile
+  //      there, so the output mirrors the monorepo: `server.js` lands at
+  //      `.next/standalone/apps/admin-web/server.js` with `node_modules` beside
+  //      it at the top. The Dockerfile copies the whole tree and starts it from
+  //      that path — see its comments.
+  //   2. `.next/static` and `public/` are deliberately **not** traced (they are
+  //      served, not imported), so the Dockerfile copies both in by hand. A
+  //      console that boots and then 404s every stylesheet is what forgetting
+  //      that looks like.
+  output: 'standalone',
+
   // `@plantops/ui` and `@plantops/web-kit` are consumed as TypeScript source:
   // their `package.json` points `main` at `src/index.ts`, so a change to a
   // shared component shows up in `next dev` without a separate library build.
