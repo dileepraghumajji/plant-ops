@@ -42,6 +42,7 @@
 
 import { execFileSync } from 'node:child_process';
 import {
+  chmodSync,
   copyFileSync,
   existsSync,
   mkdirSync,
@@ -69,7 +70,7 @@ const PLANTOPS_IMAGES = ['iam-api', 'admin-web', 'proxy', 'migrate'];
  */
 const BUNDLE_FILES = [
   [join(DEPLOY, 'docker-compose.prod.yml'), 'docker-compose.yml'],
-  [join(DEPLOY, 'bootstrap.sh'), 'bootstrap.sh'],
+  [join(DEPLOY, 'bootstrap.sh'), 'bootstrap.sh', 0o755],
   [join(DEPLOY, 'README.md'), 'README.md'],
   [join(ROOT, 'tools', 'bootstrap-install.mjs'), 'bootstrap-install.mjs'],
   [join(ROOT, 'tools', 'setup-db-roles.sql'), 'setup-db-roles.sql'],
@@ -211,9 +212,16 @@ function main() {
   const archiveBytes = statSync(archive).size;
   console.log(`  ${archive} — ${(archiveBytes / 1024 / 1024).toFixed(0)} MB`);
 
-  for (const [source, name] of BUNDLE_FILES) {
+  for (const [source, name, mode] of BUNDLE_FILES) {
     if (!existsSync(source)) die(`${source} is missing — the bundle cannot ship without it.`);
-    copyFileSync(source, join(stage, name));
+    const destination = join(stage, name);
+    copyFileSync(source, destination);
+    // Set the executable bit here rather than trusting the checkout's. Git
+    // records it, but a clone made on Windows routinely has `core.fileMode`
+    // off, so the bit survives the repository and not the working tree — and
+    // the first thing a customer types is `./bootstrap.sh`. Stating it in the
+    // builder means the artifact is correct whatever machine produced it.
+    if (mode !== undefined) chmodSync(destination, mode);
   }
   for (const [source, name] of RUNBOOKS) {
     copyFileSync(source, join(stage, 'runbooks', name));
