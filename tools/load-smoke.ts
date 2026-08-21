@@ -67,6 +67,12 @@ loadDotenv();
  * The tables the grant query reads and nothing else on this route does — see
  * the header for why `role_binding` and `client` are deliberately absent.
  */
+/** Postgres flushes a backend's pending stats at most this often. */
+const STATS_FLUSH_INTERVAL_MS = 500;
+
+/** Cap on the settle poll, so a busy database cannot hang the tool. */
+const STATS_SETTLE_ATTEMPTS = 6;
+
 const RESOLUTION_TABLES = [
   'role_permission',
   'permission',
@@ -168,6 +174,49 @@ async function accessTokenFor(options: Options): Promise<string> {
   return ((await response.json()) as { access_token: string }).access_token;
 }
 
+/**
+ * {@link readScanCounts}, but not until the counters have stopped moving.
+ *
+ * The delta this tool reports is only meaningful if the meter is still before
+ * the burst starts, and Postgres does not make that free: a backend flushes its
+ * pending statistics at transaction end but no more often than once every half
+ * second, and the `pg_stat_*` views cache a snapshot per session until
+ * `pg_stat_clear_snapshot()` is called.
+ *
+ * Read the "before" figure the instant this tool starts, and whatever the
+ * *previous* work did — the caller's fixture seeding, its warm-up request, the
+ * e2e suite that ran a moment earlier against the same database — is still
+ * unflushed. It then lands in the "after" reading and is charged to the burst.
+ *
+ * That is not hypothetical. It is what made `load-smoke.e2e.ts` fail on a CI
+ * runner while passing on every developer machine: 44 scans attributed to a
+ * burst that had made none, because a slower machine finished the preceding
+ * suite closer to the snapshot. The "after" reading already waits for exactly
+ * this reason; the "before" reading simply never did.
+ *
+ * Polls rather than sleeping a fixed interval, so a quiet database costs one
+ * round-trip and a busy one is still bounded.
+ */
+async function settledScanCounts(client: Client): Promise<Record<string, number>> {
+  const snapshot = async (): Promise<Record<string, number>> => {
+    await client.query('select pg_stat_clear_snapshot()');
+    return readScanCounts(client);
+  };
+
+  let previous = await snapshot();
+  for (let attempt = 0; attempt < STATS_SETTLE_ATTEMPTS; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, STATS_FLUSH_INTERVAL_MS));
+    const current = await snapshot();
+    if (RESOLUTION_TABLES.every((table) => current[table] === previous[table])) {
+      return current;
+    }
+    previous = current;
+  }
+  // Still moving after the cap: report what we have rather than hanging. The
+  // delta will be noisy, which the budget exists to absorb.
+  return previous;
+}
+
 /** `seq_scan + idx_scan` per resolution table, from the shared stats view. */
 async function readScanCounts(
   client: Client,
@@ -218,7 +267,7 @@ export async function runLoadSmoke(
   if (options.databaseUrl !== undefined) {
     stats = new Client({ connectionString: options.databaseUrl });
     await stats.connect();
-    before = await readScanCounts(stats);
+    before = await settledScanCounts(stats);
   }
 
   const latencies: number[] = [];
