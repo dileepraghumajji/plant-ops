@@ -41,7 +41,7 @@ Three places hold configuration, and nothing is duplicated between them.
 | Where | Holds | Notes |
 |---|---|---|
 | Railway service variables | the API's full environment (`.env.example` is the list) | The only place `JWT_PRIVATE_KEY` and `DATABASE_URL` exist. |
-| GitHub Environment `staging` / `production` | secrets `STAGING_DATABASE_DIRECT_URL`, `RAILWAY_TOKEN`; variables `RAILWAY_SERVICE`, `RAILWAY_ENVIRONMENT` | Only what the release job needs — see §3. `RAILWAY_SERVICE` doubles as the on switch: while it is unset the release job skips, so the pipeline is green on a repository with nothing to deploy to. |
+| GitHub Environment `staging` / `production` | secrets `STAGING_DATABASE_DIRECT_URL`, `RAILWAY_TOKEN`, and (first release only) `PLATFORM_BOOTSTRAP_SECRET`; variables `RAILWAY_SERVICE`, `RAILWAY_ENVIRONMENT`, `STAGING_DATABASE_CA_CERT` | Only what the release job needs — see §3. The job's first step checks all four deploy values are present and fails naming any that are missing. **Environment-scoped values are invisible to a job's `if:`** — a job's `environment:` resolves after its condition is evaluated, so `vars.X` there sees repository variables only. A guard written that way skips the job silently, with a green tick and no deploy. |
 | Vercel project | `NEXT_PUBLIC_IAM_API_URL` | The console's whole configuration. Public by construction: Next inlines it into the browser bundle. |
 
 Rules that are not negotiable:
