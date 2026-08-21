@@ -33,6 +33,7 @@
  * Test-only, and excluded from `tsconfig.app.json` — nothing here ships.
  */
 
+import { SubjectType } from '@plantops/contracts';
 import { IAM_SCHEMA, scopePathLabel } from '@plantops/db';
 import { randomUUID } from 'node:crypto';
 import type { DataSource } from 'typeorm';
@@ -149,4 +150,54 @@ export async function grantIamClientAdmin(
   );
 
   return role.id;
+}
+
+/**
+ * The grants-cache eviction a fixture owes after rewriting bindings in SQL.
+ *
+ * Production never needs this: every route that writes a `role_binding` fires
+ * `InvalidationService` from a post-commit callback (Doc 04 §7). A fixture
+ * writing the same rows with `admin.query` bypasses the whole path, so the
+ * cache keeps answering from before the write.
+ *
+ * That is invisible on a developer's machine and fatal in CI, which is the
+ * worst combination available. With Redis down — the usual local state — the
+ * resolver falls through to Postgres and every suite passes; with Redis up it
+ * serves grants scoped to the *previous* case's root `scope_node`, which the
+ * next case's freshly-created root is not under, and the request is denied.
+ * Measured on this suite: 18 of 18 pass without Redis, 3 of 18 with it.
+ *
+ * So a suite whose `beforeEach` re-seeds a tenant must call this afterwards,
+ * for every subject that might have been resolved during the previous case.
+ * Over-listing is free — a bump on a subject with nothing cached is one
+ * `INCR` on a key nobody reads.
+ *
+ * Takes the cache structurally rather than importing `GrantsCacheService`,
+ * because a fixture has no business depending on a provider's constructor.
+ */
+export interface FixtureGrantsCache {
+  bumpMany(
+    subjects: readonly { clientId: string; type: SubjectType; id: string }[],
+  ): Promise<void>;
+}
+
+/** A fixture subject to forget: `userId` or `serviceAccountId`, as bound. */
+export interface FixtureCachedSubject extends FixtureSubject {
+  clientId: string;
+}
+
+export async function forgetFixtureGrants(
+  cache: FixtureGrantsCache,
+  subjects: readonly FixtureCachedSubject[],
+): Promise<void> {
+  await cache.bumpMany(
+    subjects.flatMap(({ clientId, userId, serviceAccountId }) => [
+      ...(userId === undefined
+        ? []
+        : [{ clientId, type: SubjectType.USER, id: userId }]),
+      ...(serviceAccountId === undefined
+        ? []
+        : [{ clientId, type: SubjectType.SERVICE_ACCOUNT, id: serviceAccountId }]),
+    ]),
+  );
 }

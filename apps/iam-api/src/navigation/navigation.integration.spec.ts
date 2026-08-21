@@ -159,6 +159,7 @@ describeWithDb(
     let fixture: Fixture;
     let bootstrapSecret: string;
     let grants: GrantsCacheService;
+    let navCache: NavCatalogCacheService;
 
     jest.setTimeout(180_000);
 
@@ -194,6 +195,7 @@ describeWithDb(
       await app.listen(0);
       baseUrl = `http://127.0.0.1:${(app.getHttpServer().address() as AddressInfo).port}`;
       grants = app.get(GrantsCacheService);
+      navCache = app.get(NavCatalogCacheService);
     });
 
     afterAll(async () => {
@@ -211,7 +213,7 @@ describeWithDb(
         for (const subject of subjectsOf(tenant)) await grants.bump(subject);
       }
       await reactivateCatalog(admin, fixture.catalog);
-      await resetNavCatalog(admin, fixture.catalog);
+      await resetNavCatalog(admin, navCache, fixture.catalog);
     });
 
     // ── the wire ──────────────────────────────────────────────────────────
@@ -371,7 +373,7 @@ describeWithDb(
         // no longer reaches the catalog. It must vanish with its module, not
         // reappear at the top of the sidebar.
         await grant(fixture.acme.readerRoleId);
-        await setNavNodeActive(admin, fixture.catalog.gatepassId, 'ops', false);
+        await setNavNodeActive(admin, navCache, fixture.catalog.gatepassId, 'ops', false);
 
         expect((await gatepass(await asMember())).tree).toEqual([]);
       });
@@ -1313,8 +1315,18 @@ async function navNodeExists(
   return rows.length > 0;
 }
 
+/**
+ * Toggles a catalog node's `is_active`, and evicts the cached catalog.
+ *
+ * The eviction is not optional. Production reaches `nav_node.is_active` only
+ * through the manifest upload, which bumps the catalog from a post-commit
+ * callback; a fixture writing the column with `admin.query` announces nothing,
+ * so `GET /iam/navigation` keeps serving the tree from before the toggle. That
+ * is invisible with Redis down, where every read goes to Postgres.
+ */
 async function setNavNodeActive(
   admin: DataSource,
+  cache: NavCatalogCacheService,
   applicationId: string,
   key: string,
   isActive: boolean,
@@ -1324,6 +1336,7 @@ async function setNavNodeActive(
     `update ${S}."nav_node" set is_active = $3 where application_id = $1 and key = $2`,
     [applicationId, key, isActive],
   );
+  await cache.bump(applicationId);
 }
 
 /** Back to a tenant with no grants and no sessions, and both toggles on. */
@@ -1367,13 +1380,22 @@ async function reactivateCatalog(admin: DataSource, catalog: Catalog): Promise<v
  * them (migration 0004 cascades), and re-seeding mints fresh node ids, which is
  * also why no assertion here names one.
  */
-async function resetNavCatalog(admin: DataSource, catalog: Catalog): Promise<void> {
+async function resetNavCatalog(
+  admin: DataSource,
+  cache: NavCatalogCacheService,
+  catalog: Catalog,
+): Promise<void> {
   await asPlatformCatalog(admin);
   await admin.query(
     `delete from ${S}."nav_node" where application_id = any($1::uuid[])`,
     [[catalog.gatepassId, catalog.visitorId]],
   );
   await seedNav(admin, catalog);
+  // Re-seeding mints fresh node ids, so a cached tree from the previous case is
+  // not merely stale — it names nodes that no longer exist.
+  for (const applicationId of [catalog.gatepassId, catalog.visitorId]) {
+    await cache.bump(applicationId);
+  }
 }
 
 /** Every `s24-` client and application, and everything hanging off them. */

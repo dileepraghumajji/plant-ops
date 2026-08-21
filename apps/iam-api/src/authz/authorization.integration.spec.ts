@@ -67,7 +67,11 @@ import { AUDIT_ACTIONS } from '../audit/audit-actions';
 import { AppModule } from '../app/app.module';
 import { ENV } from '../config/config.module';
 import { createTestApplication } from '../testing/app-harness';
-import { grantIamClientAdmin } from '../testing/authorization.fixture';
+import { GrantsCacheService } from './grants-cache.service';
+import {
+  forgetFixtureGrants,
+  grantIamClientAdmin,
+} from '../testing/authorization.fixture';
 
 const S = `"${IAM_SCHEMA}"`;
 
@@ -117,6 +121,7 @@ describeWithDb(
   `authorization matrix (${configured ? 'live' : 'skipped: no DATABASE_URL'})`,
   () => {
     let app: INestApplication;
+    let grantsCache: GrantsCacheService;
     let baseUrl: string;
     let admin: DataSource;
     let acme: Tenant;
@@ -142,6 +147,7 @@ describeWithDb(
 
       app = createTestApplication(moduleRef);
       await app.init();
+      grantsCache = app.get(GrantsCacheService);
       await app.listen(0);
       baseUrl = `http://127.0.0.1:${(app.getHttpServer().address() as AddressInfo).port}`;
     });
@@ -283,6 +289,12 @@ describeWithDb(
         await grantIamClientAdmin(admin, acme.clientId, acme.root.id, {
           userId: acme.memberUserId,
         });
+        // The `before` call above cached an empty grant set for this member,
+        // and the binding just written in SQL announced nothing — so without
+        // this the second call reads the same empty answer and the case fails
+        // for a reason that has nothing to do with what it tests.
+        const member = [{ clientId: acme.clientId, userId: acme.memberUserId }];
+        await forgetFixtureGrants(grantsCache, member);
         try {
           const after = await call(await asMember(), 'GET', '/iam/roles');
           expect(after.status).toBe(200);
@@ -292,6 +304,10 @@ describeWithDb(
             `delete from ${S}."role_binding" where client_id = $1 and user_id = $2`,
             [acme.clientId, acme.memberUserId],
           );
+          // And again on the way out: the grant is gone from the database, so
+          // leaving it in the cache would hand the next case a member who can
+          // read /iam/roles.
+          await forgetFixtureGrants(grantsCache, member);
         }
       });
     });

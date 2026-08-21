@@ -75,6 +75,14 @@ export interface IntegrationHarness {
    *
    * The isolation suite never calls this — it rebuilds and connects as the
    * app role, with FORCE intact, because that is what it is testing.
+   *
+   * **Undone by {@link IntegrationHarness.dispose}**, which is not a nicety.
+   * `iam` is one schema shared by every suite in the workspace and by the
+   * hardening battery, so a suite that leaves FORCE off hands the next process
+   * a database in which ownership silently bypasses every policy. `iam-api`
+   * refuses to boot against exactly that (`assertRlsEnforceable`), which is how
+   * this was found: the battery died at startup naming fifteen unforced tables,
+   * long after the suite that relaxed them had finished and gone green.
    */
   relaxForcedRowSecurity(): Promise<void>;
   dispose(): Promise<void>;
@@ -105,6 +113,9 @@ export async function connectHarness(): Promise<IntegrationHarness> {
   const query = async <T = unknown>(sql: string, params?: unknown[]): Promise<T[]> =>
     (await dataSource.query(sql, params)) as T[];
 
+  /** Tables `relaxForcedRowSecurity` turned FORCE off on, for `dispose` to restore. */
+  let forced: string[] = [];
+
   return {
     dataSource,
     query,
@@ -133,18 +144,35 @@ export async function connectHarness(): Promise<IntegrationHarness> {
     },
 
     async relaxForcedRowSecurity(): Promise<void> {
-      const tables = await query<{ tablename: string }>(
-        `select tablename from pg_tables where schemaname = $1`,
+      // Which tables were forced, so the restore puts back exactly those.
+      // A blanket re-force would be wrong: `audit_trail` is deliberately left
+      // un-forced (Doc 07 §5.1), because the app role is blocked there by
+      // privilege rather than by policy.
+      const tables = await query<{ relname: string }>(
+        `select c.relname
+           from pg_class c
+           join pg_namespace n on n.oid = c.relnamespace
+          where n.nspname = $1 and c.relkind = 'r' and c.relforcerowsecurity`,
         [IAM_SCHEMA],
       );
-      for (const { tablename } of tables) {
-        await query(
-          `alter table "${IAM_SCHEMA}"."${tablename}" no force row level security`,
-        );
+      forced = tables.map(({ relname }) => relname);
+      for (const table of forced) {
+        await query(`alter table "${IAM_SCHEMA}"."${table}" no force row level security`);
       }
     },
 
     async dispose(): Promise<void> {
+      // Put FORCE back before letting go of the schema — see
+      // `relaxForcedRowSecurity`. Best-effort: a suite that already dropped the
+      // schema has nothing to restore, and failing here would replace a real
+      // test result with a teardown error.
+      for (const table of forced) {
+        await query(
+          `alter table "${IAM_SCHEMA}"."${table}" force row level security`,
+        ).catch(() => undefined);
+      }
+      forced = [];
+
       // Destroying the connection releases the advisory lock with it; the
       // explicit unlock keeps the intent visible and covers a pooled reuse.
       if (dataSource.isInitialized) {
