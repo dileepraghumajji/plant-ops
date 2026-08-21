@@ -20,7 +20,7 @@ open that wants a decision rather than a guess.
 
 Every session was verified by running the thing, not by reading it: a real stack
 from real images for 41, a real install from a real tarball for 42 and 44, the
-applier inside its own container for 43.  is green.
+applier inside its own container for 43. The main branch is green.
 
 ---
 
