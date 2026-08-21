@@ -5,8 +5,8 @@ written. It covers: starting the dependencies, inspecting the database, and
 getting from a blank login screen to a signed-in platform admin and tenant
 admin.
 
-This is a **development** guide. The production path is Doc 08 §6 and the ops
-runbook (roadmap Session 39).
+This is a **development** guide. The production path is Doc 08 §6 and
+[`ops-runbook.md`](ops-runbook.md).
 
 ---
 

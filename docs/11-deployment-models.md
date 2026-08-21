@@ -262,7 +262,7 @@ Everything else here is a guardrail on somebody else's hardware, and §10's reas
 
 The honest gap list as of today. None of it is hard; all of it is unbuilt.
 
-**1. There is no release artifact.** The root `docker-compose.yml` starts Postgres and Redis for local development only, and there is no `Dockerfile` anywhere in the workspace. Both models need reproducible, versioned images before either can be delivered.
+**1. There is no *complete* release artifact.** Session 39 added `apps/iam-api/Dockerfile` and a `.dockerignore`, so the API has a reproducible image. Nothing else does: there is no console image, no reverse proxy, no migration runner, and no version stamped into any of them. The root `docker-compose.yml` still starts Postgres and Redis for local development only. Both single-tenant models need the full set before either can be delivered — Session 41.
 
 **2. `admin-web` bakes the API URL in at build time.** `apps/admin-web/src/lib/api-config.ts` reads `NEXT_PUBLIC_IAM_API_URL`, which Next substitutes into the bundle at build time — the file's own comment says so explicitly. One image therefore cannot serve two customer hostnames, and a per-customer build is a fork by another name. **Fix: default the base URL to the same-origin path `/api` and put both containers behind the bundled reverse proxy.** The image then becomes customer-agnostic and the console works at whatever hostname the client points at it. This is the highest-leverage item on the list, and it only gets more expensive the longer it waits.
 
@@ -282,7 +282,7 @@ The honest gap list as of today. None of it is hard; all of it is unbuilt.
 
 **10. There is no restricted platform role.** The permission keys §6.4 needs all exist in migration 0017 and the console already gates screen-by-screen on individual permissions, so this is a seed and a documented role definition rather than a feature — but neither exists yet.
 
-**11. Roadmap session 39 — "Deployment + CI + runbook" — is still open.** The plan below extends it rather than duplicating it.
+**11. ~~Roadmap session 39 — "Deployment + CI + runbook" — is still open.~~** Delivered: the API image, the three-job pipeline, the migration release step over the direct URL, and `docs/ops-runbook.md`. It covers the *managed* path only, and it deploys nothing on its own — no environment has been stood up against it yet. The plan below extends it rather than duplicating it.
 
 ---
 

@@ -1,0 +1,62 @@
+# What never enters a Docker build context.
+#
+# Two reasons, and the second is the one that bites. The obvious one is size: an
+# installed `node_modules` here is well over a gigabyte, and it is uploaded to
+# the daemon on every build whether a layer uses it or not.
+#
+# The one that actually causes bugs is *staleness*. `apps/iam-api/Dockerfile`
+# copies the workspace in and builds it, so anything already built on the host
+# would be copied over the top of a clean checkout — and Nx, seeing outputs that
+# match its input hashes, would happily skip the work and ship a bundle compiled
+# from a developer's laptop weeks ago. Excluding every build output makes the
+# image a function of the source and nothing else.
+#
+# `.env` files are excluded for the third reason: this image must contain no
+# customer-specific value and no secret (Doc 08 §5). Configuration arrives from
+# the platform's secret store at run time.
+
+# ── Dependencies and caches ────────────────────────────────────────────────
+**/node_modules
+.nx
+**/.swc
+**/.cache
+
+# ── Build output (rebuilt inside the image) ────────────────────────────────
+**/dist
+**/out-tsc
+**/.next
+**/tsconfig.*.tsbuildinfo
+apps/admin-web/public/manuals
+docs/manuals/html
+
+# ── Test artefacts ─────────────────────────────────────────────────────────
+**/coverage
+**/test-output
+apps/iam-api-e2e/test-output
+
+# ── Secrets and local configuration ────────────────────────────────────────
+.env
+.env.*
+!.env.example
+**/.env.local
+*.pem
+*.key
+
+# ── Repository and editor metadata ─────────────────────────────────────────
+.git
+.github
+.gitignore
+.vscode
+.claude
+Dockerfile
+**/*.log
+
+# ── Documentation ──────────────────────────────────────────────────────────
+#
+# Excluded from the *image build* only. `docs/` is the authority for this system
+# and is not optional anywhere else — it simply has no bearing on a compiled
+# bundle, and Session 43 (manifests as release artifacts) is what will need a
+# deliberate exception here.
+docs
+*.md
+!README.md
