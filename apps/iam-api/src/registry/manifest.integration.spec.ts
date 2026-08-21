@@ -78,6 +78,14 @@ const usable = (url: string | undefined) =>
 const configured =
   usable(process.env['DATABASE_URL']) && usable(process.env['DATABASE_DIRECT_URL']);
 
+// This answers "is a database reachable", which is not the same question as "is
+// the schema there" — and this suite needs both. Nothing here can check the
+// second one cheaply, so it is guaranteed structurally instead: the `test`
+// target declares `dependsOn: ["@plantops/db:migration:run"]`, the same way the
+// e2e project does. Without that edge the suite is not skipped, because the
+// URLs *are* configured — it runs against an empty database and every case
+// fails on `relation "iam.client" does not exist`, several minutes before the
+// step that would have migrated it.
 const describeWithDb = configured ? describe : describe.skip;
 
 const PASSWORD = 'correct-horse-battery-staple';
