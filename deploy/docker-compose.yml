@@ -102,6 +102,33 @@ services:
       # nothing afterwards. Doc 07 §8: rotate it immediately after first use.
       PLATFORM_BOOTSTRAP_SECRET: ${PLATFORM_BOOTSTRAP_SECRET:?PLATFORM_BOOTSTRAP_SECRET is required}
 
+  # ── The release's application catalog ──────────────────────────────────────
+  #
+  # The second half of an upgrade (roadmap Session 43, Doc 11 §6.3): manifests
+  # ship with the release and are applied through the ordinary endpoint, so the
+  # permission and navigation catalog on a box is always the one this version
+  # was tested with — and re-converges if anyone has edited it by hand.
+  #
+  # A profile, so `docker compose up` never runs it implicitly. Unlike the
+  # migration it needs the **API** to be serving, and unlike the migration it
+  # needs a platform credential, so it is a step something explicit takes:
+  # `./bootstrap.sh --apply-manifests`, or
+  # `docker compose run --rm manifests` by hand.
+  manifests:
+    image: plantops/migrate:${PLANTOPS_VERSION:-dev}
+    profiles: ['tools']
+    restart: 'no'
+    entrypoint: ['tsx', 'apply-manifests.ts']
+    depends_on:
+      iam-api:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      # Through the proxy, on the stack's own network — the same path a browser
+      # takes, prefix stripping included.
+      IAM_API_URL: http://proxy/api
+      PLATFORM_BOOTSTRAP_SECRET: ${PLATFORM_BOOTSTRAP_SECRET:-}
+
   # ── Application ────────────────────────────────────────────────────────────
   iam-api:
     image: plantops/iam-api:${PLANTOPS_VERSION:-dev}

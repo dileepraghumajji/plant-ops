@@ -284,7 +284,11 @@ Session 41 did the other half: `deploy/proxy/` serves the console at `/` and the
 
 **8. There is no diagnostic bundle command** (§5.5). The version half is done: Session 41 stamps `APP_VERSION` into every image from one build argument — as an OCI label a stopped container still carries, and in the environment `/health` reports — so "what version are you on" is answered by `curl <host>/api/health` with no credential and no dashboard. CI fails if the tag and the reported version diverge. The bundle itself — logs, configuration with secrets redacted, migration ledger, readiness — is Session 49.
 
-**9. Application manifests are upload-only.** Doc 02 §2 makes manifest upload an idempotent upsert, which is exactly right, but the only path to it is a human at `POST /iam/applications/:id/manifest`. Nothing bundles manifests into a release or applies them at install and upgrade, which §6.3 requires for both single-tenant models.
+**9. ~~Application manifests are upload-only.~~ Closed.** Session 43 made the release the thing that applies them. `deploy/manifests/` is the bundled set — the IAM's own catalog among them — copied into `plantops/migrate` and applied by `tools/apply-manifests.ts` through the ordinary `POST /iam/applications/:id/manifest`, so nothing bypasses the validation, the platform-admin check, the audit record or the single transaction (Doc 02 §14). `bootstrap.sh` applies them at install and `--apply-manifests` re-applies them on upgrade; a run that changes nothing writes nothing.
+
+`manifest-convergence.e2e.ts` asserts the properties §6.3 depends on: a hand-added permission is **deactivated rather than deleted** on the next upgrade, a hand-edited application name is put back, a refused manifest changes neither catalog, and the active permission set is exactly what the shipped manifest declares.
+
+The residue is the credential: applying manifests needs platform authority, and Session 42 deliberately leaves a finished installation without it. An upgrade supplies it for the length of the upgrade (`deploy/README.md` §5). A dedicated release identity with only `iam.platform.application.*` would be better, and belongs with Session 45's restricted role.
 
 **10. There is no restricted platform role.** The permission keys §6.4 needs all exist in migration 0017 and the console already gates screen-by-screen on individual permissions, so this is a seed and a documented role definition rather than a feature — but neither exists yet.
 

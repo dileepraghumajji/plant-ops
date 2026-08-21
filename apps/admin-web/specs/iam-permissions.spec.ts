@@ -18,7 +18,7 @@ import { CLIENT_PERMISSIONS, PLATFORM_PERMISSIONS } from '../src/lib/iam-permiss
  */
 describe('platform permission keys', () => {
   const manifest = JSON.parse(
-    readFileSync(join(__dirname, '../../../tools/iam-manifest.json'), 'utf-8'),
+    readFileSync(join(__dirname, '../../../deploy/manifests/iam.manifest.json'), 'utf-8'),
   ) as { permissions: { key: string }[] };
 
   const declared = new Set(manifest.permissions.map((permission) => permission.key));
@@ -46,7 +46,7 @@ describe('platform permission keys', () => {
  */
 describe('client permission keys', () => {
   const manifest = JSON.parse(
-    readFileSync(join(__dirname, '../../../tools/iam-manifest.json'), 'utf-8'),
+    readFileSync(join(__dirname, '../../../deploy/manifests/iam.manifest.json'), 'utf-8'),
   ) as { permissions: { key: string }[] };
 
   const declared = new Set(manifest.permissions.map((permission) => permission.key));

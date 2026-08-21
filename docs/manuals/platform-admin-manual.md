@@ -265,7 +265,7 @@ why, so you can supervise it.
 1. **The database is created and seeded.** This produces exactly one identity: a
    platform *service account* whose secret comes from the environment's bootstrap
    secret. No human can sign in yet — there is nobody to sign in as.
-2. **The IAM's own catalogue is registered** (`npm run manifest:seed-iam`).
+2. **The IAM's own catalogue is registered** (`npm run manifest:apply`).
    Without this the console has no menu at all, because the console renders the
    menu the server computes, and the menu is data like everything else.
 3. **A human platform admin is created**, in two steps: create the user in the

@@ -10,7 +10,7 @@
     "keys:rotate": "tsx --conditions=@plantops/source tools/rotate-keys.ts",
     "openapi": "node --conditions=@plantops/source tools/emit-openapi.cjs",
     "manifest:upload": "tsx --conditions=@plantops/source tools/upload-manifest.ts",
-    "manifest:seed-iam": "tsx --conditions=@plantops/source tools/seed-iam-manifest.ts",
+    "manifest:apply": "tsx --conditions=@plantops/source tools/apply-manifests.ts",
     "manuals:html": "node tools/build-manuals.mjs",
     "load:smoke": "tsx --conditions=@plantops/source tools/load-smoke.ts"
   },

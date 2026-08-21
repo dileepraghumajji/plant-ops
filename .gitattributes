@@ -15,3 +15,13 @@
 Dockerfile text eol=lf
 *.conf text eol=lf
 docker-compose*.yml text eol=lf
+
+# The generated API description, compared **byte for byte** by
+# `nx run @plantops/iam-api:openapi:check`.
+#
+# The emitter writes LF. Without this line, git hands a Windows checkout CRLF,
+# so the check reports the document as stale on every run — on a machine where
+# nothing is stale — and the fix it suggests (regenerate and commit) produces a
+# commit with no content in it. Pinning the checkout to LF makes the check mean
+# what it says wherever it runs.
+apps/iam-api/openapi.json text eol=lf

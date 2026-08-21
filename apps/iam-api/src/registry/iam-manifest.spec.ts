@@ -4,7 +4,7 @@
  *
  * - `apps/iam-api/src/authz/iam-permissions.ts` — the constants the controllers
  *   name in `@RequirePermission`, so a typo does not compile.
- * - `tools/iam-manifest.json` — the document Doc 02 §2 makes the unit of
+ * - `deploy/manifests/iam.manifest.json` — the document Doc 02 §2 makes the unit of
  *   registration, uploaded through the real endpoint by
  *   `tools/seed-iam-manifest.ts`.
  * - `libs/db/src/migrations/0017-iam-permission-seed.ts` — the bootstrap, which
@@ -49,13 +49,13 @@ import { CLIENT_ADMIN_ROLE_NAME } from '../clients/client-admin.service';
 import { applicationManifestSchema } from './dto/manifest.dto';
 
 /** Four levels up from `src/registry/` is the workspace root. */
-const MANIFEST_PATH = join(__dirname, '..', '..', '..', '..', 'tools', 'iam-manifest.json');
+const MANIFEST_PATH = join(__dirname, '..', '..', '..', '..', 'deploy', 'manifests', 'iam.manifest.json');
 
 const manifest = JSON.parse(readFileSync(MANIFEST_PATH, 'utf8')) as ApplicationManifest;
 
 const migrationSeed = [...IAM_PLATFORM_PERMISSION_SEED, ...IAM_CLIENT_PERMISSION_SEED];
 
-describe('tools/iam-manifest.json', () => {
+describe('deploy/manifests/iam.manifest.json', () => {
   // The upload goes through the same `strictObject` schema every application's
   // does — no exemption for the IAM's own file (Doc 02 §14). A manifest this
   // suite accepts and the endpoint rejects would be found by an operator at
