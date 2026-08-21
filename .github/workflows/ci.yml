@@ -465,7 +465,13 @@ jobs:
             JWT_PUBLIC_KEY: oneLine(workspace + '/stack-public.pem'),
             PLATFORM_BOOTSTRAP_SECRET: process.env.PLATFORM_BOOTSTRAP_SECRET,
             PLANTOPS_CLIENT_NAME: 'Northgate Foods',
+            // Twice, because the installer refuses to proceed if the
+            // organisation it creates and the one the application is pinned to
+            // disagree (Session 44). Written from one constant here for the
+            // same reason an operator is told to copy the value: the check is
+            // only worth having while both are real.
             PLANTOPS_CLIENT_SLUG: 'northgate',
+            SINGLE_TENANT_CLIENT_SLUG: 'northgate',
             PLANTOPS_ADMIN_EMAIL: 'ops@northgate.example',
             PLANTOPS_ADMIN_NAME: 'Northgate Operations',
             PLANTOPS_ADMIN_PASSWORD: 'first-admin-password-1',
