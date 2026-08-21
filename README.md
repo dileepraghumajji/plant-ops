@@ -38,6 +38,14 @@ browser reads:
 cp apps/admin-web/.env.example apps/admin-web/.env.local   # NEXT_PUBLIC_IAM_API_URL
 ```
 
+That step matters locally and almost nowhere else. Unset, the console calls the
+same-origin path `/api`, which is what lets one build serve any hostname (Doc 11
+§3): nothing customer-specific is baked into the bundle, and the proxy in front
+maps `/api` to the API. Local development is the case where that does not hold —
+the console is on 4200, the API is on 3000, nothing proxies between them — so
+here the variable names the API outright, and the API's `CORS_ALLOWED_ORIGINS`
+names the console back.
+
 The API's paths are the ones Doc 06 §1 fixes — `/iam`, `/auth`, and the two ops
 endpoints — with no global prefix:
 

@@ -11,12 +11,18 @@
  *
  * ```tsx
  * // The whole of a console's setup.
- * <PlantOpsProvider baseUrl={process.env.NEXT_PUBLIC_IAM_API_URL!}>
+ * <PlantOpsProvider baseUrl={process.env.NEXT_PUBLIC_IAM_API_URL ?? '/api'}>
  *   <RequireAuth onUnauthenticated={(next) => router.replace(`/login?next=${next}`)}>
  *     <AppShell nav={<NavMenu tree={useNavigation().tree} … />}>…</AppShell>
  *   </RequireAuth>
  * </PlantOpsProvider>
  * ```
+ *
+ * The base is a *path* there rather than an origin, and deliberately so: `/api`
+ * resolves against whatever origin served the page, so one build of a console
+ * runs at any hostname and nothing customer-specific is inlined into its bundle
+ * (Doc 11 §3). `HttpTransport` composes a request URL as `baseUrl + path`, so
+ * nothing under this provider can tell which of the two forms it was handed.
  *
  * ## What it deliberately does not do
  *

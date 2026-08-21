@@ -17,12 +17,20 @@ import { PlantOpsProvider } from '@plantops/web-kit';
 
 export function Providers({ children }) {
   return (
-    <PlantOpsProvider baseUrl={process.env.NEXT_PUBLIC_IAM_API_URL!}>
+    <PlantOpsProvider baseUrl={process.env.NEXT_PUBLIC_IAM_API_URL ?? '/api'}>
       {children}
     </PlantOpsProvider>
   );
 }
 ```
+
+The fallback is a *path*, not an origin. `/api` resolves against whatever origin
+served the page, so one build of a console runs at any hostname with nothing
+customer-specific inlined into its bundle (Doc 11 §3); the environment variable
+is for the case where the console and the API are genuinely on different origins
+— local development, or a console hosted separately from its API. Either way the
+transport composes `baseUrl + path`, and nothing below the provider can tell
+which form it was given.
 
 `PlantOpsProvider` nests theme → antd's feedback hooks → IAM client → session →
 grants, in the order they depend on each other. That ordering is the part that is
