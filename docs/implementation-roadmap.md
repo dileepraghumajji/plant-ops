@@ -648,7 +648,7 @@
 # Session 45 — Restricted platform role & break-glass recovery
 **Goal:** What a self-hosted client legitimately gets of the platform tier, and how they recover when locked out (Doc 11 §6.4). On their hardware we cannot withhold anything technically — so the aim is to make platform access unnecessary, and to make the one genuinely necessary capability auditable.
 **Expected Output:** An on-prem platform role that grants visibility and nothing that writes to the catalog, plus a host-level recovery path.
-**Files to Create:** `libs/db/src/migrations/0018-onprem-platform-role.ts` (seeds the role; **0018 is the next free number** — 0017 is the last shipped migration), `tools/break-glass-admin.ts`, `apps/iam-api-e2e/src/onprem-role.e2e.ts`.
+**Files to Create:** `libs/db/src/migrations/0019-onprem-platform-role.ts` (seeds the role; **0019 is the next free number** — Session 44 took 0018 for the pinned-client lookup), `tools/break-glass-admin.ts`, `apps/iam-api-e2e/src/onprem-role.e2e.ts`.
 **Files to Modify:** `tools/bootstrap-install.mjs` (seed the role in single-tenant mode only), `deploy/README.md`.
 **Dependencies:** Sessions 23, 44
 **Acceptance Criteria:**

@@ -54,6 +54,11 @@ describe('migration chain', () => {
       // needs the catalog tables (0002), the join tables' policies (0009) and
       // the identity the bootstrap seed creates (0011).
       'IamPermissionSeed1786406400017',
+      // Session 44's boot-time lookup for a single-tenant deployment's pinned
+      // client. Last, and it could hardly be anywhere else: it is one
+      // `security definer` function over `client` (0003) whose policies were
+      // written by 0007, and nothing depends on it.
+      'PinnedClientLookup1786406400018',
     ]);
   });
 

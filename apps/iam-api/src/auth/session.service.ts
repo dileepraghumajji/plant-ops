@@ -45,7 +45,7 @@ import {
   type SessionDTO,
 } from '@plantops/contracts';
 import { IAM_SCHEMA, type RefreshOutcome, type VerifiedClaims } from '@plantops/db';
-import { ENV } from '../config/config.module';
+import { ENV } from '../config/env.token';
 import type { AuditAction } from '../audit/audit-actions';
 import { AuditService } from '../audit/audit.service';
 import { afterCommit, entityManager } from '../common/transaction-context';

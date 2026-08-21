@@ -50,7 +50,7 @@ import { randomUUID } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import type { DataSource } from 'typeorm';
 import { AppModule } from '../app/app.module';
-import { ENV } from '../config/config.module';
+import { ENV } from '../config/env.token';
 import type { WhoAmIResponse } from '../iam/whoami.controller';
 import { createTestApplication } from '../testing/app-harness';
 

@@ -751,6 +751,15 @@ export const whoAmISchema = named(
   }),
 );
 
+export const deploymentSchema = named(
+  'DeploymentDescription',
+  z.object({
+    mode: z.enum(['saas', 'single_tenant']),
+    client_slug: z.string().nullable(),
+    client_name: z.string().nullable(),
+  }),
+);
+
 export const livenessSchema = named(
   'LivenessReport',
   z.object({

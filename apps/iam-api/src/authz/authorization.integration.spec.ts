@@ -65,7 +65,7 @@ import type { AddressInfo } from 'node:net';
 import type { DataSource } from 'typeorm';
 import { AUDIT_ACTIONS } from '../audit/audit-actions';
 import { AppModule } from '../app/app.module';
-import { ENV } from '../config/config.module';
+import { ENV } from '../config/env.token';
 import { createTestApplication } from '../testing/app-harness';
 import { GrantsCacheService } from './grants-cache.service';
 import {

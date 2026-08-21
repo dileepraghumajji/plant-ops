@@ -62,7 +62,7 @@ import {
   type CachedGrants,
   type ResolvedGrants,
 } from '@plantops/contracts';
-import { ENV } from '../config/config.module';
+import { ENV } from '../config/env.token';
 import { withTimeout } from '../common/with-timeout';
 import { RedisService } from '../redis/redis.service';
 import type { SubjectRef } from './resolver.service';

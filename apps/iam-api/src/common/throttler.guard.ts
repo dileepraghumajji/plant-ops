@@ -32,7 +32,7 @@ import {
 import { Reflector } from '@nestjs/core';
 import type { EnvConfig } from '@plantops/config';
 import type { Request, Response } from 'express';
-import { ENV } from '../config/config.module';
+import { ENV } from '../config/env.token';
 import { RedisService } from '../redis/redis.service';
 import { IamException } from './iam.exception';
 import {

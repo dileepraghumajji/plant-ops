@@ -65,7 +65,7 @@ import {
 import type { EnvConfig } from '@plantops/config';
 import { SubjectType } from '@plantops/contracts';
 import { IAM_SCHEMA } from '@plantops/db';
-import { ENV } from '../config/config.module';
+import { ENV } from '../config/env.token';
 import { DatabaseService } from '../database/database.service';
 import {
   GrantInvalidationService,

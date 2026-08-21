@@ -42,8 +42,9 @@ async function request<T>(
   method: string,
   path: string,
   options: RequestOptions = {},
+  base: string = baseUrl(),
 ): Promise<ApiResponse<T>> {
-  const response = await fetch(`${baseUrl()}${path}`, {
+  const response = await fetch(`${base}${path}`, {
     method,
     headers: {
       ...(options.body === undefined ? {} : { 'content-type': 'application/json' }),
@@ -84,14 +85,32 @@ export interface Caller {
   del<T = unknown>(path: string, body?: unknown): Promise<ApiResponse<T>>;
 }
 
-export function as(token: string | undefined): Caller {
+/**
+ * A caller, optionally against an instance other than the battery's.
+ *
+ * `base` exists for one suite: `single-tenant.e2e.ts` starts a *second* API
+ * process in the other deployment mode, because the mode is boot-time
+ * configuration and there is no way to change it on a running instance. Every
+ * other suite omits it and drives the shared instance as before.
+ */
+export function as(token: string | undefined, base?: string): Caller {
+  const at = base === undefined ? undefined : base.replace(/\/+$/, '');
+  const send = <T>(
+    method: string,
+    path: string,
+    options: RequestOptions,
+  ): Promise<ApiResponse<T>> =>
+    at === undefined
+      ? request<T>(method, path, options)
+      : request<T>(method, path, options, at);
+
   return {
     token,
-    get: (path) => request('GET', path, { token }),
-    post: (path, body) => request('POST', path, { token, body }),
-    put: (path, body) => request('PUT', path, { token, body }),
-    patch: (path, body) => request('PATCH', path, { token, body }),
-    del: (path, body) => request('DELETE', path, { token, body }),
+    get: (path) => send('GET', path, { token }),
+    post: (path, body) => send('POST', path, { token, body }),
+    put: (path, body) => send('PUT', path, { token, body }),
+    patch: (path, body) => send('PATCH', path, { token, body }),
+    del: (path, body) => send('DELETE', path, { token, body }),
   };
 }
 

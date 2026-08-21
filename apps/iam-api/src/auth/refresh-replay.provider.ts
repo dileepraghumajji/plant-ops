@@ -9,7 +9,7 @@
 
 import type { Provider } from '@nestjs/common';
 import type { EnvConfig } from '@plantops/config';
-import { ENV } from '../config/config.module';
+import { ENV } from '../config/env.token';
 import { RedisService } from '../redis/redis.service';
 import { RefreshReplayCache, type ReplayStore } from './refresh-replay.cache';
 

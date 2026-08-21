@@ -61,6 +61,7 @@ import {
 import { IAM_PLATFORM_PERMISSIONS as P } from '../authz/iam-permissions';
 import { IamException } from '../common/iam.exception';
 import { RateLimit } from '../common/rate-limit.decorator';
+import { DeploymentModeService } from '../config/deployment-mode';
 import { ClientAdminService } from './client-admin.service';
 import { ClientApplicationsService } from './client-applications.service';
 import { ClientsService } from './clients.service';
@@ -92,15 +93,39 @@ export class ClientsController {
     private readonly clients: ClientsService,
     private readonly applications: ClientApplicationsService,
     private readonly admins: ClientAdminService,
+    private readonly deployment: DeploymentModeService,
   ) {}
 
   // ── the tenant itself (Doc 02 §3 step 1) ──────────────────────────────────
 
+  /**
+   * Refused outright in a single-tenant deployment, and the reason is coherence
+   * rather than licensing (Doc 11 §6.5).
+   *
+   * The process is pinned to one client at boot. A second `client` row would be
+   * a tenant no request this process serves can ever reach: nothing would log
+   * in to it, nothing would resolve to it, and it would sit in the database
+   * accumulating the appearance of being real. Better to say so at the call
+   * than to create it.
+   *
+   * The permission check still runs first and still means what it always did —
+   * this is a mode the deployment is in, not an authorization decision, and
+   * mixing the two would make a 403 and this 409 indistinguishable to whoever
+   * has to act on them.
+   */
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @RateLimit(CLIENTS_RATE_LIMIT)
   @RequirePermission(P.CLIENT_CREATE)
   create(@Body() body: CreateClientDto): Promise<ClientDTO> {
+    if (this.deployment.isSingleTenant) {
+      throw IamException.conflict(
+        'This deployment is pinned to a single organisation ' +
+          `("${this.deployment.client?.slug ?? 'unknown'}") and cannot hold a ` +
+          'second one. A client created here would be unreachable by every ' +
+          'request this process serves.',
+      );
+    }
     return this.clients.create(body);
   }
 

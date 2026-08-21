@@ -66,7 +66,7 @@ import {
 import type { EnvConfig } from '@plantops/config';
 import { AuditModule } from '../audit/audit.module';
 import { AuthzModule } from '../authz/authz.module';
-import { ENV } from '../config/config.module';
+import { ENV } from '../config/env.token';
 import { DatabaseModule } from '../database/database.module';
 import { RedisModule } from '../redis/redis.module';
 import { AccountStateService } from './account-state.service';

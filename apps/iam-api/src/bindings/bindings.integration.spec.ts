@@ -68,7 +68,7 @@ import type { DataSource } from 'typeorm';
 import { AppModule } from '../app/app.module';
 import { AUDIT_ACTIONS } from '../audit/audit-actions';
 import { GrantInvalidationService } from '../authz/invalidation.service';
-import { ENV } from '../config/config.module';
+import { ENV } from '../config/env.token';
 import { createTestApplication } from '../testing/app-harness';
 import {
   grantIamClientAdmin,

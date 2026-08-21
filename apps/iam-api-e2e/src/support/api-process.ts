@@ -127,7 +127,17 @@ async function waitForReady(baseUrl: string, timeoutMs: number): Promise<void> {
  *   the `e2e` target should make that unreachable, but a stale `dist` deleted
  *   by hand is a confusing failure to debug from a connection refused).
  */
-export async function startApi(): Promise<{
+export async function startApi(
+  /**
+   * Extra environment for this instance, on top of the battery's.
+   *
+   * One suite uses it: `single-tenant.e2e.ts` needs an API in
+   * `DEPLOYMENT_MODE=single_tenant`, which is boot-time configuration and
+   * cannot be changed on a running process. It starts its own instance on its
+   * own port against the same database, and stops it when it is done.
+   */
+  overrides: Readonly<Record<string, string>> = {},
+): Promise<{
   runtime: ApiRuntime;
   child: ChildProcess;
 }> {
@@ -139,7 +149,14 @@ export async function startApi(): Promise<{
   }
 
   mkdirSync(dirname(RUNTIME_FILE), { recursive: true });
-  const logPath = join(dirname(RUNTIME_FILE), 'api.log');
+  // A log per instance, so a second one cannot truncate the battery's while it
+  // is being written to — and so a failure in either is still readable
+  // afterwards.
+  const suffix = overrides['DEPLOYMENT_MODE'] ?? '';
+  const logPath = join(
+    dirname(RUNTIME_FILE),
+    suffix === '' ? 'api.log' : `api-${suffix}.log`,
+  );
   // Truncating: the reset-token scrape searches this file, and a token left
   // over from the previous run is a test that passes against stale state.
   const log = openSync(logPath, 'w');
@@ -161,6 +178,7 @@ export async function startApi(): Promise<{
       REFRESH_REUSE_GRACE_SECONDS: '10',
       NO_COLOR: '1',
       FORCE_COLOR: '0',
+      ...overrides,
     },
     stdio: ['ignore', log, log],
   });

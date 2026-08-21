@@ -79,6 +79,7 @@ import {
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR, APP_PIPE } from '@nestjs/core';
 import { AuthGuard, PermissionGuard } from '@plantops/auth-kit';
 import { AuthModule } from '../auth/auth.module';
+import { SingleTenantLoginMiddleware } from '../auth/single-tenant.middleware';
 import { AuthzApiModule } from '../authz/authz-api.module';
 import { PermissionGuardModule } from '../authz/permission-guard.module';
 import { BindingsModule } from '../bindings/bindings.module';
@@ -87,6 +88,7 @@ import {
   BULK_USER_UPLOAD_ROUTE_PATH,
   BulkUploadBodyMiddleware,
   JsonBodyMiddleware,
+  LOGIN_ROUTE_PATH,
   MANIFEST_ROUTE_PATH,
   ManifestBodyMiddleware,
 } from '../common/body-parser.middleware';
@@ -137,6 +139,12 @@ import { UsersModule } from '../users/users.module';
     { provide: APP_GUARD, useClass: PermissionGuard },
     { provide: APP_INTERCEPTOR, useClass: TenantContextInterceptor },
     { provide: APP_PIPE, useClass: ZodValidationPipe },
+    // Applied in `configure` below, on `POST /auth/login` only, and listed here
+    // because it is the one middleware in this app with a dependency to inject.
+    // `RequestIdMiddleware` and the body parsers construct without one, so Nest
+    // instantiates them straight from the class; this needs the module's
+    // injector to hand it `DeploymentModeService`.
+    SingleTenantLoginMiddleware,
   ],
 })
 export class AppModule implements NestModule {
@@ -163,5 +171,13 @@ export class AppModule implements NestModule {
       .apply(JsonBodyMiddleware)
       .exclude(manifestRoute, bulkUploadRoute)
       .forRoutes('*');
+
+    // After the body parsers, because it reads the parsed body, and before the
+    // validation pipe, because the whole point is that the DTO sees the same
+    // shape it would have seen in SaaS. A no-op unless
+    // `DEPLOYMENT_MODE=single_tenant` (`auth/single-tenant.middleware.ts`).
+    consumer
+      .apply(SingleTenantLoginMiddleware)
+      .forRoutes({ path: LOGIN_ROUTE_PATH, method: RequestMethod.POST });
   }
 }

@@ -48,6 +48,18 @@ export interface CredentialsFormProps {
   errorDetail?: string | null;
   /** Pre-fills the tenant — from the last successful sign-in, or a subdomain. */
   defaultClientSlug?: string;
+  /**
+   * Hides the tenant field, for a deployment that serves one organisation
+   * (Doc 11 §6.5).
+   *
+   * The value is still submitted — as a hidden field carrying
+   * `defaultClientSlug` — because the tenant half of the credential has not gone
+   * anywhere, it simply is not the user's to choose. Hiding it is where the
+   * change ends: the API refuses a login that names a different organisation
+   * whether or not the form ever showed a box, which is what makes this a UX
+   * decision rather than a control.
+   */
+  hideClientField?: boolean;
   /** e.g. a "Forgot password?" link. Rendered under the submit button. */
   footer?: React.ReactNode;
   submitLabel?: string;
@@ -59,6 +71,7 @@ export function CredentialsForm({
   error,
   errorDetail,
   defaultClientSlug = '',
+  hideClientField = false,
   footer,
   submitLabel = 'Sign in',
 }: CredentialsFormProps): React.ReactElement {
@@ -94,20 +107,31 @@ export function CredentialsForm({
         </Form.Item>
       )}
 
-      <Form.Item
-        name="client_slug"
-        label="Client"
-        rules={[{ required: true, message: 'Which client are you signing in to?' }]}
-        extra="The short name of your organisation in PlantOps."
-      >
-        <Input
-          prefix={<ShopOutlined />}
-          placeholder="acme-industries"
-          autoComplete="organization"
-          autoCapitalize="none"
-          spellCheck={false}
-        />
-      </Form.Item>
+      {hideClientField ? (
+        // Registered rather than merely omitted: an unrendered field would
+        // leave the submitted value to antd's store semantics, and "the tenant
+        // is missing from the login body" is not a thing to leave to a
+        // library's internals. No validation rule, because there is nothing for
+        // a user to get wrong here.
+        <Form.Item name="client_slug" hidden>
+          <Input type="hidden" />
+        </Form.Item>
+      ) : (
+        <Form.Item
+          name="client_slug"
+          label="Client"
+          rules={[{ required: true, message: 'Which client are you signing in to?' }]}
+          extra="The short name of your organisation in PlantOps."
+        >
+          <Input
+            prefix={<ShopOutlined />}
+            placeholder="acme-industries"
+            autoComplete="organization"
+            autoCapitalize="none"
+            spellCheck={false}
+          />
+        </Form.Item>
+      )}
 
       <Form.Item
         name="email"

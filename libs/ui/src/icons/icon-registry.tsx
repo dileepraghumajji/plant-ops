@@ -70,7 +70,7 @@ type IconComponent = React.ComponentType<{ className?: string }>;
 /**
  * The registry. Keys are the strings that appear in `nav_node.icon`.
  *
- * The first block is what `tools/iam-manifest.json` uses today; the rest is the
+ * The first block is what `deploy/manifests/iam.manifest.json` uses today; the rest is the
  * shared vocabulary later applications draw on.
  */
 const ICONS: Readonly<Record<string, IconComponent>> = Object.freeze({

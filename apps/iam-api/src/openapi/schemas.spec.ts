@@ -56,6 +56,7 @@ import type {
 } from '@plantops/contracts';
 import type { z } from 'zod';
 import type { ReadinessReport } from '../health/health.service';
+import type { DeploymentDescription } from '../config/deployment.controller';
 import type { LivenessReport } from '../health/health.controller';
 import type { WhoAmIResponse } from '../iam/whoami.controller';
 import {
@@ -72,6 +73,7 @@ import {
   introspectSchema,
   jwkSchema,
   jwksSchema,
+  deploymentSchema,
   livenessSchema,
   manifestUpsertSchema,
   permissionCatalogSchema,
@@ -169,6 +171,7 @@ export type _ResponseSchemasMirrorTheContracts = [
 
   // identity & ops
   Expect<Mirrors<typeof whoAmISchema, WhoAmIResponse>>,
+  Expect<Mirrors<typeof deploymentSchema, DeploymentDescription>>,
   Expect<Mirrors<typeof livenessSchema, LivenessReport>>,
   Expect<Mirrors<typeof readinessSchema, ReadinessReport>>,
 
