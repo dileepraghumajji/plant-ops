@@ -101,6 +101,8 @@ npm run release:migrate              # apply it
 
 A non-zero exit stops the workflow before the deploy step. **That is the entire ordering guarantee**: there is no path from a failed migration to an app swap.
 
+It also bounds its own shutdown. The first real release applied all seventeen migrations correctly, printed its summary, and then failed to exit for twenty-three minutes — a connection through the pooler that never closed. The schema was right the whole time; the deploy behind it simply never happened. A release step that hangs *after* succeeding is worse than one that fails, because nothing is wrong to find. It now exits regardless after fifteen seconds, preserving its exit code, and the job carries a twenty-minute `timeout-minutes` behind that.
+
 ### 3.3 Railway's own auto-deploy must stay off
 
 Railway can deploy on push from its GitHub integration. For `iam-api` that setting must be **disabled**. If it is on, a push deploys the app without waiting for the migration job, and §3.1's ordering — the one thing this pipeline exists to impose — silently stops holding.

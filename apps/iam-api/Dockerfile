@@ -64,7 +64,14 @@ COPY libs/iam-client/package.json        libs/iam-client/
 COPY libs/ui/package.json                libs/ui/
 COPY libs/web-kit/package.json           libs/web-kit/
 
-RUN --mount=type=cache,target=/root/.npm npm ci
+# `id=` is written out rather than left to default. BuildKit derives it from
+# `target` when omitted, which is why this builds locally and in the `image` CI
+# job — but Railway's Metal builder rejects the mount outright with "is missing
+# an id argument", and does so *after* `railway up --detach` has already
+# returned success. Naming it costs nothing and keeps one Dockerfile valid for
+# both builders. The id is shared with the prune stage below on purpose: same
+# npm cache, so the first stage warms it for the second.
+RUN --mount=type=cache,id=npm,target=/root/.npm npm ci
 
 COPY . .
 
@@ -105,7 +112,7 @@ COPY --from=build /workspace/apps/iam-api/dist ./
 # `npm install --omit=dev` alone would also work, and would be worse: it would
 # resolve every range against the registry on every build, which is precisely
 # the reproducibility this two-step keeps.
-RUN --mount=type=cache,target=/root/.npm \
+RUN --mount=type=cache,id=npm,target=/root/.npm \
     npm install --package-lock-only --omit=dev --no-audit --no-fund && \
     npm ci --omit=dev --no-audit --no-fund
 

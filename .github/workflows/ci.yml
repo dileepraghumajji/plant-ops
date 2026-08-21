@@ -239,6 +239,13 @@ jobs:
     # reviewer is configured when staging stops being a place to experiment.
     environment: staging
 
+    # A backstop, not a budget. The first real release applied its migrations in
+    # under a minute and then sat for twenty-three, because the tool had finished
+    # its work but the process would not exit — the deploy behind it never ran,
+    # and it took a human noticing to end it. `release-migrate` now bounds its
+    # own shutdown; this bounds everything else, including `railway up`.
+    timeout-minutes: 20
+
     # Deployments do not overlap, and a superseded one is *not* cancelled
     # mid-flight — `cancel-in-progress` here could kill a runner between the
     # migration and the app swap, which is the one window where stopping half
@@ -321,6 +328,20 @@ jobs:
         # service — if it is on, a push deploys the app without waiting for the
         # migration step above, which is precisely the ordering this job exists
         # to impose (`docs/ops-runbook.md` §3).
+        #
+        # **Not `--detach`, and that is the point of this step.** Detached,
+        # `railway up` returns 0 as soon as the tarball is uploaded — before the
+        # image is built, let alone deployed. A Dockerfile that Railway's
+        # builder rejects then fails minutes later while this workflow has
+        # already gone green, which is a pipeline reporting success for work it
+        # never observed. Attached, the CLI streams the build and exits non-zero
+        # when it fails, so a red run means a failed deploy and a green one
+        # means the service actually took the image.
+        #
+        # Attached means this step waits, so it depends on the job's
+        # `timeout-minutes` above to bound a build wedged on Railway's side —
+        # without that backstop this would hold the runner, and the
+        # `release-staging` concurrency group with it, for six hours.
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
@@ -328,7 +349,7 @@ jobs:
           railway up \
             --service "${{ vars.RAILWAY_SERVICE }}" \
             --environment "${{ vars.RAILWAY_ENVIRONMENT }}" \
-            --detach --yes
+            --yes
 
       # `admin-web` is not deployed from here. Vercel's GitHub integration
       # builds it from the root `vercel.json` on the same push, and it is safe
