@@ -248,6 +248,17 @@ jobs:
           DATABASE_DIRECT_URL: ${{ secrets.STAGING_DATABASE_DIRECT_URL }}
           DATABASE_SSL: 'true'
           DATABASE_CA_CERT: ${{ vars.STAGING_DATABASE_CA_CERT }}
+          # The exception to "the release job holds no secrets", and it is
+          # temporary by construction. Migration 0011 seeds the platform
+          # identity by hashing this value (Doc 07 §8); it runs exactly once in
+          # the life of a database and is a no-op on every release after. So
+          # this secret is set for the first release of a new environment and
+          # **deleted immediately afterwards** — `docs/ops-runbook.md` §6.
+          #
+          # Passing it unconditionally is safe: once 0011 is applied,
+          # `release-migrate` never looks at the variable, and a deleted secret
+          # resolves to the empty string rather than failing the expression.
+          PLATFORM_BOOTSTRAP_SECRET: ${{ secrets.PLATFORM_BOOTSTRAP_SECRET }}
         run: npm run release:migrate
 
       - name: Deploy iam-api to Railway

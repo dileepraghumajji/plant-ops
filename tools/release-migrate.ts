@@ -183,9 +183,15 @@ function assertBootstrapSecretIfSeeding(outstanding: readonly string[]): void {
   throw new Error(
     `${BOOTSTRAP_MIGRATION_NAME} has not been applied to this database, and it ` +
       `seeds the platform identity from ${BOOTSTRAP_SECRET_ENV} (Doc 07 §8).\n\n` +
+      // Three cases, not two. CI resolves a missing secret to the empty string
+      // rather than omitting the variable, so "set but blank" is the shape an
+      // operator actually hits — and reporting it as "shorter than 32
+      // characters" would send them looking for a password they never set.
       (secret === undefined
         ? `${BOOTSTRAP_SECRET_ENV} is not set.`
-        : `${BOOTSTRAP_SECRET_ENV} is shorter than ${BOOTSTRAP_SECRET_MIN_LENGTH} characters.`) +
+        : secret.trim() === ''
+          ? `${BOOTSTRAP_SECRET_ENV} is set but empty — check that the secret exists in the environment this job runs under.`
+          : `${BOOTSTRAP_SECRET_ENV} is shorter than ${BOOTSTRAP_SECRET_MIN_LENGTH} characters.`) +
       '\n\nSupply it for this one release, then remove it from the release job and rotate\n' +
       'the credential — docs/ops-runbook.md §6. Every subsequent release runs without it.',
   );
