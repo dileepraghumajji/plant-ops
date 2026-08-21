@@ -8,6 +8,22 @@ open that wants a decision rather than a guess.
 
 ---
 
+## Where things stand
+
+| Session | Status |
+|---|---|
+| 41 — images, proxy, migration runner | merged, CI green (PR #45) |
+| 42 — offline bundle & first-boot bootstrap | merged, CI green (PR #46) |
+| 43 — manifests as release artifacts | merged, CI green (PR #47) |
+| 44 — single-tenant deployment mode | merged, CI green (PR #48) |
+| 45 — on-prem role & break-glass | **not started — needs a decision, see the last section** |
+
+Every session was verified by running the thing, not by reading it: a real stack
+from real images for 41, a real install from a real tarball for 42 and 44, the
+applier inside its own container for 43. The main branch is green.
+
+---
+
 ## Session 41 — Container images for both apps, proxy, and migration runner
 
 **Branch:** `session-41-images-proxy-migrator` → merged to `main`
@@ -208,3 +224,28 @@ and a second `./bootstrap.sh` changes nothing and re-verifies green.
 2. **The organisation slug is written twice in `.env`** — once for the installer, once for the application — and `bootstrap.sh` refuses to proceed if they disagree. Deriving one from the other inside the compose file would remove the duplication and also remove the boot check that catches a genuinely wrong value. The duplication was chosen deliberately; worth confirming.
 3. **`GET /iam/deployment` is a new public endpoint.** It returns the mode and, in single-tenant mode, the pinned organisation's slug and display name — its own name, on its own login page. Doc 06 has not been amended to describe it; that belongs with the next docs pass.
 4. **A Session 43 miss surfaced here.** `libs/ui`'s icon-registry test reads the IAM manifest by path, and moving the manifest did not mark `libs/ui` as affected — so it passed CI on a file that no longer existed. Fixed. Worth deciding whether tests that read files outside their own project should declare them as Nx inputs.
+
+---
+
+## Session 45 — not started. It needs a decision that is not mine to make.
+
+**Status:** blocked on a design question, deliberately left for review rather than guessed at overnight.
+
+Sessions 41–44 are merged and CI-green. Session 45 ("restricted on-prem platform role & break-glass recovery") is well-specified in most respects — Doc 11 §6.4 even lists the exact permission keys, all of which already exist in migration 0017, so the role itself is a seed and no new permission is invented. What is unresolved is **who is bound to that role**, and the roadmap's own wording pulls two ways:
+
+- It names `libs/db/src/migrations/0019-onprem-platform-role.ts` as the thing that "seeds the role" — but a migration runs in both deployment modes and cannot read `DEPLOYMENT_MODE`.
+- It also says the role is "seeded only in `single_tenant` mode", and lists `tools/bootstrap-install.mjs` as the thing that seeds it.
+
+Those reconcile if "seeded" means *granted*, but that surfaces the real question:
+
+**The role carries `iam.platform.*` keys, so it lives in the platform tenant and is bound at the platform scope root. The client's IT are users of the *client* tenant.** A `role_binding` names a role, a subject and a scope node that all belong to one client, so a client-tenant user cannot be bound to a platform-tenant role. Giving the on-prem operator this role therefore means **creating a second human identity, in the platform tenant, at install** — with its own password, in `.env`, alongside the client administrator's. That is a real product decision (two accounts on the box, two passwords to rotate, two things to explain in the install guide), and it is not stated anywhere in Doc 11 or the roadmap.
+
+Three ways to go, and I would want your call:
+
+1. **Create a platform-tenant operator at install.** Truest to §6.4. Costs a second identity in `.env` and a section in the install guide. Needs a small provisioning path — `POST /iam/users` then `POST /iam/role-bindings` as the platform account — which does not exist as a single call today (the platform-admin manual already calls this out as a known rough edge).
+2. **Bind the restricted role to nobody at install, and ship it as a definition only.** The migration creates the role; an operator who genuinely needs platform visibility is walked through binding themselves in the runbook. Cheapest, and honest, but it means the capability §6.4 promises is not actually delivered by the install.
+3. **Drop the separate role and grant the reads to the client admin instead.** Contradicts the tier split — `iam.platform.*` on a client-tenant role — so I would not do this without you saying so explicitly.
+
+Separately, Doc 11 §12 decision 4 is still formally open (break-glass as an audited host command versus granting `iam.platform.client.admin.create` in the role). §6.4 and the roadmap both pick the command, so I would build that unless you say otherwise — but it is worth knowing you have a live choice there, and the doc itself says the permission is "the better 3am experience".
+
+**Nothing is half-built.** No branch, no partial migration, no dangling 0019. Session 45 starts clean whenever you have picked.
