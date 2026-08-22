@@ -104,6 +104,16 @@ COPY --chown=node:node tools/apply-manifests.ts ./apply-manifests.ts
 COPY --chown=node:node tools/iam-api-client.ts ./iam-api-client.ts
 COPY --chown=node:node deploy/manifests/ ./manifests/
 
+# Break-glass recovery (roadmap Session 45, Doc 11 §6.4).
+#
+# Here rather than in the API image for a reason that is nearly the opposite of
+# the manifest applier's: that one needs the API *serving*, and this one is what
+# you run when it is not. It talks to the database directly as the owning role,
+# which is a credential only this container is given — and it is the container an
+# operator already invokes by hand, so `docker compose run --rm --entrypoint tsx
+# migrate break-glass-admin.ts …` needs nothing new to exist.
+COPY --chown=node:node tools/break-glass-admin.ts ./break-glass-admin.ts
+
 USER node
 
 # `ENTRYPOINT` rather than `CMD`, so arguments passed to `docker run` land on

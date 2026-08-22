@@ -152,6 +152,18 @@ export default [
       // Migrations legitimately set the context to write their own seed data,
       // since FORCE'd policies apply to the migration role too (Doc 07 §5.1).
       '**/migrations/**',
+      // The break-glass recovery command (roadmap Session 45, Doc 11 §6.4), for
+      // the same reason as migrations and no other: it is a *host* command that
+      // runs as the owning role with no application, no request and therefore no
+      // verified claims in existence — `applyRlsContext()` takes an unforgeable
+      // `VerifiedClaims`, and there is nothing here that could produce one.
+      //
+      // Named as one file rather than `tools/**`. The rule is about provenance:
+      // the danger is a context derived from something a caller sent, and this
+      // file derives it from a slug in argv *after* verifying the operator holds
+      // the platform credential against its stored hash. A directory-wide
+      // exception would let the next tool skip that argument entirely.
+      '**/tools/break-glass-admin.ts',
       // Test plumbing and specs build fixtures across tenants deliberately.
       '**/testing/**',
       '**/*.spec.ts',

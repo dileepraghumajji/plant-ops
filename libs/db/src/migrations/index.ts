@@ -28,6 +28,7 @@ import { ServiceAccountAuth1786406400015 } from './0015-service-account-auth.js'
 import { BindingExpirySweep1786406400016 } from './0016-binding-expiry-sweep.js';
 import { IamPermissionSeed1786406400017 } from './0017-iam-permission-seed.js';
 import { PinnedClientLookup1786406400018 } from './0018-pinned-client-lookup.js';
+import { OnPremPlatformRole1786406400019 } from './0019-onprem-platform-role.js';
 
 export { ENUM_VALUES, Extensions1786406400001 } from './0001-extensions-enums.js';
 export { RegistryTables1786406400002 } from './0002-registry-tables.js';
@@ -103,6 +104,14 @@ export {
   IAM_PLATFORM_PERMISSION_SEED,
 } from './0017-iam-permission-seed.js';
 export { PinnedClientLookup1786406400018 } from './0018-pinned-client-lookup.js';
+export {
+  OnPremPlatformRole1786406400019,
+  ONPREM_AUDIT_ACTIONS,
+  ONPREM_ROLE_NAME,
+  ONPREM_ROLE_PERMISSION_KEYS,
+  ONPREM_SERVICE_ACCOUNT_KEY,
+  ONPREM_SERVICE_ACCOUNT_NAME,
+} from './0019-onprem-platform-role.js';
 
 export const migrations = [
   Extensions1786406400001,
@@ -123,4 +132,5 @@ export const migrations = [
   BindingExpirySweep1786406400016,
   IamPermissionSeed1786406400017,
   PinnedClientLookup1786406400018,
+  OnPremPlatformRole1786406400019,
 ] as const;

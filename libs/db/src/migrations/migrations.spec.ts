@@ -59,6 +59,11 @@ describe('migration chain', () => {
       // `security definer` function over `client` (0003) whose policies were
       // written by 0007, and nothing depends on it.
       'PinnedClientLookup1786406400018',
+      // Session 45's restricted on-prem platform role. It maps keys migration
+      // 0017 seeds onto a role in the platform tenant 0011 creates, and — in
+      // `single_tenant` mode only — binds a service account to it at the
+      // platform scope root, so it can only run after both.
+      'OnPremPlatformRole1786406400019',
     ]);
   });
 

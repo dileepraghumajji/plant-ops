@@ -5,6 +5,8 @@
 #   ./bootstrap.sh                          install, or resume an install
 #   ./bootstrap.sh --verify                 check a finished installation
 #   ./bootstrap.sh --rotate-platform-secret retire the one-time credential
+#   ./bootstrap.sh --onprem-credential      issue the restricted operator credential
+#   ./bootstrap.sh --break-glass ...        recover a locked-out administrator
 #
 # ## What it asks of the host
 #
@@ -71,7 +73,11 @@ case "${1:-}" in
   --verify) MODE=verify ;;
   --rotate-platform-secret) MODE=rotate ;;
   --apply-manifests) MODE=manifests ;;
-  *) die "unknown option '$1' — expected --verify, --apply-manifests or --rotate-platform-secret" ;;
+  --onprem-credential) MODE=onprem ;;
+  --break-glass) MODE=breakglass; shift ;;
+  *) die "unknown option '$1'. Expected one of:
+  --verify  --apply-manifests  --rotate-platform-secret
+  --onprem-credential  --break-glass" ;;
 esac
 
 command -v docker >/dev/null 2>&1 || die 'docker is not installed or not on PATH.'
@@ -152,7 +158,7 @@ as PLANTOPS_CLIENT_SLUG (\"$CLIENT_SLUG\")."
 Set both to the same value."
 fi
 
-# ── Verify / rotate: no installation steps, just the container call ─────────
+# ── Everything that is not an install: no setup steps, just a container call ─
 
 run_installer() {
   # Copied in rather than mounted: a bind mount would need an absolute host path
@@ -182,6 +188,41 @@ apply_manifests() {
 if [ "$MODE" = 'rotate' ]; then
   step 'Rotating the platform credential'
   run_installer rotate || die 'rotation failed.'
+  exit 0
+fi
+
+# The restricted on-prem operator's credential (roadmap Session 45, Doc 11 §6.4).
+# The identity is provisioned by migration 0019 at install; this is what turns it
+# into something that can authenticate, and it is separate from the install for
+# the reason `bootstrap-install.mjs` gives — issuing it on every run would make
+# a second `./bootstrap.sh` silently invalidate the credential in use.
+if [ "$MODE" = 'onprem' ]; then
+  step 'Issuing the on-prem operator credential'
+  run_installer onprem-credential || die 'the credential was not issued.'
+  exit 0
+fi
+
+# Break-glass recovery (roadmap Session 45, Doc 11 §6.4, §12 decision 4).
+#
+# Unlike everything else here this does *not* go through the API: it is what you
+# run when the console will not let anybody in, so it must not depend on being
+# able to log in. It runs in the `migrate` container — the operations image,
+# which already holds the owning database credentials and the transpiler, and is
+# the one service that legitimately receives PLATFORM_BOOTSTRAP_SECRET. A service
+# of its own would have been the same image with the same environment under a
+# second name.
+#
+# It refuses unless .env carries the *current* platform credential, which a
+# finished installation deliberately does not (Doc 07 §8) — so put it back for
+# the length of the recovery and remove it again, exactly as an upgrade does.
+#
+#   ./bootstrap.sh --break-glass --client <slug> --email <address> [--reason "why"]
+if [ "$MODE" = 'breakglass' ]; then
+  [ "$#" -gt 0 ] || die 'break-glass needs arguments:
+
+  ./bootstrap.sh --break-glass --client <slug> --email <address> [--reason "why"]'
+  step 'Break-glass administrator recovery'
+  dc run --rm --entrypoint tsx migrate break-glass-admin.ts "$@" || die 'recovery failed.'
   exit 0
 fi
 
@@ -379,6 +420,13 @@ DO THIS NOW, before you close this terminal:
          chmod 600 .env
 
   3. Sign in and change the administrator's password. It is in .env too.
+
+Optional, if your own IT want read-only visibility of what is installed:
+
+    ./bootstrap.sh --onprem-credential
+
+  It issues a machine credential that can read the application catalog, this
+  organisation and the audit trail, and can change none of them. See README §4.
 
 Afterwards, to check this installation at any time:
 

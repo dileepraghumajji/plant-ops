@@ -690,7 +690,7 @@
 # Session 48 — Entitlements & offline licence
 **Goal:** Ceilings and term on the tenant, and a signed licence a self-hosted install can verify **offline** (Doc 11 §10). `client_application` carries `enabled` and a `config` jsonb today but no `expires_at` and no limits, so SaaS billing and self-hosted licensing have nowhere shared to read from.
 **Expected Output:** One entitlement source serving both commercial models, and an expiry that degrades rather than detonates.
-**Files to Create:** `libs/db/src/migrations/0019-entitlements.ts`, `apps/iam-api/src/licence/{licence.service.ts,licence.guard.ts}`, `tools/issue-licence.ts` (our signing side — never shipped in the bundle), `apps/iam-api-e2e/src/entitlements.e2e.ts`.
+**Files to Create:** `libs/db/src/migrations/0020-entitlements.ts` (**0020 is the next free number** — Session 45 took 0019 for the on-prem platform role), `apps/iam-api/src/licence/{licence.service.ts,licence.guard.ts}`, `tools/issue-licence.ts` (our signing side — never shipped in the bundle), `apps/iam-api-e2e/src/entitlements.e2e.ts`.
 **Files to Modify:** `libs/db/src/entities/client-application.entity.ts` and `client.entity.ts` (`expires_at`, `max_users`, `max_sites`), `apps/iam-api/src/clients/client-applications.service.ts`, `users/users.service.ts` and `users/bulk-upload.service.ts` (user ceiling), `scopes/scopes.service.ts` (site ceiling — **not** keyed off `scope_node.kind`, per Doc 11 §10.1 and ADR 0002), `libs/config/src/env.schema.ts` (licence path + our public key), `apps/admin-web/src/components/shell/header.tsx` (expiry banner).
 **Dependencies:** Sessions 15, 21, 44
 **Acceptance Criteria:**
