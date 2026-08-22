@@ -11,15 +11,31 @@ only on `@plantops/contracts`.
 
 | | URL | Used for |
 |---|---|---|
-| `createAppDataSource` | `DATABASE_URL` — the Supabase **pooler** | serving requests |
-| `createMigrationDataSource` | `DATABASE_DIRECT_URL` — the **direct** endpoint | migrations, release step |
+| `createAppDataSource` | `DATABASE_URL` | serving requests |
+| `createMigrationDataSource` | `DATABASE_DIRECT_URL` — always **direct**, never pooled | migrations, release step |
 
-The pooler runs PgBouncer/Supavisor in transaction mode: a server connection is
-handed back after every transaction, so nothing may pin session state to one.
-That is why `installExtensions` is off, `synchronize` is off (everywhere, in
-every environment — Doc 07 §3), and why nothing in this lib ever names a
-prepared statement. From Session 5 the RLS context is set with
-`set_config(..., true)` — transaction-local — for the same reason.
+Whether a pooler sits in front of `DATABASE_URL` is `DATABASE_POOLED`, and it is
+configuration rather than something inferred from the variable's name. On a
+managed host it is `true` and the two URLs are two endpoints; in the bundled
+stack and against a client's own server it is `false` and both URLs name the
+same Postgres, differing only in **role** (Doc 07 §5.1). The schema refuses the
+combination that describes a pooler which is not there — `true` with both URLs
+on one host and port.
+
+A pooler in transaction mode hands a server connection back after every
+transaction, so nothing may pin session state to one. That is why nothing in
+this lib ever names a prepared statement — node-postgres prepares only *named*
+queries, and TypeORM never supplies a name, so the guarantee is structural and
+`usesPreparedStatements()` reports the permission rather than flipping a driver
+flag that does not exist. `installExtensions` and `synchronize` are off for
+reasons of their own (extensions are migration-owned; schema changes are
+reviewed migrations — Doc 07 §3), and the RLS context is transaction-local
+because a per-request tenant is.
+
+TLS is `DATABASE_SSL`: `disable`, `verify-ca` (chain against
+`DATABASE_CA_CERT`, hostname not — a client's own certificate authority and an
+address it does not name), or `verify-full`. `true`/`false` still parse, as
+`verify-full`/`disable`. No mode encrypts without verifying.
 
 Both take a plain settings object rather than importing `@plantops/config`;
 `apps/iam-api` passes the validated env through.

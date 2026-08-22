@@ -23,7 +23,7 @@ describe('migrationEnvSchema', () => {
     expect(parsed.DATABASE_DIRECT_URL).toBe(VALID.DATABASE_DIRECT_URL);
     // Defaults, so a release job sets two variables rather than four.
     expect(parsed.NODE_ENV).toBe('development');
-    expect(parsed.DATABASE_SSL).toBe(false);
+    expect(parsed.DATABASE_SSL).toBe('disable');
   });
 
   it('reads no variable the full schema does not also define', () => {
@@ -45,12 +45,18 @@ describe('migrationEnvSchema', () => {
     expect(MIGRATION_ENV_KEYS as readonly string[]).toContain('DATABASE_CA_CERT');
   });
 
-  it.each(['JWT_PRIVATE_KEY', 'PLATFORM_BOOTSTRAP_SECRET', 'REDIS_URL', 'DATABASE_URL'])(
-    'does not require %s — a migration never uses it',
-    (key) => {
-      expect(MIGRATION_ENV_KEYS as readonly string[]).not.toContain(key);
-    },
-  );
+  it.each([
+    'JWT_PRIVATE_KEY',
+    'PLATFORM_BOOTSTRAP_SECRET',
+    'REDIS_URL',
+    'DATABASE_URL',
+    // Not a secret, and still not here: pooling describes what sits in front of
+    // the *app* URL, and DDL runs on the direct endpoint in every deployment
+    // (Doc 07 §2). A migrator that read the flag could only be misled by it.
+    'DATABASE_POOLED',
+  ])('does not require %s — a migration never uses it', (key) => {
+    expect(MIGRATION_ENV_KEYS as readonly string[]).not.toContain(key);
+  });
 
   it('still rejects a malformed connection string', () => {
     const result = migrationEnvSchema.safeParse({ DATABASE_DIRECT_URL: 'db.example.com' });
@@ -75,7 +81,7 @@ describe('migrationEnvSchema', () => {
     });
     expect(parsed).toEqual({
       NODE_ENV: 'production',
-      DATABASE_SSL: true,
+      DATABASE_SSL: 'verify-full',
       DATABASE_DIRECT_URL: VALID.DATABASE_DIRECT_URL,
     });
   });

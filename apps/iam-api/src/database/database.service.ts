@@ -1,11 +1,13 @@
 /**
  * The request-serving database connection (Doc 07 §2).
  *
- * One pool, against the **pooler** endpoint and as the non-owning app role —
- * the role that RLS actually constrains. `main.ts` has already proved that
- * role cannot bypass policy before this module is constructed; if that
- * assertion is ever moved or removed, this connection silently becomes a
- * connection that returns other tenants' rows (Doc 07 §5.1).
+ * One pool, against `DATABASE_URL` and as the non-owning app role — the role
+ * that RLS actually constrains. Whether a pooler sits in front of that URL is
+ * `DATABASE_POOLED`, stated in configuration rather than inferred from the
+ * variable's name (Doc 11 §8, gap 3). `main.ts` has already proved that role
+ * cannot bypass policy before this module is constructed; if that assertion is
+ * ever moved or removed, this connection silently becomes a connection that
+ * returns other tenants' rows (Doc 07 §5.1).
  *
  * Unlike Redis, an unreachable Postgres at boot is fatal: there is no degraded
  * mode for an IAM that cannot read its own tables, and starting anyway would
@@ -20,7 +22,7 @@ import {
   type OnModuleInit,
 } from '@nestjs/common';
 import type { EnvConfig } from '@plantops/config';
-import { createAppDataSource } from '@plantops/db';
+import { createAppDataSource, describeAppConnection } from '@plantops/db';
 import type { DataSource } from 'typeorm';
 import { ENV } from '../config/env.token';
 import { withTimeout } from '../common/with-timeout';
@@ -37,7 +39,11 @@ export class DatabaseService implements OnModuleInit, OnApplicationShutdown {
   async onModuleInit(): Promise<void> {
     if (!this.dataSource.isInitialized) {
       await this.dataSource.initialize();
-      this.logger.log('Database pool ready');
+      // The topology, not the endpoint. For a self-hosted install nobody can
+      // log into, the boot log is the only place that says whether this process
+      // believes it is behind a pooler — and DATABASE_POOLED is now a claim an
+      // operator makes rather than one the code infers (Doc 11 §8, gap 3).
+      this.logger.log(`Database pool ready — ${describeAppConnection(this.env)}`);
     }
   }
 

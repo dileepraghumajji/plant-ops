@@ -97,7 +97,7 @@ services:
       # subset of the environment — no signing key, no Redis, no application
       # credentials — so a compromised upgrade job holds none of them.
       DATABASE_DIRECT_URL: postgresql://${POSTGRES_USER:-plantops}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-plantops_iam}
-      DATABASE_SSL: 'false'
+      DATABASE_SSL: 'disable'
       # Read by migration 0011 on the very first run of a new database, and by
       # nothing afterwards. Doc 07 §8: rotate it immediately after first use.
       PLATFORM_BOOTSTRAP_SECRET: ${PLATFORM_BOOTSTRAP_SECRET:?PLATFORM_BOOTSTRAP_SECRET is required}
@@ -156,10 +156,14 @@ services:
       # refuses to boot if you do.
       DATABASE_URL: postgresql://${PLANTOPS_APP_ROLE:-plantops_app}:${PLANTOPS_APP_PASSWORD}@postgres:5432/${POSTGRES_DB:-plantops_iam}
       DATABASE_DIRECT_URL: postgresql://${POSTGRES_USER:-plantops}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-plantops_iam}
+      # One Postgres, no pooler in front of it — both URLs above name the same
+      # host and port, so the application talks to a real session. Stated rather
+      # than inferred (Doc 11 §8, gap 3).
+      DATABASE_POOLED: 'false'
       # The bundled Postgres speaks no TLS and never leaves the compose network.
-      # A client pointing this stack at their own database server sets both this
-      # and a CA — Session 46 is what makes that configuration honest.
-      DATABASE_SSL: 'false'
+      # A client pointing this stack at their own database server sets this and a
+      # CA in `.env` instead; `.env.template` says which mode fits which case.
+      DATABASE_SSL: 'disable'
       REDIS_URL: redis://redis:6379
       # Correct **because** of the proxy in front, and only because of it: it
       # replaces `X-Forwarded-For` rather than appending to it, so the address
