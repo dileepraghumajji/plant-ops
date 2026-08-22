@@ -59,7 +59,7 @@ Denials (`403`) never reveal whether the target exists across tenants.
 
 `INTERNAL_ERROR` carries a fixed, generic `message` — an unhandled exception's own text may quote a query, a connection string, or a row, none of which belongs in a response. The `requestId` is the correlation handle: it appears in the response, in the logged stack trace, and in any audit record for the request.
 
-`GET /health` and `GET /ready` (§13) are ops endpoints, not part of this surface: they answer with a readiness report and are exempt from the envelope, since a probe consumes status codes rather than error codes.
+`GET /health` and `GET /ready` (§13) are ops endpoints, not part of this surface: they answer with a readiness report and are exempt from the envelope, since a probe consumes status codes rather than error codes. `GET /iam/deployment` (§13) is unauthenticated for the same practical reason — a login screen reads it before anyone has a credential — but it *is* part of this surface and keeps the envelope.
 
 ---
 
@@ -238,5 +238,38 @@ There is no mutating route on this surface and there is not meant to be
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | /health | liveness |
+| GET | /health | liveness, and the build this process is |
 | GET | /ready | readiness (db, redis) |
+| GET | /iam/deployment | how many tenants this deployment serves |
+
+All three are unauthenticated, exempt from the throttle and exempt from the
+per-request transaction. `/health` and `/ready` are also outside the error
+envelope, since a probe consumes status codes rather than error codes (§2);
+`/iam/deployment` is inside it, because it is part of this surface rather than an
+orchestrator's probe.
+
+**`/health` reports `version`** — the `APP_VERSION` stamped into the image at
+build time (Doc 11 §8). Support for any installation begins with "what version
+are you on", and on a self-hosted one there is no dashboard to open and nobody
+to ask, so the answer has to come from the process itself over an endpoint that
+needs no credential. A version string is not a secret, and hiding it costs every
+legitimate support conversation an hour.
+
+```
+GET /health   →  { "status": "ok", "version": "1.4.2", "uptimeSeconds": 3600 }
+```
+
+**`/iam/deployment`** exists for the login screen, which has to know whether to
+ask for an organisation *before* anyone has a credential — and cannot know at
+build time, because one console build serves every deployment (Doc 11 §3).
+
+```
+GET /iam/deployment
+  saas           →  { "mode": "saas",          "client_slug": null,        "client_name": null }
+  single_tenant  →  { "mode": "single_tenant", "client_slug": "northgate", "client_name": "Northgate Foods" }
+```
+
+It decides a form field and nothing else. Hiding the tenant field is UX
+(Doc 09 §4); the control is that a single-tenant deployment **refuses** a login
+naming a different organisation, whether or not this endpoint was ever called
+(Doc 11 §6.5).
