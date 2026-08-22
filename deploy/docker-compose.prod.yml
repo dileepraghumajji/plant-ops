@@ -93,7 +93,7 @@ services:
     environment:
       NODE_ENV: production
       DATABASE_DIRECT_URL: postgresql://${POSTGRES_USER:-plantops}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-plantops_iam}
-      DATABASE_SSL: 'false'
+      DATABASE_SSL: 'disable'
 
   # ── The release's application catalog ──────────────────────────────────────
   #
@@ -154,13 +154,20 @@ services:
       # at boot that it is not the owner and refuses to start if it is.
       DATABASE_URL: postgresql://${PLANTOPS_APP_ROLE:-plantops_app}:${PLANTOPS_APP_PASSWORD:?PLANTOPS_APP_PASSWORD is required — see .env.template}@postgres:5432/${POSTGRES_DB:-plantops_iam}
       DATABASE_DIRECT_URL: postgresql://${POSTGRES_USER:-plantops}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-plantops_iam}
+      # One PostgreSQL, nothing in front of it: the two URLs above name the same
+      # host and port, and the application gets a real session rather than a
+      # pooled one. The schema requires this to be said out loud — left at the
+      # managed default, the stack would apply every PgBouncer restriction to a
+      # database that has no PgBouncer, and would describe itself that way in
+      # support bundles.
+      DATABASE_POOLED: 'false'
       # The bundled PostgreSQL speaks no TLS and never leaves this host's
       # private network. Fixed here rather than left to `.env` because the two
-      # halves have to agree: a `DATABASE_SSL=true` against a database that
-      # speaks plaintext fails at connect time with an error about the
-      # certificate. Session 46 is what makes pointing this stack at an external
-      # database server a configuration rather than an edit.
-      DATABASE_SSL: 'false'
+      # halves have to agree: a verifying mode against a database that speaks
+      # plaintext fails at connect time with an error about the certificate. A
+      # client pointing this stack at their own database server sets these two
+      # in `.env` instead — see `.env.template` for what verify-ca is for.
+      DATABASE_SSL: 'disable'
       REDIS_URL: redis://redis:6379
       # Correct **because** of the proxy in front, and only because of it: it
       # replaces `X-Forwarded-For` rather than appending to it, so the address

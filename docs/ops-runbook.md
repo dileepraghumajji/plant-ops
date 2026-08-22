@@ -50,7 +50,8 @@ Rules that are not negotiable:
 - **Never log the config object.** `redactEnv()` exists for this; `main.ts` uses it. `DATABASE_URL`, `DATABASE_DIRECT_URL`, `REDIS_URL`, `JWT_PRIVATE_KEY` and `PLATFORM_BOOTSTRAP_SECRET` are masked by it (Doc 07 §8, Doc 10 §8).
 - **`REDIS_KEY_PREFIX` must differ between environments** whenever they share a managed Redis instance. Without it, a staging deploy flushing `perms:*` silently invalidates production's grants cache.
 - **`TRUST_PROXY=true` on Railway, and only behind a proxy that rewrites `X-Forwarded-For`.** On without one, every caller picks their own rate-limit bucket by sending the header themselves, which is the same as having no IP rate limiting at all.
-- **`DATABASE_SSL=true`** against Supabase, **with `DATABASE_CA_CERT` set** — the pooler's chain is not publicly rooted, so TLS without the anchor cannot connect at all (§5.1). Both are `false`/unset only for a local docker-compose Postgres.
+- **`DATABASE_SSL=verify-full`** against Supabase, **with `DATABASE_CA_CERT` set** — the pooler's chain is not publicly rooted, so TLS without the anchor cannot connect at all (§5.1). `disable`/unset is for a local docker-compose Postgres only. (`true`/`false` still parse, as `verify-full`/`disable`; `verify-ca` is the on-premise mode — see Doc 07 §2.)
+- **`DATABASE_POOLED`** — `true` (the default) on Supabase, where `DATABASE_URL` is the transaction pooler. `false` wherever one Postgres serves both URLs, which is every on-premise install and local docker-compose. The schema refuses `true` when both URLs name the same host and port, because that combination claims a pooler that is not there.
 - **`OPENAPI_ENABLED`** is off by default in every environment including staging. The document is a build artefact (`npm run openapi`, committed at `apps/iam-api/openapi.json`), so an integrating team does not need a deployment to serve it.
 
 ---
@@ -89,7 +90,7 @@ A migration that renames a column in one step will break production for the leng
 
 `tools/release-migrate.ts`, behind `npm run release:migrate`. It differs from the developer's `npm run migration:run` in four ways that matter to a deploy:
 
-1. **It validates only the migration subset of the environment** — `DATABASE_DIRECT_URL`, `DATABASE_SSL`, `NODE_ENV`. The release job therefore never holds the signing key, the Redis URL, or the bootstrap secret.
+1. **It validates only the migration subset of the environment** — `DATABASE_DIRECT_URL`, `DATABASE_SSL`, `DATABASE_CA_CERT`, `NODE_ENV`. The release job therefore never holds the signing key, the Redis URL, or the bootstrap secret. `DATABASE_POOLED` is not in the subset either: it describes what sits in front of the *app* URL, and migrations always run direct.
 2. **It takes a Postgres advisory lock**, so a re-run of a stuck job cannot race the deploy it was re-run for.
 3. **It cannot revert.** Rolling a schema back under a running fleet is §10, done by a human with this document open.
 4. **`--check` reports without applying**, exiting non-zero if anything is pending.
@@ -193,7 +194,7 @@ Supabase offers three endpoints, and the obvious mapping — "the direct URL get
 | `DATABASE_URL` | Transaction pooler | 6543 |
 | `DATABASE_DIRECT_URL` | **Session pooler** | 5432 |
 
-Both also need `DATABASE_SSL=true` **and** `DATABASE_CA_CERT` — see below.
+Both also need `DATABASE_SSL=verify-full` **and** `DATABASE_CA_CERT` — see below. Leave `DATABASE_POOLED` at its `true` default: on Supabase there genuinely is a pooler, and the two variables above are two different endpoints on it.
 
 **The direct connection is IPv6-only** unless you buy the dedicated IPv4 add-on, and **GitHub Actions runners are IPv4-only**. Point `DATABASE_DIRECT_URL` at `db.<ref>.supabase.co` and the migration job simply cannot reach it — failing with a connection error that reads like an outage rather than an addressing problem. Check what you have before choosing:
 
@@ -214,18 +215,20 @@ DATABASE_DIRECT_URL=postgresql://plantops.<ref>:<owner-pw>@aws-<n>-<region>.pool
 
 The database is **`postgres`**, not `plantops_iam` — that name is local-only. The migrations create schema `iam` inside whatever database you connect to.
 
-**TLS needs a trust anchor, and without one there is no working configuration.** Measured against `aws-0-ap-south-1.pooler.supabase.com:5432`: the server presents `CN=*.pooler.supabase.com`, issued by `Supabase Intermediate 2021 CA` under a **self-signed** `Supabase Root 2021 CA`. Node's default store does not contain that root, so a connection with `rejectUnauthorized: true` fails with `SELF_SIGNED_CERT_IN_CHAIN` — while `DATABASE_SSL=false` would send the database password in cleartext across the public internet.
+**TLS needs a trust anchor, and without one there is no working configuration.** Measured against `aws-0-ap-south-1.pooler.supabase.com:5432`: the server presents `CN=*.pooler.supabase.com`, issued by `Supabase Intermediate 2021 CA` under a **self-signed** `Supabase Root 2021 CA`. Node's default store does not contain that root, so a connection with `rejectUnauthorized: true` fails with `SELF_SIGNED_CERT_IN_CHAIN` — while `DATABASE_SSL=disable` would send the database password in cleartext across the public internet.
 
 So set both:
 
 ```
-DATABASE_SSL=true
+DATABASE_SSL=verify-full
 DATABASE_CA_CERT=<contents of prod-ca-2021.crt>
 ```
 
 Download it from **Project Settings → Database → SSL Configuration → Download certificate**. It is a public certificate, not a secret — it is the anchor verification is performed *against*, not a credential. Verified against this project's pooler: the chain validates and `authorized` is true.
 
 There is deliberately **no** setting that disables certificate verification. The usual `rejectUnauthorized: false` workaround encrypts the connection while authenticating nothing, which would leave an active attacker able to sit between the API and the one component Doc 07 §5.1 treats as the last line of defence. `libs/db/src/data-source.ts` builds the TLS options in one function for both connections so the app and the migrations cannot end up trusting different things.
+
+`verify-ca` is the third mode and is not that escape hatch: it verifies the chain against `DATABASE_CA_CERT` — which it *requires* — and relaxes only the hostname check. It exists for a client's own Postgres, holding a certificate from the client's own authority, reached by a compose service name or a virtual address the certificate never named. It is the wrong answer here, where the host is exactly what the certificate says it is.
 
 **Never put Supabase's `postgres` role in either variable.** Measured on a fresh project: `rolsuper = f` but `rolbypassrls = t`. It would pass a naive superuser check while bypassing every policy in Doc 07 §6 — which is exactly why the boot check in §1 tests table ownership as well.
 

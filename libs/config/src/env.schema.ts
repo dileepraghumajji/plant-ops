@@ -196,6 +196,24 @@ function hasScheme(value: string, schemes: string[]): boolean {
 }
 
 /**
+ * The `host:port` a connection string reaches, lowercased — the part that says
+ * *which server*, with the role, the password and the database name left out.
+ *
+ * Returns the whole string when it will not parse. That case cannot arrive from
+ * `envSchema`, where {@link postgresUrl} has already rejected it, and returning
+ * something unequal-to-everything is the right shape for the one caller: a
+ * comparison, which should not claim two endpoints are the same because neither
+ * could be read.
+ */
+function endpointOf(connectionString: string): string {
+  try {
+    return new URL(connectionString).host.toLowerCase();
+  } catch {
+    return connectionString;
+  }
+}
+
+/**
  * PEM key material. Secret stores and `.env` files routinely carry keys with
  * literal `\n` sequences instead of real newlines; unescape before validating
  * so a correct key is not rejected for its transport encoding.
@@ -285,6 +303,56 @@ const boolish = (fallback: boolean) =>
     .transform((value) => value === 'true' || value === '1')
     .default(fallback);
 
+/**
+ * How the database connection is protected, and how far the server is
+ * authenticated (Doc 07 §2).
+ *
+ * A boolean was the right shape while every deployment was either Supabase or
+ * a docker-compose Postgres on the same host. It stops being the right shape
+ * the moment a client terminates TLS at *their* Postgres: what they need is
+ * not yes-or-no but a trust anchor and a decision about the hostname, and a
+ * boolean can express neither (Doc 11 §8, gap 3).
+ *
+ * The three values are libpq's, minus the ones that would weaken the model:
+ *
+ * - `disable` — no TLS. Right for a bundled container on a private docker
+ *   network, and for nothing that crosses a machine boundary.
+ * - `verify-ca` — chain verified, hostname **not**. The on-premise case: an
+ *   internal CA issues a certificate for the Postgres host, and the connection
+ *   string reaches it by a compose service name, a VIP, or an address the
+ *   certificate was never going to name. Requires `DATABASE_CA_CERT` (see the
+ *   refinement below) — against the public store it would accept any
+ *   publicly-trusted certificate for any host, which is barely verification.
+ * - `verify-full` — chain **and** hostname. The default answer whenever the
+ *   connection leaves the host, and what `DATABASE_SSL=true` has always meant.
+ *
+ * libpq's `allow`, `prefer` and `require` are deliberately absent. All three
+ * encrypt without authenticating, which against the component Doc 07 §5.1
+ * treats as the last line of defence buys secrecy from a passive observer and
+ * nothing at all from an active one. `verify-ca` with the client's own CA is
+ * the answer to every case they would otherwise be reached for.
+ *
+ * `true`/`1` and `false`/`0` remain accepted and mean `verify-full` and
+ * `disable`: every deployment written before this variable grew a third state
+ * keeps working, and keeps meaning exactly what it meant.
+ */
+export const DATABASE_SSL_MODES = ['disable', 'verify-ca', 'verify-full'] as const;
+
+/** See {@link DATABASE_SSL_MODES}. */
+export type DatabaseSslMode = (typeof DATABASE_SSL_MODES)[number];
+
+const databaseSslMode = z
+  .enum([...DATABASE_SSL_MODES, 'true', 'false', '1', '0'], {
+    error:
+      'DATABASE_SSL must be one of: disable, verify-ca, verify-full (true/1 and false/0 are still accepted, and mean verify-full and disable)',
+  })
+  .transform((value): DatabaseSslMode => {
+    if (value === 'true' || value === '1') return 'verify-full';
+    if (value === 'false' || value === '0') return 'disable';
+    return value;
+  })
+  .default('disable');
+
 const millis = (label: string, fallback: number) =>
   z.coerce
     .number({ error: `${label} must be a number of milliseconds` })
@@ -358,13 +426,38 @@ export const envSchema = z.object({
     .default('0.0.0-dev'),
 
   /**
-   * Application connection — the Supabase **pooler** endpoint. TypeORM must
-   * disable prepared statements against PgBouncer transaction mode (Doc 07 §2).
+   * Application connection (Doc 07 §2).
+   *
+   * On a managed host this is the **pooler** endpoint; on an installation with
+   * a single Postgres it is that Postgres, and it is then the same endpoint as
+   * `DATABASE_DIRECT_URL` — a supported configuration, not a degraded one. What
+   * the two URLs must always differ in is the **role** (Doc 07 §5.1): the app
+   * URL carries the non-owning role every RLS policy applies to, the direct URL
+   * carries the owner. `assertRlsEnforceable` refuses to boot otherwise.
    */
   DATABASE_URL: postgresUrl('DATABASE_URL'),
   /** **Direct** (non-pooled) endpoint; migrations only (Doc 07 §2). */
   DATABASE_DIRECT_URL: postgresUrl('DATABASE_DIRECT_URL'),
-  DATABASE_SSL: boolish(false),
+  /**
+   * Is there a transaction-mode pooler in front of `DATABASE_URL`?
+   *
+   * The one fact the data source used to *infer* (Doc 11 §8, gap 3). Every
+   * pooler-safety constraint — no server-side prepared statements, no session
+   * `set_config`, no `CREATE EXTENSION` at connect — exists because a PgBouncer
+   * server connection is handed to another client after each transaction. On an
+   * on-premise Postgres with no pooler in front of it, none of that is true;
+   * the code simply had no way to be told so, because it read the deployment's
+   * topology out of the *name* of a variable.
+   *
+   * Now it is stated. `true` is the default and keeps managed behaviour exactly
+   * as it was, so no existing deployment changes by upgrading; a single-endpoint
+   * install sets `false` and the refinement below makes sure it is asked (see
+   * {@link createAppDataSourceOptions} in `@plantops/db` for what follows from
+   * it).
+   */
+  DATABASE_POOLED: boolish(true),
+  /** TLS to the database. See {@link DATABASE_SSL_MODES}. */
+  DATABASE_SSL: databaseSslMode,
   /**
    * Trust anchor for the database's TLS certificate, PEM.
    *
@@ -375,8 +468,8 @@ export const envSchema = z.object({
    * `CN=*.pooler.supabase.com`, issued by `Supabase Intermediate 2021 CA`
    * under a self-signed `Supabase Root 2021 CA`. Node rejects that chain with
    * `SELF_SIGNED_CERT_IN_CHAIN`, so without this variable there is no working
-   * value for `DATABASE_SSL` at all: `true` cannot connect, and `false` would
-   * send the password in cleartext.
+   * value for `DATABASE_SSL` at all: `verify-full` cannot connect, and
+   * `disable` would send the password in cleartext.
    *
    * Supplying the CA is the third option, and the only good one — verification
    * stays **on** (`rejectUnauthorized: true`), it is simply performed against
@@ -384,6 +477,10 @@ export const envSchema = z.object({
    * the connection while authenticating nothing, which in a system whose whole
    * premise is that the database is the last line of defence (Doc 07 §5.1) is
    * the wrong trade.
+   *
+   * The same anchor is what makes `verify-ca` usable for a client running their
+   * own Postgres behind their own internal CA, and the refinement below
+   * *requires* it there — that mode's whole point is a private root.
    *
    * Optional: a local docker-compose Postgres speaks no TLS, and a host whose
    * certificate chains to a public root needs no extra anchor.
@@ -659,10 +756,62 @@ export const envSchema = z.object({
    * says nothing at all.
    */
   .refine(
-    (env) => env.DATABASE_CA_CERT === undefined || env.DATABASE_SSL,
+    (env) => env.DATABASE_CA_CERT === undefined || env.DATABASE_SSL !== 'disable',
     {
       message:
-        'DATABASE_CA_CERT is set but DATABASE_SSL is false — the certificate would be ignored and the connection sent in cleartext. Set DATABASE_SSL=true, or remove the certificate.',
+        'DATABASE_CA_CERT is set but DATABASE_SSL is disable — the certificate would be ignored and the connection sent in cleartext. Set DATABASE_SSL=verify-full (or verify-ca), or remove the certificate.',
+    },
+  )
+  /**
+   * `verify-ca` without an anchor is not verification worth the name.
+   *
+   * The mode exists for one situation: a client's own Postgres, holding a
+   * certificate from the client's own CA, reached by a name that certificate
+   * does not carry — a compose service, a VIP, an internal address. Skipping the
+   * hostname check there is a considered trade, and the private root is what
+   * still makes it a check at all.
+   *
+   * Against the *system* store the same setting accepts any publicly-trusted
+   * certificate for any host on the internet, which is a materially weaker
+   * position than `verify-full` and looks in configuration like a marginally
+   * different one. So it is refused: an operator with a public chain wants
+   * `verify-full` and can have it, and an operator with a private one has the
+   * certificate this asks for.
+   */
+  .refine(
+    (env) => env.DATABASE_SSL !== 'verify-ca' || env.DATABASE_CA_CERT !== undefined,
+    {
+      message:
+        'DATABASE_SSL=verify-ca requires DATABASE_CA_CERT — without a trust anchor it would verify against the public store, accepting any publicly-trusted certificate for any host. Supply your CA, or use verify-full.',
+    },
+  )
+  /**
+   * A pooler that is not there.
+   *
+   * When both URLs name the same host and port they are one endpoint, and one
+   * endpoint is not a pooler plus a direct connection — it is a database with
+   * nothing in front of it, which is exactly what an on-premise install looks
+   * like (Doc 11 §8, gap 3). Left at the managed default, such an install runs
+   * under every PgBouncer constraint for no reason and, worse, describes itself
+   * in logs and support bundles as something it is not.
+   *
+   * Checked on host and port rather than on the whole string because the two
+   * URLs legitimately differ in their *role* even against a single Postgres —
+   * `plantops_app` and `plantops` (Doc 07 §5.1) — so comparing the strings would
+   * find a pooler in every docker-compose stack we ship.
+   *
+   * The other way this refinement fires is the mistake `docs/ops-runbook.md` §3
+   * warns about: both variables pointed at the transaction pooler, leaving DDL
+   * to run through PgBouncer. The message names both readings, because from here
+   * the two are indistinguishable and only the operator knows which they meant.
+   */
+  .refine(
+    (env) =>
+      !env.DATABASE_POOLED ||
+      endpointOf(env.DATABASE_URL) !== endpointOf(env.DATABASE_DIRECT_URL),
+    {
+      message:
+        'DATABASE_POOLED is true but DATABASE_URL and DATABASE_DIRECT_URL name the same host and port, so there is no pooler in front of this database. Set DATABASE_POOLED=false for a single Postgres — or point DATABASE_URL at the pooler and DATABASE_DIRECT_URL at the direct endpoint (Doc 07 §2).',
     },
   )
   /**
@@ -731,6 +880,11 @@ export const ENV_KEYS = Object.keys(envSchema.shape) as Array<keyof EnvConfig>;
  * carry different **roles** — the owner migrates, the app serves — so the
  * migrator having no way to reach the app's credentials is the arrangement
  * working, not a gap in it.
+ *
+ * `DATABASE_POOLED` is absent for a different reason: it describes what sits in
+ * front of the *app* URL, and the release step never touches that URL. DDL runs
+ * on the direct endpoint whatever the application's topology is (Doc 07 §2), so
+ * a migrator that read the flag could only be misled by it.
  */
 export const migrationEnvSchema = z.object({
   NODE_ENV: envSchema.shape.NODE_ENV,

@@ -17,7 +17,11 @@
  */
 
 import { DataSource, QueryFailedError } from 'typeorm';
-import { MIGRATIONS_TABLE_NAME, createMigrationDataSource } from '../data-source.js';
+import {
+  MIGRATIONS_TABLE_NAME,
+  createMigrationDataSource,
+  type DatabaseSslMode,
+} from '../data-source.js';
 import { IAM_SCHEMA, IAM_SCHEMA_TEST_LOCK_ID } from '../schema.js';
 
 /**
@@ -89,16 +93,33 @@ export interface IntegrationHarness {
 }
 
 /**
+ * `DATABASE_SSL` as this harness needs it, without pulling `@plantops/config`
+ * into `libs/db` (Doc 08 §2).
+ *
+ * The variable grew from a boolean to a mode in Session 46 and kept the old
+ * spellings, so a CI job or a developer's `.env` may hold either. Anything not
+ * recognised is `disable`, which is what a test database on localhost is: the
+ * alternative — guessing TLS — turns a typo into a connection failure with a
+ * certificate error, which is a long way from the truth.
+ */
+function sslModeFromEnv(): DatabaseSslMode {
+  const value = (process.env['DATABASE_SSL'] ?? '').trim();
+  if (value === 'verify-ca' || value === 'verify-full') return value;
+  return value === 'true' || value === '1' ? 'verify-full' : 'disable';
+}
+
+/**
  * Opens the migration connection (the direct endpoint — DDL under PgBouncer
  * transaction mode is a good way to lose a schema halfway) and returns the
  * helpers the suites share.
  */
 export async function connectHarness(): Promise<IntegrationHarness> {
   const dataSource = createMigrationDataSource({
-    // Migrations run over the direct endpoint; the app URL is unused here.
-    DATABASE_URL: DATABASE_DIRECT_URL as string,
+    // The direct endpoint and nothing else: `MigrationConnectionSettings` has
+    // no `DATABASE_URL` and no `DATABASE_POOLED`, because DDL never runs
+    // through a pooler in any deployment (Doc 07 §2).
     DATABASE_DIRECT_URL: DATABASE_DIRECT_URL as string,
-    DATABASE_SSL: process.env['DATABASE_SSL'] === 'true',
+    DATABASE_SSL: sslModeFromEnv(),
     NODE_ENV: 'test',
   });
   await dataSource.initialize();

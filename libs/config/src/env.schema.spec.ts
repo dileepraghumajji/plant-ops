@@ -5,6 +5,7 @@ import {
 } from '@plantops/contracts';
 import {
   BOOTSTRAP_SECRET_MIN_LENGTH,
+  DATABASE_SSL_MODES,
   DEFAULT_RATE_LIMIT_MAX_REQUESTS,
   DEFAULT_RATE_LIMIT_WINDOW_SECONDS,
   DEFAULT_READINESS_TIMEOUT_MS,
@@ -39,6 +40,18 @@ function validEnv(overrides: EnvSource = {}): EnvSource {
     ...overrides,
   };
 }
+
+/** Shaped like a trust anchor, and deliberately not one. */
+const CA_PEM = '-----BEGIN CERTIFICATE-----\nnot-a-real-ca\n-----END CERTIFICATE-----';
+
+/**
+ * One Postgres serving both connections — the on-premise and docker-compose
+ * shape. Two roles, one host and port (Doc 07 §5.1).
+ */
+const ONE_ENDPOINT = {
+  DATABASE_URL: 'postgresql://plantops_app:pw@postgres:5432/plantops_iam',
+  DATABASE_DIRECT_URL: 'postgresql://plantops:pw@postgres:5432/plantops_iam',
+} as const;
 
 function issuesOf(source: EnvSource): string[] {
   try {
@@ -266,16 +279,111 @@ describe('parseEnv — bootstrap secret and other defaults', () => {
     expect(env.NODE_ENV).toBe('development');
     expect(env.PORT).toBe(3000);
     expect(env.LOG_LEVEL).toBe('log');
-    expect(env.DATABASE_SSL).toBe(false);
+    expect(env.DATABASE_SSL).toBe('disable');
+    // The managed default, and the reason an existing deployment can upgrade
+    // into this schema without editing anything (Doc 11 §8, gap 3).
+    expect(env.DATABASE_POOLED).toBe(true);
   });
 
   it('parses boolean-ish flags', () => {
-    expect(parseEnv(validEnv({ DATABASE_SSL: 'true' })).DATABASE_SSL).toBe(true);
-    expect(parseEnv(validEnv({ DATABASE_SSL: '1' })).DATABASE_SSL).toBe(true);
-    expect(parseEnv(validEnv({ DATABASE_SSL: '0' })).DATABASE_SSL).toBe(false);
-    expect(issuesOf(validEnv({ DATABASE_SSL: 'yes' }))[0]).toContain(
-      'DATABASE_SSL',
+    expect(parseEnv(validEnv({ DATABASE_POOLED: 'true' })).DATABASE_POOLED).toBe(true);
+    expect(parseEnv(validEnv({ DATABASE_POOLED: '1' })).DATABASE_POOLED).toBe(true);
+    expect(parseEnv(validEnv({ DATABASE_POOLED: '0' })).DATABASE_POOLED).toBe(false);
+    expect(issuesOf(validEnv({ DATABASE_POOLED: 'yes' }))[0]).toContain(
+      'DATABASE_POOLED',
     );
+  });
+
+  describe('DATABASE_SSL (Doc 11 §8, gap 3)', () => {
+    it.each(DATABASE_SSL_MODES)('accepts %s', (mode) => {
+      // `disable` is the one mode a certificate may not accompany, which is a
+      // separate assertion below; here every mode is given what it needs.
+      const anchor = mode === 'disable' ? {} : { DATABASE_CA_CERT: CA_PEM };
+      expect(parseEnv(validEnv({ DATABASE_SSL: mode, ...anchor })).DATABASE_SSL).toBe(
+        mode,
+      );
+    });
+
+    it('keeps the boolean spellings meaning what they always meant', () => {
+      // The upgrade property. Every `.env`, CI job and secret store written
+      // before the variable grew a third state keeps its exact behaviour.
+      expect(parseEnv(validEnv({ DATABASE_SSL: 'true' })).DATABASE_SSL).toBe(
+        'verify-full',
+      );
+      expect(parseEnv(validEnv({ DATABASE_SSL: '1' })).DATABASE_SSL).toBe('verify-full');
+      expect(parseEnv(validEnv({ DATABASE_SSL: 'false' })).DATABASE_SSL).toBe('disable');
+      expect(parseEnv(validEnv({ DATABASE_SSL: '0' })).DATABASE_SSL).toBe('disable');
+    });
+
+    it.each([['yes'], ['require'], ['prefer'], ['allow']])(
+      'rejects %s',
+      (value) => {
+        // `require`, `prefer` and `allow` are libpq modes we deliberately do
+        // not offer: all three encrypt without authenticating the server.
+        expect(issuesOf(validEnv({ DATABASE_SSL: value }))[0]).toContain(
+          'DATABASE_SSL',
+        );
+      },
+    );
+
+    it('refuses verify-ca without a trust anchor', () => {
+      // Against the system store it would accept any publicly-trusted
+      // certificate for any host, while looking like a considered choice.
+      expect(issuesOf(validEnv({ DATABASE_SSL: 'verify-ca' }))[0]).toContain(
+        'DATABASE_SSL=verify-ca requires DATABASE_CA_CERT',
+      );
+    });
+
+    it('accepts verify-ca with one — the client-supplied Postgres', () => {
+      const env = parseEnv(
+        validEnv({ DATABASE_SSL: 'verify-ca', DATABASE_CA_CERT: CA_PEM }),
+      );
+      expect(env.DATABASE_SSL).toBe('verify-ca');
+      expect(env.DATABASE_CA_CERT).toContain('BEGIN CERTIFICATE');
+    });
+
+    it('refuses a certificate with TLS switched off', () => {
+      expect(
+        issuesOf(validEnv({ DATABASE_SSL: 'disable', DATABASE_CA_CERT: CA_PEM }))[0],
+      ).toContain('DATABASE_CA_CERT is set but DATABASE_SSL is disable');
+    });
+
+    it('needs no TLS configuration at all for the bundled container', () => {
+      // The whole of the on-premise default: one Postgres on a private
+      // network, and neither variable set.
+      const source = validEnv({ ...ONE_ENDPOINT, DATABASE_POOLED: 'false' });
+      delete source.DATABASE_SSL;
+      delete source.DATABASE_CA_CERT;
+      expect(parseEnv(source).DATABASE_SSL).toBe('disable');
+    });
+  });
+
+  describe('DATABASE_POOLED (Doc 11 §8, gap 3)', () => {
+    it('supports one endpoint for both URLs — the on-premise install', () => {
+      // The load-bearing case of the session: this is a supported, documented
+      // configuration and must parse without complaint.
+      const env = parseEnv(validEnv({ ...ONE_ENDPOINT, DATABASE_POOLED: 'false' }));
+      expect(env.DATABASE_POOLED).toBe(false);
+      expect(env.DATABASE_URL).not.toBe(env.DATABASE_DIRECT_URL);
+    });
+
+    it('refuses to claim a pooler that both URLs say is not there', () => {
+      expect(issuesOf(validEnv(ONE_ENDPOINT))[0]).toContain(
+        'DATABASE_POOLED is true but DATABASE_URL and DATABASE_DIRECT_URL name the same host and port',
+      );
+    });
+
+    it('compares endpoints, not roles or passwords', () => {
+      // A single Postgres still carries two *roles* (Doc 07 §5.1), so the two
+      // strings always differ. Comparing them would find a pooler everywhere.
+      expect(ONE_ENDPOINT.DATABASE_URL).not.toBe(ONE_ENDPOINT.DATABASE_DIRECT_URL);
+      expect(issuesOf(validEnv(ONE_ENDPOINT))).toHaveLength(1);
+    });
+
+    it('says nothing about a genuine pooler on a different port', () => {
+      // The managed shape: transaction pooler on 6543, session pooler on 5432.
+      expect(() => parseEnv(validEnv())).not.toThrow();
+    });
   });
 
   it.each([['staging'], ['prod']])('rejects unknown NODE_ENV %s', (value) => {
