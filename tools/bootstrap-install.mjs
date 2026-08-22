@@ -8,8 +8,10 @@
  * is the other half — Docker, database roles, migrations, readiness — and it is
  * what runs this.
  *
- *   node bootstrap-install.mjs provision  < .env
- *   node bootstrap-install.mjs verify     < .env
+ *   node bootstrap-install.mjs provision          < .env
+ *   node bootstrap-install.mjs verify             < .env
+ *   node bootstrap-install.mjs rotate             < .env
+ *   node bootstrap-install.mjs onprem-credential  < .env
  *
  * ## Why it runs *inside* a container
  *
@@ -56,6 +58,18 @@
 
 /** The account key migration 0011 seeds the platform identity under. */
 const PLATFORM_ACCOUNT_KEY = 'platform-bootstrap';
+
+/**
+ * The account key migration 0019 seeds the restricted on-prem operator under
+ * (roadmap Session 45, Doc 11 §6.4).
+ *
+ * It exists only in `single_tenant` mode, and it is created with a secret the
+ * migration generates and discards — so it authenticates as nobody until
+ * `onprem-credential` below rotates it and prints one. That is deliberate: the
+ * alternative was a second live credential sitting in `.env` for the life of the
+ * deployment beside the administrator's password.
+ */
+const ONPREM_ACCOUNT_KEY = 'onprem-operator';
 
 /**
  * Reached by service name on the stack's own network, through the proxy.
@@ -113,6 +127,9 @@ function configFrom(values, { requireSecret }) {
 
   const config = {
     bootstrapSecret: need('PLATFORM_BOOTSTRAP_SECRET', requireSecret),
+    // Not validated here: `libs/config` owns what a legal value is, and this
+    // reads it only to decide whether the on-prem operator should exist at all.
+    deploymentMode: values['DEPLOYMENT_MODE'] ?? 'saas',
     client: { name: need('PLANTOPS_CLIENT_NAME'), slug: need('PLANTOPS_CLIENT_SLUG') },
     admin: {
       email: need('PLANTOPS_ADMIN_EMAIL'),
@@ -418,6 +435,80 @@ async function rotatePlatformSecret(config) {
   );
 }
 
+/**
+ * Issues the on-prem operator's credential and prints it once
+ * (roadmap Session 45, Doc 11 §6.4).
+ *
+ * A separate command rather than a step of the install, and that is the whole
+ * design. Minting it during `provision` would mean a second `./bootstrap.sh`
+ * printed a *different* secret and quietly invalidated the one in use — which
+ * would break the property Session 42 spent the most effort on, that re-running
+ * the installer changes nothing.
+ *
+ * So the identity is provisioned by the migration and the credential is issued
+ * when somebody asks for it. Until then it exists and authenticates as nobody,
+ * which is the right default for a capability most installations never use.
+ *
+ * The rotation goes through the ordinary `POST /iam/service-accounts/:id/rotate`
+ * — the same endpoint `--rotate-platform-secret` uses — so re-issuing later is
+ * the same command, and the previous value stops working the instant it returns.
+ */
+async function issueOnPremCredential(config) {
+  if (config.deploymentMode !== 'single_tenant') {
+    throw new Error(
+      `DEPLOYMENT_MODE is "${config.deploymentMode}", and the on-prem operator ` +
+        'exists only in a single-tenant installation (Doc 11 §6.4). There is ' +
+        'nothing to issue here.',
+    );
+  }
+
+  const token = await platformToken(config.bootstrapSecret);
+  if (token === null) {
+    throw new Error(
+      'The platform credential was rejected. Put the *current* value into .env ' +
+        'for the length of this command — the one printed by ' +
+        '`./bootstrap.sh --rotate-platform-secret`, not the one the install started with.',
+    );
+  }
+
+  const accounts = await listAll(token, '/iam/service-accounts');
+  const operator = accounts.find((account) => account.account_key === ONPREM_ACCOUNT_KEY);
+  if (!operator) {
+    throw new Error(
+      `No service account with key "${ONPREM_ACCOUNT_KEY}" exists.\n\n` +
+        'It is created by migration 0019, and only when DEPLOYMENT_MODE is ' +
+        'single_tenant at the moment the migration runs. A database first ' +
+        'migrated in saas mode does not have it, and migrations do not re-run — ' +
+        'see deploy/README.md §4.',
+    );
+  }
+
+  const rotated = await request(API_BASE, `/iam/service-accounts/${operator.id}/rotate`, {
+    method: 'POST',
+    token,
+  });
+  if (rotated.status !== 200 || !rotated.payload?.account_secret) {
+    throw new Error(`could not issue the credential: ${reason(rotated)}`);
+  }
+
+  console.log(
+    '\nThe on-prem operator credential has been issued. Any previous value no ' +
+      'longer works.\n\n' +
+      '  account_key     ' +
+      ONPREM_ACCOUNT_KEY +
+      '\n  account_secret  ' +
+      rotated.payload.account_secret +
+      '\n\n' +
+      'This is the only time it will be shown.\n\n' +
+      'What it can do: read the application catalog, this organisation and its\n' +
+      'enabled applications, and the audit trail — through the API, with\n' +
+      'POST /api/auth/token. What it cannot do: change any of them. It is a\n' +
+      'machine identity, so it does not sign in to the console.\n\n' +
+      'Store it where your organisation keeps credentials, and remove\n' +
+      'PLATFORM_BOOTSTRAP_SECRET from .env again.',
+  );
+}
+
 // ── Entry ───────────────────────────────────────────────────────────────────
 
 async function readStdin() {
@@ -479,11 +570,28 @@ async function provision(config) {
       : `Administrator ${config.admin.email} already exists for this client — ` +
           'left as it is, password included.',
   );
+
+  // Reported, never issued here — see `issueOnPremCredential` for why the
+  // credential is a separate, explicit command.
+  if (config.deploymentMode === 'single_tenant') {
+    const accounts = await listAll(token, '/iam/service-accounts');
+    const operator = accounts.find(
+      (account) => account.account_key === ONPREM_ACCOUNT_KEY,
+    );
+    console.log(
+      operator
+        ? 'The restricted on-prem operator identity is provisioned and holds no ' +
+            'usable credential yet. Run `./bootstrap.sh --onprem-credential` if ' +
+            'your IT need read-only visibility of the catalog and audit.'
+        : 'Note: no on-prem operator identity exists. It is seeded by migration ' +
+            '0019 when DEPLOYMENT_MODE is single_tenant — see deploy/README.md §4.',
+    );
+  }
 }
 
 async function main() {
   const mode = process.argv[2] ?? 'provision';
-  const modes = ['provision', 'verify', 'rotate'];
+  const modes = ['provision', 'verify', 'rotate', 'onprem-credential'];
   if (!modes.includes(mode)) {
     throw new Error(`unknown mode "${mode}" — expected one of: ${modes.join(', ')}`);
   }
@@ -494,6 +602,11 @@ async function main() {
 
   if (mode === 'rotate') {
     await rotatePlatformSecret(config);
+    return;
+  }
+
+  if (mode === 'onprem-credential') {
+    await issueOnPremCredential(config);
     return;
   }
 

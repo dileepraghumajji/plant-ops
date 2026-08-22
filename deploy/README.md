@@ -135,6 +135,94 @@ required:
 curl -s http://localhost:8080/api/health
 ```
 
+### Read-only visibility for your own IT
+
+This installation runs on your hardware, so nothing in it can be withheld from
+you technically, and pretending otherwise would build a false sense of control
+into the product. What it does instead is make platform-level access
+*unnecessary*: everything a running installation needs day to day — users,
+roles, scopes, service accounts for your integrations — is in the console your
+administrator already signs in to.
+
+For the part that is genuinely useful to see and never useful to change, the
+install provisions a restricted identity called **`onprem-operator`**. It holds
+six permissions, all of them reads:
+
+| It can read | |
+|---|---|
+| `iam.platform.app.read` | which applications are installed |
+| `iam.platform.permission.read` | their permission catalog |
+| `iam.platform.nav.read` | their navigation catalog |
+| `iam.platform.client.read` | this organisation |
+| `iam.platform.client.app.read` | which applications are enabled for it |
+| `iam.platform.audit.read` | the audit trail |
+
+It **cannot** register or edit an application, upload a manifest, add a
+permission or navigation node, create an organisation, or change what this one
+is entitled to. Those belong to the release, not to a deployment: an upgrade
+re-applies the catalog it shipped with (§5), so an edit made here would be
+reverted at the next upgrade anyway — and a support request against a
+hand-modified catalog is guesswork for both of us.
+
+It is provisioned without a usable credential. Issue one when you want it:
+
+```sh
+./bootstrap.sh --onprem-credential
+```
+
+The secret is printed **once**. It is a machine identity, not a login — it does
+not sign in to the console. Use it against the API:
+
+```sh
+curl -s -X POST http://localhost:8080/api/auth/token   -H 'content-type: application/json'   -d '{"account_key":"onprem-operator","account_secret":"<the secret>"}'
+
+curl -s http://localhost:8080/api/iam/applications   -H "authorization: Bearer <access_token>"
+```
+
+Re-running the command issues a new secret and retires the previous one. It
+needs `PLATFORM_BOOTSTRAP_SECRET` in `.env` for its duration, as an upgrade does
+— put the current value back, run it, and remove the line again.
+
+> **One limitation, stated plainly.** The identity is created by the migration
+> that runs at install, and only when `DEPLOYMENT_MODE=single_tenant` at that
+> moment. Migrations do not run twice, so an installation first migrated in
+> `saas` mode and reconfigured afterwards will not have it, and
+> `--onprem-credential` will say so. Bundles ship pinned to one mode, so this is
+> a re-configuration rather than an upgrade.
+
+### Locked out: break-glass recovery
+
+If your only administrator cannot get in — locked by failed attempts,
+offboarded by mistake, or simply gone — there is a way back that does not depend
+on the console working, and does not require reaching us.
+
+```sh
+./bootstrap.sh --break-glass --client <your-slug> --email <address>   --reason "why you are running this"
+```
+
+It runs on this host, against the database directly. It creates that address as
+an administrator of your organisation, or recovers it if it already exists —
+returning the account to active, clearing its failed-attempt counter, restoring
+its administrator binding if it had lost one, and setting a **new password that
+is printed once**. Any existing sessions for that account are revoked.
+
+Two things it asks of you:
+
+- **`PLATFORM_BOOTSTRAP_SECRET` in `.env`, and the current one.** It is checked
+  against what the database stores, so a stale value from before the install's
+  rotation is refused rather than accepted. Remove the line again afterwards.
+- **An organisation that has been installed.** It recovers an administrator; it
+  does not create an organisation. If yours has never been provisioned, the
+  answer is `./bootstrap.sh`, and it will tell you so.
+
+Every run is recorded in the audit trail as `platform.break_glass`, with the
+reason you gave, distinctly from any ordinary console action — including when it
+was run, for which address, and whether it created or recovered. That record is
+the point: this is a capability that reaches past the console, and it should
+never be possible to use it quietly.
+
+Sign in with the printed password and change it immediately.
+
 ---
 
 ## 5. Upgrading
@@ -221,6 +309,14 @@ docker compose down --volumes     # DESTROYS ALL DATA — only on a fresh instal
 
 If the installation *is* provisioned and working, you do not need it at all —
 that is the intended end state.
+
+**Nobody can sign in to the console.** This is what break-glass is for; see §4.
+It needs the current `PLATFORM_BOOTSTRAP_SECRET` and nothing else that is
+working.
+
+**`--onprem-credential` says no such service account exists.** The identity is
+seeded only when `DEPLOYMENT_MODE=single_tenant` at the moment the database is
+first migrated, and migrations do not re-run. See the note in §4.
 
 ---
 

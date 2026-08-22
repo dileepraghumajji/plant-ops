@@ -101,6 +101,13 @@ services:
       # Read by migration 0011 on the very first run of a new database, and by
       # nothing afterwards. Doc 07 §8: rotate it immediately after first use.
       PLATFORM_BOOTSTRAP_SECRET: ${PLATFORM_BOOTSTRAP_SECRET:?PLATFORM_BOOTSTRAP_SECRET is required}
+      # Read by migration 0019, which provisions the restricted on-prem operator
+      # identity in `single_tenant` mode and nothing at all otherwise (Doc 11
+      # §6.4). Passed explicitly because this file lists its environment rather
+      # than taking `env_file` — without it the two stacks would seed differently
+      # from the same `.env`, which is the kind of divergence nobody finds until
+      # an install behaves unlike CI.
+      DEPLOYMENT_MODE: ${DEPLOYMENT_MODE:-saas}
 
   # ── The release's application catalog ──────────────────────────────────────
   #

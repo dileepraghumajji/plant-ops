@@ -17,6 +17,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   ACCOUNT_AUDIT_ACTIONS,
+  ONPREM_AUDIT_ACTIONS,
   REFRESH_AUDIT_ACTIONS,
   ROLE_BINDING_EXPIRED_ACTION,
   SERVICE_ACCOUNT_AUDIT_ACTIONS,
@@ -46,6 +47,11 @@ describe('the action catalog', () => {
     // action, and wrapping it in an object to fit this table would invent a
     // namespace the migration does not have.
     ['ROLE_BINDING_EXPIRED_ACTION', { EXPIRED: ROLE_BINDING_EXPIRED_ACTION }],
+    // Session 45. `SEEDED` is written by migration 0019 and would be caught by
+    // the literal scan below too; `BREAK_GLASS` is written by
+    // `tools/break-glass-admin.ts`, which no scan of this directory can see —
+    // so this row is the only thing pinning that spelling to the catalog.
+    ['ONPREM_AUDIT_ACTIONS', ONPREM_AUDIT_ACTIONS],
   ])('contains every action %s exports', (_name, actions) => {
     for (const action of Object.values(actions)) {
       expect(catalog).toContain(action);

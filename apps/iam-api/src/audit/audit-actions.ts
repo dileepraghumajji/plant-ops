@@ -165,6 +165,24 @@ export const AUDIT_ACTIONS = {
   // ── Bootstrap (Doc 10 §4) ──────────────────────────────────────────────
   /** Written once, by migration 0011. */
   PLATFORM_BOOTSTRAP: 'platform.bootstrap',
+
+  // ── Single-tenant delivery (Session 45, Doc 11 §6.4) ───────────────────
+  //
+  // Both are written outside this process — the first by migration 0019, the
+  // second by `tools/break-glass-admin.ts`, which runs on the *host* with the
+  // database on one side and no application on the other. They are listed here
+  // because `action` is what every audit query filters on (Doc 06 §12), and an
+  // event nobody can name in a filter is an event nobody finds.
+  /** Migration 0019 provisioning the on-prem operator identity. */
+  PLATFORM_ONPREM_SEEDED: 'platform.onprem_seeded',
+  /**
+   * A locked-out client administrator recovered from the host.
+   *
+   * Distinct from `user.created` and `auth.account.unlocked` on purpose: this is
+   * somebody with the bootstrap secret and a shell on the server reaching past
+   * the console, and Doc 11 §6.4 requires it to be legible as exactly that.
+   */
+  PLATFORM_BREAK_GLASS: 'platform.break_glass',
 } as const;
 
 /** Every action string the catalog permits. */
