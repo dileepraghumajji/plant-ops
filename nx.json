@@ -12,7 +12,15 @@
       "!{projectRoot}/src/test-setup.[jt]s",
       "!{projectRoot}/test-setup.[jt]s"
     ],
-    "sharedGlobals": []
+    // Files outside every project that a project's inputs must still include.
+    //
+    // The release manifest set is here because four test files read it by path —
+    // libs/ui's icon registry, admin-web's permission and nav guards, and
+    // iam-api's manifest spec — and Nx cannot see a readFileSync. Without it,
+    // editing or moving the manifest leaves those suites cached against a file
+    // that changed; in one real case the file had ceased to exist and CI still
+    // reported green (Session 43, caught in Session 44).
+    "sharedGlobals": ["{workspaceRoot}/deploy/manifests/*.manifest.json"]
   },
   "plugins": [
     {
